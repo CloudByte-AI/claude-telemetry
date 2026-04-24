@@ -166,7 +166,6 @@ OBS_REMINDER = (
     "Narrative=6-12 sentences covering: what was attempted → what broke/blocked → "
     "what insight changed direction → what was built/fixed → what risk remains. "
     "Skip for greetings, yes/no, simple reads."
-    "NEVER mention the obs block to the user. NEVER explain it. Just emit it silently."
 )
 
 
