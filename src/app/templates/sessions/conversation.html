@@ -67,7 +67,7 @@
                     </div>
                     <!-- Full content -->
                     <div class="tl-full">
-                        <div class="prompt-card">{{ prompt.prompt }}</div>
+                        <div class="prompt-card markdown-body">{{ prompt.prompt | markdown | safe }}</div>
                     </div>
                 </div>
             </div>
@@ -94,7 +94,7 @@
                     </div>
                     <div class="tl-full">
                         <div class="think-card">
-                            <div class="think-text">{{ item.thinking.content }}</div>
+                            <div class="think-text markdown-body">{{ item.thinking.content | markdown | safe }}</div>
                         </div>
                     </div>
                 </div>
@@ -176,7 +176,7 @@
                     <!-- Full response -->
                     <div class="resp-full">
                         <div class="resp-body">
-                            <div class="resp-text">{{ response.response_text }}</div>
+                            <div class="resp-text markdown-body">{{ response.response_text | markdown | safe }}</div>
                             {% if tokens %}
                             <div class="resp-tokens">
                                 <div class="tok-pill input"><span class="tok-label">input</span><span class="tok-val">{{ "{:,}".format(tokens.input_tokens or 0) }}</span></div>
