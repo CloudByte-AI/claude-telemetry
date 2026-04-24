@@ -6,11 +6,9 @@
   "plugins": [
     {
       "name": "claude-telemetry",
-      "source": {
-        "source": "github",
-        "repo": "CloudByte-AI/claude-telemetry"
-      },
-      "description": "CloudByte Plugin for Your Project Management & Tracking System"
+      "source": "./",
+      "description": "CloudByte Plugin for Your Project Management & Tracking System",
+      "license": "Apache-2.0"
     }
   ]
 }
