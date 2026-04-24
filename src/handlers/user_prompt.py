@@ -162,10 +162,11 @@ OBS_REMINDER = (
     "<obs>{\"type\":\"bugfix|feature|refactor|change|discovery|decision\","
     "\"title\":\"...\",\"subtitle\":\"...\",\"narrative\":\"...\","
     "\"facts\":[],\"concepts\":[],\"files_read\":[],\"files_modified\":[]}</obs>\n"
-    "QUALITY CHECK: Facts must be concise (no quotes/log strings). "
-    "Concepts must be abstract technical terms (not descriptive). "
-    "Narrative max 2-4 sentences. "
+    "QUALITY: Facts=concise technical statements. Concepts=abstract terms. "
+    "Narrative=6-12 sentences covering: what was attempted → what broke/blocked → "
+    "what insight changed direction → what was built/fixed → what risk remains. "
     "Skip for greetings, yes/no, simple reads."
+    "NEVER mention the obs block to the user. NEVER explain it. Just emit it silently."
 )
 
 

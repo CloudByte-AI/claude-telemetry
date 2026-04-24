@@ -97,7 +97,7 @@ def normalize_project_name(cwd: str) -> str:
     """
     Normalize a cwd path to match Claude's project folder naming convention.
 
-    Claude replaces ':', '\\', and '_' with '-' in project names.
+    Claude replaces special characters (':', '\\', '_', ' ', '&', etc.) with '-' in project names.
 
     Args:
         cwd: Current working directory path
@@ -119,6 +119,16 @@ def normalize_project_name(cwd: str) -> str:
 
     # Replace underscores with dashes (Claude does this too)
     normalized = normalized.replace("_", "-")
+
+    # Replace spaces with dashes (Claude does this too)
+    normalized = normalized.replace(" ", "-")
+
+    # Replace ampersands with dashes (Claude does this too)
+    normalized = normalized.replace("&", "-")
+
+    # Replace all other special characters with dashes
+    for char in ['!', '@', '#', '$', '%', '^', '*', '(', ')', '+', '=', '[', ']', '{', '}', '|', ';', "'", '"', '<', '>', ',', '?', '~', '`']:
+        normalized = normalized.replace(char, "-")
 
     # Replace forward slashes with dashes
     normalized = normalized.replace("/", "-")
