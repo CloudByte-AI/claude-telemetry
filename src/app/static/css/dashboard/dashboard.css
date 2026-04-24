@@ -1,0 +1,221 @@
+/* ═══════════════════════════════════════
+   DASHBOARD — complete stylesheet
+   ═══════════════════════════════════════ */
+
+
+
+/* ── Charts row ── */
+.dash-charts-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+}
+.dash-chart-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+}
+.dash-chart-head {
+    padding: 13px 18px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg3);
+}
+.dash-chart-title { font-size: 13px; font-weight: 600; color: var(--text); }
+.dash-chart-sub   { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--text2); }
+.dash-chart-body  { padding: 16px 18px; }
+
+/* ── GitHub-style heatmap card ── */
+/* --gh-empty inherits from --bg3 which adapts to light/dark automatically */
+.gh-heatmap-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.gh-heatmap-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 13px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg3);
+    flex-wrap: wrap;
+}
+
+.gh-heatmap-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+}
+.gh-heatmap-sub {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: var(--text2);
+}
+
+.gh-year-btns {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 16px 18px 16px 16px;
+    flex-shrink: 0;
+    justify-content: flex-start;
+}
+
+.gh-year-btn {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text2);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 18px;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+    text-align: center;
+    min-width: 70px;
+}
+.gh-year-btn:hover { color: var(--text); border-color: var(--border2); }
+.gh-year-btn.active {
+    color: #fff;
+    background: var(--accent);
+    border-color: var(--accent);
+    font-weight: 600;
+}
+
+.gh-legend {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+.gh-legend-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--text2);
+}
+.gh-legend-cells { display: flex; gap: 2px; }
+
+/* Scroll wrapper */
+.gh-heatmap-scroll {
+    overflow-x: auto;
+    padding: 14px 20px 20px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+}
+.gh-heatmap-scroll::-webkit-scrollbar { height: 4px; }
+.gh-heatmap-scroll::-webkit-scrollbar-track { background: transparent; }
+.gh-heatmap-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.gh-heatmap-inner { display: inline-flex; flex-direction: column; gap: 0; }
+
+/* Month labels */
+.gh-month-row { }
+
+/* Grid cells */
+.gh-cell {
+    transition: opacity 0.1s;
+}
+.gh-cell:hover { opacity: 0.8; }
+.gh-cell-out   { pointer-events: none; }
+
+/* Tooltip */
+.heat-tooltip {
+    position: fixed;
+    background: var(--bg);
+    border: 1px solid var(--border2);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--text);
+    pointer-events: none;
+    z-index: 999;
+    display: none;
+    white-space: nowrap;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+.heat-tooltip-date { color: var(--text2); font-size: 10px; margin-bottom: 3px; }
+.heat-tooltip-val  { color: var(--accent); font-weight: 600; }
+
+/* ── Recent sessions ── */
+.dash-sessions-list { display: flex; flex-direction: column; }
+.dash-session-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 11px 18px;
+    border-bottom: 1px solid var(--border);
+    text-decoration: none;
+    transition: background 0.12s;
+}
+.dash-session-row:last-child { border-bottom: none; }
+.dash-session-row:hover { background: rgba(255,255,255,0.02); }
+.dash-session-id {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: var(--accent);
+    flex-shrink: 0;
+    width: 78px;
+}
+.dash-session-project {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.dash-session-meta { display: flex; gap: 8px; flex-shrink: 0; align-items: center; }
+.dash-session-badge {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--text2);
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 2px 6px;
+    white-space: nowrap;
+}
+
+/* ── Observation cards ── */
+.dash-obs-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    padding: 14px 18px;
+}
+.dash-obs-card {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 14px;
+    text-decoration: none;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    transition: border-color 0.15s, box-shadow 0.12s;
+}
+.dash-obs-card:hover { border-color: var(--border2); box-shadow: 0 2px 8px var(--shadow); }
+.dash-obs-type  { font-family: 'IBM Plex Mono', monospace; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--amber); }
+.dash-obs-title { font-size: 13px; font-weight: 600; color: var(--text); line-height: 1.4; }
+.dash-obs-subtitle { font-size: 12px; color: var(--text2); line-height: 1.5; }
+.dash-obs-meta  { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--text2); margin-top: 2px; }
+
+/* ── Empty state ── */
+.dash-empty {
+    padding: 32px 18px;
+    text-align: center;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: var(--text2);
+}

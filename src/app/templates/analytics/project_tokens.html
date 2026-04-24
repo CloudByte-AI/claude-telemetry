@@ -1,0 +1,167 @@
+{% extends "base/index.html" %}
+{% block title %}Token Analysis · {{ project.name }} — CloudByte{% endblock %}
+{% block breadcrumb %}token usage / {{ project.name | truncate(28) }}{% endblock %}
+
+{% block head %}<link rel="stylesheet" href="/static/css/analytics/project_tokens.css">{% endblock %}
+
+{% block content %}
+
+<div id="chart-data" style="display:none;"
+     data-donut-labels="{{ donut_labels | tojson | forceescape }}"
+     data-donut-values="{{ donut_values | tojson | forceescape }}"
+     data-bar-labels="{{ bar_labels | tojson | forceescape }}"
+     data-bar-io="{{ bar_io | tojson | forceescape }}"
+     data-bar-tool="{{ bar_tool | tojson | forceescape }}"
+     data-bar-sess-ids="{{ bar_sess_ids | tojson | forceescape }}">
+</div>
+
+<!-- Header -->
+<div class="analysis-header-card section">
+    <div class="analysis-header-left">
+        <div style="display:flex;align-items:center;gap:10px;">
+            <span class="analysis-name-val" title="{{ project.name }}">{{ project.name }}</span>
+            <span class="badge badge-green" style="font-size:10px;">token analysis</span>
+        </div>
+        <div class="analysis-meta-row">
+            <div class="analysis-meta-item">path <span class="mono" style="font-size:10px;">{{ project.path[-45:] if project.path else '—' }}</span></div>
+            <div class="analysis-meta-item">created <span>{{ project.created_at[:10] if project.created_at else '—' }}</span></div>
+            <div class="analysis-meta-item">sessions <span>{{ session_rows|length }}</span></div>
+        </div>
+    </div>
+    <div class="analysis-header-right">
+        <a href="/tools/project/{{ project.project_id }}" class="btn btn-ghost" style="font-size:11px;color:var(--amber);border-color:rgba(255,179,71,0.3);background:rgba(255,179,71,0.04);">tool analysis ↗</a>
+        <a href="/projects" class="btn btn-ghost" style="font-size:11px;">projects ↗</a>
+        <a href="/tokens" class="btn btn-ghost" style="font-size:11px;">← token usage</a>
+    </div>
+</div>
+
+<!-- Stat tiles -->
+<div class="stats-grid section">
+    <div class="stat-tile accent">
+        <div class="stat-label">IO Tokens</div>
+        <div class="stat-value">
+            {% set v = io_total %}{% if v >= 1000000 %}{{ "%.1f"|format(v/1000000) }}M{% elif v >= 1000 %}{{ "%.1f"|format(v/1000) }}K{% else %}{{ v }}{% endif %}
+        </div>
+        <div class="stat-sub">{{ "{:,}".format(io_total) }} total</div>
+    </div>
+    <div class="stat-tile purple">
+        <div class="stat-label">Tool Tokens</div>
+        <div class="stat-value">
+            {% set v = tool_total %}{% if v >= 1000000 %}{{ "%.1f"|format(v/1000000) }}M{% elif v >= 1000 %}{{ "%.1f"|format(v/1000) }}K{% else %}{{ v }}{% endif %}
+        </div>
+        <div class="stat-sub">{{ "{:,}".format(tool_total) }} total</div>
+    </div>
+    <div class="stat-tile green">
+        <div class="stat-label">Tool-Active Turns</div>
+        <div class="stat-value">{{ turns_with_tools }}</div>
+        <div class="stat-sub">turns that produced tool tokens</div>
+    </div>
+    <div class="stat-tile amber">
+        <div class="stat-label">Tool Types Used</div>
+        <div class="stat-value">{{ unique_tools }}</div>
+        <div class="stat-sub">distinct tool types</div>
+    </div>
+</div>
+
+<!-- Charts -->
+<div class="charts-row section">
+
+    <!-- Donut: toggleable segments -->
+    <div class="chart-card">
+        <div class="chart-card-header">
+            <span class="chart-card-title">Token Distribution</span>
+            <span class="chart-card-sub">click legend to show/hide</span>
+        </div>
+        <div class="chart-body">
+            <div class="donut-wrap">
+                <div class="donut-canvas-wrap">
+                    <canvas id="donut-chart" width="140" height="140"></canvas>
+                    <div class="donut-center">
+                        <div class="donut-center-val" id="donut-total">—</div>
+                        <div class="donut-center-label">total</div>
+                    </div>
+                </div>
+                <div class="donut-legend">
+                    {% for label in donut_labels %}
+                    <div class="legend-item" data-idx="{{ loop.index0 }}" onclick="toggleDonutSegment(this)" style="cursor:pointer;">
+                        <div class="legend-dot" data-index="{{ loop.index0 }}"></div>
+                        <span class="legend-name">{{ label }}</span>
+                        <span class="legend-val">
+                            {% set v = donut_values[loop.index0] %}
+                            {% if v >= 1000000 %}{{ "%.1f"|format(v/1000000) }}M{% elif v >= 1000 %}{{ "%.1f"|format(v/1000) }}K{% else %}{{ v }}{% endif %}
+                        </span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Vertical grouped bar: IO vs Tool per session, clickable -->
+    <div class="chart-card">
+        <div class="chart-card-header">
+            <span class="chart-card-title">IO vs Tool Per Session</span>
+            <span class="chart-card-sub">IO (blue) · tool (purple) · click to analyse</span>
+        </div>
+        <div class="chart-body-bar">
+            <canvas id="bar-chart"></canvas>
+        </div>
+    </div>
+
+</div>
+
+<!-- Per-session table -->
+<div class="section">
+    <div class="section-divider">
+        <span class="section-divider-title">Per Session Breakdown</span>
+        <div class="section-divider-line"></div>
+        <span class="dimmer mono" style="font-size:11px;">{{ session_rows|length }} session{{ 's' if session_rows|length != 1 }}</span>
+    </div>
+    <div class="card">
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Session</th>
+                        <th>Date</th>
+                        <th>IO Input</th>
+                        <th>IO Output</th>
+                        <th>IO Cache Rd.</th>
+                        <th>Tool Input</th>
+                        <th>Tool Output</th>
+                        <th style="text-align:right;">Grand Total</th>
+                        <th style="width:90px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in session_rows %}
+                    <tr>
+                        <td style="white-space:nowrap;">
+                            <a href="/sessions/{{ row.session_id }}" class="mono accent-text" style="font-size:11px;text-decoration:none;">{{ row.session_id[:8] }}…</a>
+                        </td>
+                        <td class="mono dimmer" style="font-size:11px;white-space:nowrap;">{{ row.session_date or '—' }}</td>
+                        <td class="mono accent-text">{{ "{:,}".format(row.io_input or 0) }}</td>
+                        <td class="mono green-text">{{ "{:,}".format(row.io_output or 0) }}</td>
+                        <td class="mono" style="color:var(--purple);">{{ "{:,}".format(row.io_cr or 0) }}</td>
+                        <td class="mono accent-text" style="opacity:0.75;">{{ "{:,}".format(row.tool_input or 0) }}</td>
+                        <td class="mono green-text" style="opacity:0.75;">{{ "{:,}".format(row.tool_output or 0) }}</td>
+                        <td class="mono" style="text-align:right;font-weight:600;color:var(--text);">{{ "{:,}".format(row.grand_total or 0) }}</td>
+                        <td style="text-align:right;">
+                            <a href="/tokens/session/{{ row.session_id }}" class="tbl-btn analyse">analyse ↗</a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="9"><div class="no-data">no session data</div></td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="/static/js/analytics/project_tokens.js"></script>
+{% endblock %}

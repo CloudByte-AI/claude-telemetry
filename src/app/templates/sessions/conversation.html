@@ -1,0 +1,314 @@
+{% extends "base/index.html" %}
+{% block title %}Conversation #{{ turn_number }} — CloudByte{% endblock %}
+{% block breadcrumb %}sessions / {{ prompt.session_id[:8] }}… / conversation #{{ turn_number }}{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/css/sessions/conversation.css">
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/sessions/conversation.js"></script>
+{% endblock %}
+
+{% block content %}
+
+
+<!-- Header -->
+<div class="section" style="display:flex;align-items:center;justify-content:space-between;">
+    <div style="display:flex;align-items:center;gap:12px;">
+        <a href="/sessions/{{ prompt.session_id }}" class="btn btn-ghost" style="font-size:11px;">← session</a>
+        <div>
+            <div style="font-size:16px;font-weight:500;color:var(--text);">
+                Conversation
+                <span style="font-family:'IBM Plex Mono',monospace;color:var(--accent);">#{{ turn_number }}</span>
+                <span style="color:var(--text3);font-size:13px;"> / {{ total_turns }}</span>
+            </div>
+            <div class="dimmer" style="font-size:12px;">{{ prompt.project_name or 'Unknown' }} — {{ prompt.session_id[:8] }}…</div>
+        </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;">
+        {% if observation %}
+        <a href="/observations/{{ observation.id }}"
+           style="display:inline-flex;align-items:center;gap:5px;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:500;color:var(--amber);text-decoration:none;padding:5px 11px;border:1px solid rgba(255,179,71,0.3);border-radius:5px;background:rgba(255,179,71,0.06);transition:all 0.15s;white-space:nowrap;"
+           onmouseover="this.style.background='rgba(255,179,71,0.12)'"
+           onmouseout="this.style.background='rgba(255,179,71,0.06)'"
+           title="{{ observation.title or 'view observation' }}">
+            ✦ observation
+        </a>
+        {% endif %}
+        <div class="turn-nav" style="width:200px;">
+            <a href="{% if prev_id %}/conversation/{{ prev_id }}{% else %}#{% endif %}" class="{% if not prev_id %}disabled{% endif %}">← prev</a>
+            <a href="{% if next_id %}/conversation/{{ next_id }}{% else %}#{% endif %}" class="{% if not next_id %}disabled{% endif %}">next →</a>
+        </div>
+    </div>
+</div>
+
+<div class="conv-layout">
+
+    <!-- ── Timeline (left, independently scrollable) ── -->
+    <div class="conv-left">
+        <div class="timeline">
+
+        <!-- 1. User Prompt — FIX 3: collapsible, shows preview when closed -->
+        <div class="tl-item">
+            <div class="tl-icon user">👤</div>
+            <div class="tl-body">
+                <div class="tl-label user">
+                    <span>user prompt</span>
+                    <span style="color:var(--text3);font-size:10px;">{{ prompt.timestamp[:16].replace('T',' ') if prompt.timestamp else '' }}</span>
+                </div>
+                <div class="tl-card">
+                    <!-- Collapsed bar: preview text + expand button -->
+                    <div class="tl-collapsed-bar" onclick="toggleTl(this)">
+                        <span class="tl-preview">{{ prompt.prompt | truncate(80) }}</span>
+                        <div class="tl-bar-right">
+                            <span class="expand-btn">more ↓</span>
+                        </div>
+                    </div>
+                    <!-- Full content -->
+                    <div class="tl-full">
+                        <div class="prompt-card">{{ prompt.prompt }}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. Tool calls — each preceded by its paired thinking block -->
+        {% for item in tool_list %}
+
+        <!-- 2a. Thinking paired to this tool (shown as its own timeline step) -->
+        {% if item.thinking %}
+        <div class="tl-item">
+            <div class="tl-icon think">◈</div>
+            <div class="tl-body">
+                <div class="tl-label think">
+                    <span>thinking → {{ item.tool.tool_name }}</span>
+                    <span style="color:var(--text3);font-size:10px;">step {{ loop.index }} of {{ tool_list|length }}</span>
+                </div>
+                <div class="tl-card" style="border-color:rgba(160,130,250,0.2);">
+                    <div class="tl-collapsed-bar" onclick="toggleTl(this)" style="background:rgba(160,130,250,0.04);">
+                        <span class="tl-preview" style="color:var(--text2);font-style:italic;">{{ item.thinking.content | truncate(80) }}</span>
+                        <div class="tl-bar-right">
+                            <span class="expand-btn" style="color:var(--purple);border-color:rgba(160,130,250,0.3);background:rgba(160,130,250,0.06);">more ↓</span>
+                        </div>
+                    </div>
+                    <div class="tl-full">
+                        <div class="think-card">
+                            <div class="think-text">{{ item.thinking.content }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- 2b. The tool call itself -->
+        <div class="tl-item">
+            <div class="tl-icon tool">⚙</div>
+            <div class="tl-body">
+                <div class="tl-label tool">
+                    <span>tool call {{ loop.index }} / {{ tool_list|length }}</span>
+                </div>
+                <div class="tl-card" style="border-color:rgba(255,180,70,0.2);">
+                    <!-- Collapsed bar: tool name + tokens + status -->
+                    <div class="tool-summary-bar" onclick="toggleTool(this)">
+                        <span class="tool-card-name">{{ item.tool.tool_name }}</span>
+                        {% if item.tokens %}
+                        <span class="mini-pill">in <b>{{ "{:,}".format(item.tokens.input_tokens or 0) }}</b></span>
+                        <span class="mini-pill">out <b>{{ "{:,}".format(item.tokens.output_tokens or 0) }}</b></span>
+                        <span class="mini-pill">cr <b>{{ "{:,}".format(item.tokens.cache_creation_tokens or 0) }}</b></span>
+                        <span class="mini-pill">rd <b>{{ "{:,}".format(item.tokens.cache_read_tokens or 0) }}</b></span>
+                        {% endif %}
+                        <span style="flex:1;"></span>
+                        {% if '"error"' in (item.tool.output_json or '') %}
+                            <span class="badge badge-red" style="font-size:9px;">✗ error</span>
+                        {% else %}
+                            <span class="badge badge-green" style="font-size:9px;">✓ ok</span>
+                        {% endif %}
+                        <span class="expand-btn" style="color:var(--amber);border-color:rgba(255,180,70,0.3);background:rgba(255,180,70,0.06);">more ↓</span>
+                    </div>
+                    <!-- Full tool details -->
+                    <div class="tool-full">
+                        <div class="tool-card-io">
+                            <div class="tc-section">
+                                <div class="tc-label">input</div>
+                                <div class="tc-code">{{ item.tool.input_json }}</div>
+                            </div>
+                            <div class="tc-section">
+                                <div class="tc-label">output</div>
+                                <div class="tc-code">{{ item.tool.output_json }}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {% endfor %}
+
+        <!-- 4. Response — FIX 3&4: collapsed bar shows preview text + token summary -->
+        {% if response %}
+        <div class="tl-item">
+            <div class="tl-icon resp">◆</div>
+            <div class="tl-body">
+                <div class="tl-label resp">
+                    <span>assistant response</span>
+                    <span style="color:var(--text3);font-size:10px;">{{ response.model or '' }}</span>
+                </div>
+                <div class="tl-card" style="border-color:rgba(0,180,255,0.2);">
+                    <!-- Collapsed bar: text preview + token pills -->
+                    <div class="resp-collapsed-bar" onclick="toggleResp(this)">
+                        <div style="flex:1;min-width:0;">
+                            <div class="tl-preview" style="margin-bottom:6px;">{{ response.response_text | truncate(90) }}</div>
+                            {% if tokens %}
+                            <div class="resp-token-preview">
+                                <span class="rtp inp">in <b>{{ "{:,}".format(tokens.input_tokens or 0) }}</b></span>
+                                <span class="rtp out">out <b>{{ "{:,}".format(tokens.output_tokens or 0) }}</b></span>
+                                <span class="rtp ccr">cache_cr <b>{{ "{:,}".format(tokens.cache_creation_tokens or 0) }}</b></span>
+                                <span class="rtp crd">cache_rd <b>{{ "{:,}".format(tokens.cache_read_tokens or 0) }}</b></span>
+                            </div>
+                            {% endif %}
+                        </div>
+                        <div style="flex-shrink:0;margin-left:10px;">
+                            <span class="expand-btn">more ↓</span>
+                        </div>
+                    </div>
+                    <!-- Full response -->
+                    <div class="resp-full">
+                        <div class="resp-body">
+                            <div class="resp-text">{{ response.response_text }}</div>
+                            {% if tokens %}
+                            <div class="resp-tokens">
+                                <div class="tok-pill input"><span class="tok-label">input</span><span class="tok-val">{{ "{:,}".format(tokens.input_tokens or 0) }}</span></div>
+                                <div class="tok-pill output"><span class="tok-label">output</span><span class="tok-val">{{ "{:,}".format(tokens.output_tokens or 0) }}</span></div>
+                                <div class="tok-pill ccreate"><span class="tok-label">cache cr.</span><span class="tok-val">{{ "{:,}".format(tokens.cache_creation_tokens or 0) }}</span></div>
+                                <div class="tok-pill cread"><span class="tok-label">cache rd.</span><span class="tok-val">{{ "{:,}".format(tokens.cache_read_tokens or 0) }}</span></div>
+                                <div class="tok-pill total"><span class="tok-label">total</span><span class="tok-val">{{ "{:,}".format((tokens.input_tokens or 0) + (tokens.output_tokens or 0)) }}</span></div>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+    </div><!-- end .timeline -->
+    </div><!-- end .conv-left -->
+
+    <!-- ── Right sidebar (independently scrollable) ── -->
+    <div class="sticky-right">
+
+        <!-- Turn Summary — open by default -->
+        <div class="sc-card">
+            <div class="sc-header open" onclick="toggleCard(this)">
+                <span class="sc-title">Turn Summary</span>
+                <span class="sc-chevron" style="transform:none;">▼</span>
+            </div>
+            <div class="sc-body open">
+                <div class="sc-inner">
+                    <div class="meta-row"><span class="meta-key">turn</span><span class="meta-val mono accent-text">#{{ turn_number }} / {{ total_turns }}</span></div>
+                    <div class="meta-row"><span class="meta-key">tools used</span><span class="meta-val mono amber-text">{{ tool_list|length }}</span></div>
+                    <div class="meta-row"><span class="meta-key">thinking</span><span class="meta-val mono" style="color:var(--purple);">{{ 'yes' if tool_list | selectattr('thinking') | list else 'no' }}</span></div>
+                    <div class="meta-row"><span class="meta-key">model</span><span class="meta-val mono dimmer" style="font-size:11px;">{{ response.model if response else '—' }}</span></div>
+                </div>
+                {% if observation %}
+                <div style="padding:10px 14px 12px;border-top:1px solid var(--border);">
+                    <a href="/observations/{{ observation.id }}"
+                       style="display:flex;align-items:center;gap:7px;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:500;color:var(--amber);text-decoration:none;padding:6px 10px;border:1px solid rgba(255,179,71,0.25);border-radius:5px;background:rgba(255,179,71,0.06);transition:all 0.15s;"
+                       onmouseover="this.style.background='rgba(255,179,71,0.12)'"
+                       onmouseout="this.style.background='rgba(255,179,71,0.06)'">
+                        <span>✦</span>
+                        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ observation.title | truncate(30) if observation.title else 'view observation' }}</span>
+                        <span>↗</span>
+                    </a>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Response Tokens — collapsed by default -->
+        {% if tokens %}
+        <div class="sc-card">
+            <div class="sc-header" onclick="toggleCard(this)">
+                <span class="sc-title">Response Tokens</span>
+                <span class="sc-chevron" style="transform:rotate(-90deg);">▼</span>
+            </div>
+            <div class="sc-body">
+                <div class="token-grid">
+                    <div class="tg-box inp"><div class="tg-label">input</div><div class="tg-val">{{ "{:,}".format(tokens.input_tokens or 0) }}</div></div>
+                    <div class="tg-box out"><div class="tg-label">output</div><div class="tg-val">{{ "{:,}".format(tokens.output_tokens or 0) }}</div></div>
+                    <div class="tg-box ccr"><div class="tg-label">cache cr.</div><div class="tg-val">{{ "{:,}".format(tokens.cache_creation_tokens or 0) }}</div></div>
+                    <div class="tg-box crd"><div class="tg-label">cache rd.</div><div class="tg-val">{{ "{:,}".format(tokens.cache_read_tokens or 0) }}</div></div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Tool Token Total — collapsed by default -->
+        {% if tool_list %}
+        <div class="sc-card">
+            <div class="sc-header" onclick="toggleCard(this)">
+                <span class="sc-title">Tool Token Total</span>
+                <span class="sc-chevron" style="transform:rotate(-90deg);">▼</span>
+            </div>
+            <div class="sc-body">
+                <div class="token-grid">
+                    <div class="tg-box inp">
+                        <div class="tg-label">input</div>
+                        <div class="tg-val">{{ "{:,}".format(tool_list | selectattr('tokens') | map(attribute='tokens') | map(attribute='input_tokens') | select | list | sum) }}</div>
+                    </div>
+                    <div class="tg-box out">
+                        <div class="tg-label">output</div>
+                        <div class="tg-val">{{ "{:,}".format(tool_list | selectattr('tokens') | map(attribute='tokens') | map(attribute='output_tokens') | select | list | sum) }}</div>
+                    </div>
+                    <div class="tg-box ccr">
+                        <div class="tg-label">cache cr.</div>
+                        <div class="tg-val">{{ "{:,}".format(tool_list | selectattr('tokens') | map(attribute='tokens') | map(attribute='cache_creation_tokens') | select | list | sum) }}</div>
+                    </div>
+                    <div class="tg-box crd">
+                        <div class="tg-label">cache rd.</div>
+                        <div class="tg-val">{{ "{:,}".format(tool_list | selectattr('tokens') | map(attribute='tokens') | map(attribute='cache_read_tokens') | select | list | sum) }}</div>
+                    </div>
+                </div>
+                <div style="padding:0 12px 12px;font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--text3);text-align:center;">
+                    total across {{ tool_list|length }} tool call{{ 's' if tool_list|length != 1 }}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Tools Used — collapsed by default -->
+        {% if tool_list %}
+        <div class="sc-card">
+            <div class="sc-header" onclick="toggleCard(this)">
+                <span class="sc-title">Tools Used ({{ tool_list|length }})</span>
+                <span class="sc-chevron" style="transform:rotate(-90deg);">▼</span>
+            </div>
+            <div class="sc-body">
+                <div class="sc-inner" style="padding-top:8px;padding-bottom:8px;">
+                    {% for item in tool_list %}
+                    <div class="meta-row">
+                        <span class="meta-key" style="color:var(--amber);">{{ loop.index }}. {{ item.tool.tool_name }}</span>
+                        {% if '"error"' in (item.tool.output_json or '') %}
+                            <span class="badge badge-red" style="font-size:9px;">error</span>
+                        {% else %}
+                            <span class="badge badge-green" style="font-size:9px;">ok</span>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Navigation -->
+        <div class="turn-nav">
+            <a href="{% if prev_id %}/conversation/{{ prev_id }}{% else %}#{% endif %}" class="{% if not prev_id %}disabled{% endif %}">← prev</a>
+            <a href="{% if next_id %}/conversation/{{ next_id }}{% else %}#{% endif %}" class="{% if not next_id %}disabled{% endif %}">next →</a>
+        </div>
+
+    </div>
+</div>
+
+{% endblock %}

@@ -1,0 +1,87 @@
+{% if observations %}
+<div class="obs-list">
+    {% for obs in observations %}
+    <div class="obs-card">
+        <div class="obs-card-header">
+
+            <!-- Type badge + turn -->
+            <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start;flex-shrink:0;min-width:90px;">
+                <span class="obs-type-badge {{ obs.type_meta.color }}">
+                    {{ obs.type_meta.icon }} {{ obs.type_meta.label }}
+                </span>
+                {% if obs.turn_number %}
+                <span class="mono dimmer" style="font-size:10px;">turn {{ obs.turn_number }}</span>
+                {% endif %}
+            </div>
+
+            <!-- Title + subtitle + meta -->
+            <div class="obs-main">
+                <div class="obs-title">{{ obs.title or '—' }}</div>
+                {% if obs.subtitle %}
+                <div class="obs-subtitle">{{ obs.subtitle }}</div>
+                {% endif %}
+                <div class="obs-meta">
+                    {% if obs.project_name %}
+                    <span class="obs-meta-item"><span style="color:var(--accent);">◎</span> {{ obs.project_name }}</span>
+                    {% endif %}
+                    <span class="obs-meta-item mono">
+                        <a href="/sessions/{{ obs.session_id }}" style="color:var(--accent);text-decoration:none;">{{ obs.session_id[:8] }}…</a>
+                    </span>
+                    {% if obs.created_at %}
+                    <span class="obs-meta-item">{{ obs.created_at[:16].replace('T',' ') }}</span>
+                    {% endif %}
+                    {% if obs.task_counts and (obs.task_counts.pending > 0 or obs.task_counts.failed > 0) %}
+                    <span class="obs-meta-item" style="color:var(--red);font-weight:500;">
+                        ⚠ {{ obs.task_counts.pending + obs.task_counts.failed }} incomplete
+                    </span>
+                    {% endif %}
+                    {% if obs.concepts %}
+                    <span class="obs-meta-item" style="color:var(--purple);">{{ obs.concepts|length }} concept{{ 's' if obs.concepts|length != 1 }}</span>
+                    {% endif %}
+                    {% if obs.facts %}
+                    <span class="obs-meta-item">{{ obs.facts|length }} fact{{ 's' if obs.facts|length != 1 }}</span>
+                    {% endif %}
+                    {% if obs.files_modified %}
+                    <span class="obs-meta-item" style="color:var(--amber);">{{ obs.files_modified|length }} file{{ 's' if obs.files_modified|length != 1 }} modified</span>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Detail link -->
+            <a href="/observations/{{ obs.id }}" class="obs-detail-link">observation detail ↗</a>
+
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Pagination -->
+{% if pg.pages > 1 %}
+<div class="pagination">
+    <span class="pg-info">showing {{ ((pg.page-1)*15)+1 }}–{{ [pg.page*15, pg.total]|min }} of {{ total }}</span>
+    <div class="pg-btns">
+        {% set base = '/observations?search='~search~'&type_filter='~type_filter~'&date_from='~date_from~'&date_to='~date_to %}
+        <a href="{{ base }}&page={{ pg.page-1 }}" class="pg-btn {% if pg.page<=1 %}disabled{% endif %}">← prev</a>
+        {% if pg.pg_start > 1 %}<a href="{{ base }}&page=1" class="pg-btn">1</a>{% if pg.pg_start > 2 %}<span class="pg-dots">…</span>{% endif %}{% endif %}
+        {% for pn in pg.page_nums %}<a href="{{ base }}&page={{ pn }}" class="pg-btn {% if pn==pg.page %}active{% endif %}">{{ pn }}</a>{% endfor %}
+        {% if pg.pg_end < pg.pages %}{% if pg.pg_end < pg.pages-1 %}<span class="pg-dots">…</span>{% endif %}<a href="{{ base }}&page={{ pg.pages }}" class="pg-btn">{{ pg.pages }}</a>{% endif %}
+        <a href="{{ base }}&page={{ pg.page+1 }}" class="pg-btn {% if pg.page>=pg.pages %}disabled{% endif %}">next →</a>
+    </div>
+</div>
+{% endif %}
+
+{% else %}
+<div class="obs-empty">
+    <div class="obs-empty-icon">◉</div>
+    {% if search or type_filter or date_from %}
+    <div class="obs-empty-title">No observations match your search or filter</div>
+    <div class="obs-empty-sub">Try adjusting the search, type, or date range.</div>
+    {% else %}
+    <div class="obs-empty-title">No observations yet</div>
+    <div class="obs-empty-sub">
+        Observations are extracted automatically by the LLM.<br>
+        Enable observations in <a href="/config" style="color:var(--accent);">Configuration</a> and provide a valid API key.
+    </div>
+    {% endif %}
+</div>
+{% endif %}

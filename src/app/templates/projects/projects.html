@@ -1,0 +1,101 @@
+{% extends "base/index.html" %}
+{% block title %}Projects — CloudByte{% endblock %}
+{% block breadcrumb %}projects{% endblock %}
+
+{% block head %}<link rel="stylesheet" href="/static/css/projects/projects.css">{% endblock %}
+
+{% block content %}
+
+<!-- Page header -->
+<div class="section" style="display:flex;align-items:center;justify-content:space-between;">
+    <div>
+        <div style="font-size:20px;font-weight:500;margin-bottom:4px;">Projects</div>
+        <div class="dimmer mono" style="font-size:11px;">
+            {{ projects|length }} project{{ 's' if projects|length != 1 }} tracked
+        </div>
+    </div>
+</div>
+
+<!-- Project cards grid -->
+<div class="projects-grid section">
+    {% for p in projects %}
+    <div class="project-card">
+
+        <!-- Card top accent line (green) -->
+        <div class="project-card-accent"></div>
+
+        <div class="project-card-body">
+
+            <!-- Name + ID + sessions button on same row -->
+            <div class="project-name-row">
+                <div style="min-width:0;flex:1;">
+                    <div class="project-name" title="{{ p.name or 'Unnamed' }}">{{ p.name or 'Unnamed' }}</div>
+                    <span class="project-id-badge">{{ p.project_id[:8] }}…</span>
+                </div>
+                <a href="/sessions?project={{ p.project_id }}" class="project-btn primary" style="flex-shrink:0;align-self:flex-start;">
+                    {{ p.session_count }} session{{ 's' if p.session_count != 1 }} →
+                </a>
+            </div>
+
+            <!-- Path -->
+            <div class="project-path" title="{{ p.path or '' }}">
+                {{ p.path or '—' }}
+            </div>
+
+            <!-- Stats grid: 4 metrics -->
+            <div class="project-stats-grid">
+                <div class="project-stat">
+                    <div class="project-stat-val accent-text">{{ p.session_count }}</div>
+                    <div class="project-stat-label">sessions</div>
+                </div>
+                <div class="project-stat">
+                    <div class="project-stat-val green-text">{{ p.prompt_count }}</div>
+                    <div class="project-stat-label">prompts</div>
+                </div>
+                <div class="project-stat">
+                    <div class="project-stat-val amber-text">{{ p.tool_count }}</div>
+                    <div class="project-stat-label">tool calls</div>
+                </div>
+                <div class="project-stat">
+                    <div class="project-stat-val" style="color:var(--purple);">
+                        {% set v = p.io_tokens or 0 %}
+                        {% if v >= 1000000 %}{{ "%.1f"|format(v/1000000) }}M
+                        {% elif v >= 1000 %}{{ "%.1f"|format(v/1000) }}K
+                        {% else %}{{ v }}{% endif %}
+                    </div>
+                    <div class="project-stat-label">IO tokens</div>
+                </div>
+            </div>
+
+            <!-- Meta row: tools + last session -->
+            <div class="project-meta-row">
+                <span class="project-meta-item">
+                    <span class="project-meta-dot" style="background:var(--amber);"></span>
+                    {{ p.unique_tools or 0 }} tool type{{ 's' if (p.unique_tools or 0) != 1 }}
+                </span>
+                <span class="project-meta-item">
+                    <span class="project-meta-dot" style="background:var(--green);"></span>
+                    last active {{ p.last_session or 'never' }}
+                </span>
+            </div>
+
+            <!-- Analysis buttons side by side with icons -->
+            <div class="project-actions">
+                <a href="/tokens/project/{{ p.project_id }}" class="project-btn token">
+                    ◈ token analysis ↗
+                </a>
+                <a href="/tools/project/{{ p.project_id }}" class="project-btn tool">
+                    ⚙ tool analysis ↗
+                </a>
+            </div>
+
+        </div>
+    </div>
+    {% else %}
+    <div style="grid-column:1/-1;">
+        <div class="card"><div class="empty">no projects found</div></div>
+    </div>
+    {% endfor %}
+</div>
+
+{% endblock %}

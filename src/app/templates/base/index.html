@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}CloudByte{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/base.css">
+    {% block head %}{% endblock %}
+</head>
+<body>
+<div class="layout">
+
+    <aside class="sidebar">
+        <div class="sidebar-logo">
+            <div class="logo-mark">◈ CloudByte</div>
+            <div class="logo-sub">claude code analytics</div>
+        </div>
+
+        <nav class="sidebar-nav">
+            <div class="nav-section">
+                <div class="nav-label">Overview</div>
+                <a href="/" class="nav-link {% if active == 'dashboard' %}active{% endif %}">
+                    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/>
+                        <rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/>
+                    </svg>
+                    Dashboard
+                </a>
+                <a href="/projects" class="nav-link {% if active == 'projects' %}active{% endif %}">
+                    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M2 4h12v9a1 1 0 01-1 1H3a1 1 0 01-1-1V4z"/><path d="M2 4l2-2h4l2 2"/>
+                    </svg>
+                    Projects
+                </a>
+                <a href="/sessions" class="nav-link {% if active == 'sessions' %}active{% endif %}">
+                    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <rect x="1" y="3" width="14" height="10" rx="1.5"/><path d="M5 7h6M5 10h4"/>
+                    </svg>
+                    Sessions
+                </a>
+            </div>
+
+            <div class="nav-section">
+                <div class="nav-label">Analytics</div>
+                <a href="/tokens" class="nav-link {% if active == 'tokens' %}active{% endif %}">
+                    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M1 12l4-4 3 3 4-5 3 3"/><path d="M1 14h14"/>
+                    </svg>
+                    Token Usage
+                </a>
+                <a href="/tools" class="nav-link {% if active == 'tools' %}active{% endif %}">
+                    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M10 2l4 4-7 7H3v-4l7-7z"/>
+                    </svg>
+                    Tool Calls
+                </a>
+            </div>
+
+            <div class="nav-section">
+                <div class="nav-label">Memory</div>
+                <a href="/observations" class="nav-link {% if active == 'observations' %}active{% endif %}">
+                    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <circle cx="8" cy="8" r="6"/><path d="M8 5v3l2 2"/>
+                    </svg>
+                    Observations
+                </a>
+
+            </div>
+
+            <div class="nav-section">
+                <div class="nav-label">System</div>
+                <a href="/config" class="nav-link {% if active == 'config' %}active{% endif %}">
+                    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <circle cx="8" cy="8" r="2.5"/>
+                        <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.42 1.42M11.53 11.53l1.42 1.42M3.05 12.95l1.42-1.42M11.53 4.47l1.42-1.42"/>
+                    </svg>
+                    Configuration
+                </a>
+            </div>
+        </nav>
+
+        <div class="sidebar-footer">
+            <div class="status-dot">
+                <span class="dot"></span>
+                db connected
+            </div>
+        </div>
+    </aside>
+
+    <div class="main">
+        <div class="topbar">
+            <div class="page-title">
+                <span>/</span>{% block breadcrumb %}home{% endblock %}
+            </div>
+            <div class="topbar-right">
+                <div class="theme-switcher">
+                    <button class="theme-btn" data-theme="dark"  onclick="setTheme('dark')">dark</button>
+                    <button class="theme-btn" data-theme="dim"   onclick="setTheme('dim')">dim</button>
+                    <button class="theme-btn" data-theme="light" onclick="setTheme('light')">light</button>
+                </div>
+                <span class="topbar-version">v0.1.0</span>
+            </div>
+        </div>
+
+        <div class="content">
+            {% block content %}{% endblock %}
+        </div>
+    </div>
+
+</div>
+
+<script src="https://unpkg.com/htmx.org@1.9.10/dist/htmx.min.js"></script>
+<script src="/static/js/theme.js"></script>
+<script src="/static/js/sse.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,251 @@
+{% extends "base/index.html" %}
+{% block title %}Tool Analysis · {{ project.name }} — CloudByte{% endblock %}
+{% block breadcrumb %}tool calls / project {{ project.name | truncate(30) }}{% endblock %}
+
+{% block head %}<link rel="stylesheet" href="/static/css/analytics/project_tools.css">{% endblock %}
+
+{% block content %}
+
+<!-- Chart data — forceescape keeps double-quoted JSON safe in HTML attributes -->
+<div id="chart-data" style="display:none;"
+     data-labels="{{ chart_labels | tojson | forceescape }}"
+     data-calls="{{ chart_calls | tojson | forceescape }}"
+     data-inp="{{ chart_inp | tojson | forceescape }}"
+     data-out="{{ chart_out | tojson | forceescape }}"
+     data-cache-rd="{{ chart_cache_read | tojson | forceescape }}"
+     data-cache-cr="{{ chart_cache_cr | tojson | forceescape }}"
+     data-bar-labels="{{ bar_labels | tojson | forceescape }}"
+     data-bar-calls="{{ bar_tool_calls | tojson | forceescape }}"
+     data-bar-tokens="{{ bar_tokens | tojson | forceescape }}"
+     data-bar-session-ids="{{ bar_session_ids | tojson | forceescape }}">
+</div>
+
+<!-- ── Project header ── -->
+<div class="project-header-card section">
+    <div class="project-header-left">
+        <div class="project-name-line">
+            <span class="project-name-val" title="{{ project.name }}">{{ project.name }}</span>
+            <span class="badge badge-green" style="font-size:9px;">tool analysis</span>
+        </div>
+        <div class="project-meta-row">
+            <div class="project-meta-item">
+                path <span class="mono" style="font-size:10px;">{{ project.path[-50:] if project.path else '—' }}</span>
+            </div>
+            <div class="project-meta-item">
+                created <span>{{ project.created_at[:10] if project.created_at else '—' }}</span>
+            </div>
+            <div class="project-meta-item">
+                sessions <span>{{ stats.total_sessions }}</span>
+            </div>
+        </div>
+    </div>
+    <div class="project-header-right">
+        <a href="/tokens/project/{{ project.project_id }}" class="btn btn-ghost"style="font-size:11px;color:var(--accent);border-color:rgba(0,212,255,0.3);background:rgba(0,212,255,0.04);">token analysis ↗</a>
+        <a href="/projects" class="btn btn-ghost" style="font-size:11px;">projects ↗</a>
+        <a href="/tools" class="btn btn-ghost" style="font-size:11px;">← all tools</a>
+    </div>
+</div>
+
+<!-- ── Stat tiles ── -->
+<div class="stats-grid section">
+    <div class="stat-tile accent">
+        <div class="stat-label">Total Calls</div>
+        <div class="stat-value">{{ "{:,}".format(stats.total_calls or 0) }}</div>
+        <div class="stat-sub">across {{ stats.total_sessions }} session{{ 's' if stats.total_sessions != 1 }}</div>
+    </div>
+    <div class="stat-tile amber">
+        <div class="stat-label">Unique Tools</div>
+        <div class="stat-value">{{ stats.unique_tools or 0 }}</div>
+        <div class="stat-sub">distinct tool types</div>
+    </div>
+    <div class="stat-tile green">
+        <div class="stat-label">Active Turns</div>
+        <div class="stat-value">{{ stats.active_turns or 0 }}</div>
+        <div class="stat-sub">turns with tool use</div>
+    </div>
+    <div class="stat-tile purple">
+        <div class="stat-label">Tool Tokens</div>
+        <div class="stat-value">
+            {% set v = total_tool_tokens %}
+            {% if v >= 1000000 %}{{ "%.1f"|format(v/1000000) }}M
+            {% elif v >= 1000 %}{{ "%.1f"|format(v/1000) }}K
+            {% else %}{{ v }}{% endif %}
+        </div>
+        <div class="stat-sub">{{ "{:,}".format(total_tool_tokens) }} total</div>
+    </div>
+</div>
+
+<!-- ── Charts ── -->
+<div class="charts-row section">
+
+    <!-- Donut: tool call distribution across project -->
+    <div class="chart-card">
+        <div class="chart-card-header">
+            <span class="chart-card-title">Call Distribution</span>
+            <span class="chart-card-sub">by tool type · all sessions</span>
+        </div>
+        <div class="chart-body">
+            <div class="donut-wrap">
+                <div class="donut-canvas-wrap">
+                    <canvas id="donut-chart" width="140" height="140"></canvas>
+                    <div class="donut-center">
+                        <div class="donut-center-val">{{ stats.total_calls }}</div>
+                        <div class="donut-center-label">calls</div>
+                    </div>
+                </div>
+                <div class="donut-legend">
+                    {% for label in chart_labels %}
+                    <div class="legend-item">
+                        <div class="legend-dot" data-index="{{ loop.index0 }}"></div>
+                        <span class="legend-name">{{ label }}</span>
+                        <span class="legend-count">{{ chart_calls[loop.index0] }}</span>
+                        <span class="legend-pct">{{ (chart_calls[loop.index0] / (stats.total_calls or 1) * 100) | round | int }}%</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Grouped bar: tool calls + tokens per session (clickable → session analysis) -->
+    <div class="chart-card">
+        <div class="chart-card-header">
+            <span class="chart-card-title">Activity Per Session</span>
+            <span class="chart-card-sub">calls (green) · tokens (purple) · click to analyse</span>
+        </div>
+        <div class="chart-body-bar">
+            <canvas id="bar-chart"></canvas>
+        </div>
+    </div>
+
+</div>
+
+<!-- ── Per-tool breakdown ── -->
+<div class="section">
+    <div class="section-divider">
+        <span class="section-divider-title">Per Tool Breakdown</span>
+        <div class="section-divider-line"></div>
+        <span class="dimmer mono" style="font-size:10px;">across all sessions in this project</span>
+    </div>
+    <div class="card">
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Tool</th>
+                        <th>Calls</th>
+                        <th>Share</th>
+                        <th>Sessions</th>
+                        <th>Input</th>
+                        <th>Output</th>
+                        <th>Cache Rd.</th>
+                        <th>Cache Cr.</th>
+                        <th style="text-align:center;">Errors</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in tool_rows %}
+                    <tr>
+                        <td>
+                            <div class="tool-name-cell">
+                                <div class="tool-color-dot" data-index="{{ loop.index0 }}"></div>
+                                <span class="mono" style="font-weight:600;color:var(--amber);">{{ row.tool_name }}</span>
+                            </div>
+                        </td>
+                        <td><span class="mono accent-text" style="font-weight:600;">{{ row.call_count }}</span></td>
+                        <td style="min-width:110px;">
+                            <div class="call-bar-wrap">
+                                <div class="call-bar-track">
+                                    <div class="call-bar-fill" data-pct="{{ row.call_pct }}" data-index="{{ loop.index0 }}"></div>
+                                </div>
+                                <span class="mono dimmer" style="font-size:10px;">{{ row.call_pct }}%</span>
+                            </div>
+                        </td>
+                        <td>
+                            <span class="sessions-used-pill">{{ row.sessions_used_in }} session{{ 's' if row.sessions_used_in != 1 }}</span>
+                        </td>
+                        <td class="mono accent-text">{{ "{:,}".format(row.input_tokens or 0) }}</td>
+                        <td class="mono green-text">{{ "{:,}".format(row.output_tokens or 0) }}</td>
+                        <td class="mono" style="color:var(--purple);">{{ "{:,}".format(row.cache_read_tokens or 0) }}</td>
+                        <td class="mono amber-text">{{ "{:,}".format(row.cache_creation_tokens or 0) }}</td>
+                        <td style="text-align:center;">
+                            {% if row.errors > 0 %}
+                                <span class="error-badge">✗ {{ row.errors }}</span>
+                            {% else %}
+                                <span class="ok-badge">—</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="9"><div class="empty">no tool data</div></td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- ── Per-session breakdown ── -->
+<div class="section">
+    <div class="section-divider">
+        <span class="section-divider-title">Per Session Breakdown</span>
+        <div class="section-divider-line"></div>
+        <span class="dimmer mono" style="font-size:10px;">{{ session_rows|length }} session{{ 's' if session_rows|length != 1 }} with tool use</span>
+    </div>
+    <div class="card">
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Session</th>
+                        <th>Date</th>
+                        <th>Tool Calls</th>
+                        <th>Unique Tools</th>
+                        <th>Input</th>
+                        <th>Output</th>
+                        <th>Cache Rd.</th>
+                        <th>Cache Cr.</th>
+                        <th style="width:110px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in session_rows %}
+                    <tr>
+                        <td style="white-space:nowrap;">
+                            <a href="/sessions/{{ row.session_id }}"
+                               class="mono accent-text"
+                               style="font-size:11px;text-decoration:none;">
+                                {{ row.session_id[:8] }}…
+                            </a>
+                        </td>
+                        <td class="mono dimmer" style="font-size:11px;white-space:nowrap;">
+                            {{ row.session_date or '—' }}
+                        </td>
+                        <td>
+                            <span class="tool-badge">{{ row.tool_calls }} calls</span>
+                        </td>
+                        <td class="mono dimmer" style="text-align:center;">{{ row.unique_tools }} types</td>
+                        <td class="mono accent-text">{{ "{:,}".format(row.input_tokens or 0) }}</td>
+                        <td class="mono green-text">{{ "{:,}".format(row.output_tokens or 0) }}</td>
+                        <td class="mono" style="color:var(--purple);">{{ "{:,}".format(row.cache_read_tokens or 0) }}</td>
+                        <td class="mono amber-text">{{ "{:,}".format(row.cache_creation_tokens or 0) }}</td>
+                        <td style="text-align:right;">
+                            <a href="/tools/session/{{ row.session_id }}"
+                               class="btn btn-ghost"
+                               style="font-size:10px;padding:3px 9px;white-space:nowrap;color:var(--green);border-color:rgba(0,229,160,0.25);background:rgba(0,229,160,0.04);">
+                                analyse ↗
+                            </a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="9"><div class="empty">no session data</div></td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script><script src="/static/js/analytics/project_tools.js"></script>{% endblock %}

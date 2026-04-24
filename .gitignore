@@ -1,0 +1,43 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+venv/
+.env
+
+# CloudByte data (user-specific)
+.cloudbyte/
+*.db
+*.log
+*.pid
+
+# Ignore hooks config (user-specific)
+.claude/hooks.json
+.claude/settings.local.json
+
+# Ignore hooks config (marketplace version is source of truth)
+hooks/hooks.json
+
+# Test and temporary files
+test/
+testing/
+process_json_to_db.py
+update_db.py
+test_observation/
+CHANGES.md
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

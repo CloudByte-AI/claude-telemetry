@@ -1,0 +1,65 @@
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Tool</th>
+                <th>Calls</th>
+                <th>Share</th>
+                <th>Input</th>
+                <th>Output</th>
+                <th>Cache Rd.</th>
+                <th>Cache Cr.</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in tool_rows %}
+            <tr>
+                <td>
+                    <div class="tool-name-cell">
+                        <div class="tool-color-dot" data-index="{{ loop.index0 + (tool_pg.page - 1) * 10 }}"></div>
+                        <span class="mono" style="font-weight:600;color:var(--amber);">{{ row.tool_name }}</span>
+                    </div>
+                </td>
+                <td><span class="mono accent-text" style="font-weight:600;">{{ row.call_count }}</span></td>
+                <td style="min-width:110px;">
+                    <div class="call-bar-wrap">
+                        <div class="call-bar-track">
+                            <div class="call-bar-fill"
+                                 data-pct="{{ row.call_pct }}"
+                                 data-index="{{ loop.index0 + (tool_pg.page - 1) * 10 }}"></div>
+                        </div>
+                        <span class="mono dimmer" style="font-size:11px;">{{ row.call_pct }}%</span>
+                    </div>
+                </td>
+                <td class="mono accent-text">{{ "{:,}".format(row.input_tokens or 0) }}</td>
+                <td class="mono green-text">{{ "{:,}".format(row.output_tokens or 0) }}</td>
+                <td class="mono" style="color:var(--purple);">{{ "{:,}".format(row.cache_read_tokens or 0) }}</td>
+                <td class="mono amber-text">{{ "{:,}".format(row.cache_creation_tokens or 0) }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7"><div class="empty">{% if tool_search %}no tools matching "{{ tool_search }}"{% else %}no tool data{% endif %}</div></td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% set base = '/tools?top_n='~top_n~'&tool_search='~tool_search~'&sess_search='~sess_search~'&proj_search='~proj_search %}
+{% if tool_pg.total > 0 %}
+<div class="pagination">
+    <span class="pg-info">showing {{ ((tool_pg.page-1)*10)+1 }}–{{ [tool_pg.page*10, tool_pg.total]|min }} of {{ tool_pg.total }}</span>
+    <div class="pg-btns">
+        <a href="{{ base }}&tool_page={{ tool_pg.page-1 }}" class="pg-btn {% if tool_pg.page <= 1 %}disabled{% endif %}">← prev</a>
+        {% if tool_pg.pg_start > 1 %}
+            <a href="{{ base }}&tool_page=1" class="pg-btn">1</a>
+            {% if tool_pg.pg_start > 2 %}<span class="pg-dots">…</span>{% endif %}
+        {% endif %}
+        {% for pn in tool_pg.page_nums %}
+        <a href="{{ base }}&tool_page={{ pn }}" class="pg-btn {% if pn == tool_pg.page %}active{% endif %}">{{ pn }}</a>
+        {% endfor %}
+        {% if tool_pg.pg_end < tool_pg.pages %}
+            {% if tool_pg.pg_end < tool_pg.pages - 1 %}<span class="pg-dots">…</span>{% endif %}
+            <a href="{{ base }}&tool_page={{ tool_pg.pages }}" class="pg-btn">{{ tool_pg.pages }}</a>
+        {% endif %}
+        <a href="{{ base }}&tool_page={{ tool_pg.page+1 }}" class="pg-btn {% if tool_pg.page >= tool_pg.pages %}disabled{% endif %}">next →</a>
+    </div>
+</div>
+{% endif %}

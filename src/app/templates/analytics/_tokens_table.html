@@ -1,0 +1,80 @@
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th rowspan="2" style="vertical-align:bottom;">Session</th>
+                <th rowspan="2" style="vertical-align:bottom;">Project</th>
+                <th rowspan="2" style="vertical-align:bottom;">Date</th>
+                <th rowspan="2" style="vertical-align:bottom;text-align:center;">Turns</th>
+                <th colspan="4" class="col-group-header"
+                    style="color:var(--accent);border-left:1px solid var(--border);">
+                    response tokens
+                </th>
+                <th rowspan="2" style="vertical-align:bottom;text-align:right;padding-right:16px;">Total</th>
+            </tr>
+            <tr>
+                <th class="sub-th" style="border-left:1px solid var(--border);">Input</th>
+                <th class="sub-th">Output</th>
+                <th class="sub-th">Cache Rd.</th>
+                <th class="sub-th">Cache Cr.</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in session_rows %}
+            <tr>
+                <td style="white-space:nowrap;">
+                    <a href="/sessions/{{ row.session_id }}" class="mono accent-text"
+                       style="font-size:11px;text-decoration:none;">{{ row.session_id[:8] }}…</a>
+                </td>
+                <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;"
+                    title="{{ row.project_name or '' }}">{{ row.project_name or '—' }}</td>
+                <td class="mono dimmer" style="font-size:11px;white-space:nowrap;">{{ row.session_date or '—' }}</td>
+                <td class="mono dimmer" style="text-align:center;">{{ row.turn_count }}</td>
+                <td class="mono accent-text" style="border-left:1px solid var(--border);">{{ "{:,}".format(row.display_input or 0) }}</td>
+                <td class="mono green-text">{{ "{:,}".format(row.display_output or 0) }}</td>
+                <td class="mono" style="color:var(--purple);">{{ "{:,}".format(row.display_cache_read or 0) }}</td>
+                <td class="mono amber-text">{{ "{:,}".format(row.display_cache_create or 0) }}</td>
+                <td class="mono" style="text-align:right;font-weight:600;color:var(--text);padding-right:16px;">
+                    {{ "{:,}".format(row.grand_total or 0) }}
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="6">
+                    <div class="no-data">
+                        {% if search %}no sessions matching "{{ search }}"{% else %}no session data{% endif %}
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% if total_records > 0 %}
+<div class="pagination">
+    <span class="pg-info">
+        showing {{ ((page-1)*per_page)+1 }}–{{ [page*per_page, total_records]|min }} of {{ total_records }}
+    </span>
+    <div class="pg-btns">
+        <a href="/tokens?dr={{ dr }}&date_from={{ date_from }}&date_to={{ date_to }}&include_tools={{ include_tools }}&search={{ search }}&page={{ page-1 }}&per_page={{ per_page }}"
+           class="pg-btn {% if page <= 1 %}disabled{% endif %}">← prev</a>
+        {% if pg_start > 1 %}
+            <a href="/tokens?dr={{ dr }}&date_from={{ date_from }}&date_to={{ date_to }}&include_tools={{ include_tools }}&search={{ search }}&page=1&per_page={{ per_page }}"
+               class="pg-btn">1</a>
+            {% if pg_start > 2 %}<span class="pg-dots">…</span>{% endif %}
+        {% endif %}
+        {% for pn in page_nums %}
+        <a href="/tokens?dr={{ dr }}&date_from={{ date_from }}&date_to={{ date_to }}&include_tools={{ include_tools }}&search={{ search }}&page={{ pn }}&per_page={{ per_page }}"
+           class="pg-btn {% if pn == page %}active{% endif %}">{{ pn }}</a>
+        {% endfor %}
+        {% if pg_end < total_pages %}
+            {% if pg_end < total_pages - 1 %}<span class="pg-dots">…</span>{% endif %}
+            <a href="/tokens?dr={{ dr }}&date_from={{ date_from }}&date_to={{ date_to }}&include_tools={{ include_tools }}&search={{ search }}&page={{ total_pages }}&per_page={{ per_page }}"
+               class="pg-btn">{{ total_pages }}</a>
+        {% endif %}
+        <a href="/tokens?dr={{ dr }}&date_from={{ date_from }}&date_to={{ date_to }}&include_tools={{ include_tools }}&search={{ search }}&page={{ page+1 }}&per_page={{ per_page }}"
+           class="pg-btn {% if page >= total_pages %}disabled{% endif %}">next →</a>
+    </div>
+</div>
+{% endif %}

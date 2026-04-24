@@ -1,0 +1,59 @@
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Session</th>
+                <th>Project</th>
+                <th>Date</th>
+                <th>Tool Calls</th>
+                <th>Unique Tools</th>
+                <th>Input</th>
+                <th>Output</th>
+                <th>Cache Rd.</th>
+                <th style="width:80px;"></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in sess_rows %}
+            <tr>
+                <td style="white-space:nowrap;">
+                    <a href="/sessions/{{ row.session_id }}" class="mono accent-text" style="font-size:11px;text-decoration:none;">{{ row.session_id[:8] }}…</a>
+                </td>
+                <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;" title="{{ row.project_name or '' }}">{{ row.project_name or '—' }}</td>
+                <td class="mono dimmer" style="font-size:11px;white-space:nowrap;">{{ row.session_date or '—' }}</td>
+                <td><span class="tool-badge">{{ row.tool_calls }}</span></td>
+                <td class="mono dimmer" style="text-align:center;">{{ row.unique_tools }}</td>
+                <td class="mono accent-text">{{ "{:,}".format(row.input_tokens or 0) }}</td>
+                <td class="mono green-text">{{ "{:,}".format(row.output_tokens or 0) }}</td>
+                <td class="mono" style="color:var(--purple);">{{ "{:,}".format(row.cache_read_tokens or 0) }}</td>
+                <td style="text-align:right;">
+                    <a href="/tools/session/{{ row.session_id }}" class="tbl-btn explore" style="font-size:10px;padding:3px 8px;">analyse ↗</a>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="9"><div class="empty">{% if sess_search %}no sessions matching "{{ sess_search }}"{% else %}no session data{% endif %}</div></td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% set base = '/tools?top_n='~top_n~'&tool_search='~tool_search~'&sess_search='~sess_search~'&proj_search='~proj_search %}
+{% if sess_pg.total > 0 %}
+<div class="pagination">
+    <span class="pg-info">showing {{ ((sess_pg.page-1)*10)+1 }}–{{ [sess_pg.page*10, sess_pg.total]|min }} of {{ sess_pg.total }}</span>
+    <div class="pg-btns">
+        <a href="{{ base }}&sess_page={{ sess_pg.page-1 }}" class="pg-btn {% if sess_pg.page <= 1 %}disabled{% endif %}">← prev</a>
+        {% if sess_pg.pg_start > 1 %}
+            <a href="{{ base }}&sess_page=1" class="pg-btn">1</a>
+            {% if sess_pg.pg_start > 2 %}<span class="pg-dots">…</span>{% endif %}
+        {% endif %}
+        {% for pn in sess_pg.page_nums %}
+        <a href="{{ base }}&sess_page={{ pn }}" class="pg-btn {% if pn == sess_pg.page %}active{% endif %}">{{ pn }}</a>
+        {% endfor %}
+        {% if sess_pg.pg_end < sess_pg.pages %}
+            {% if sess_pg.pg_end < sess_pg.pages - 1 %}<span class="pg-dots">…</span>{% endif %}
+            <a href="{{ base }}&sess_page={{ sess_pg.pages }}" class="pg-btn">{{ sess_pg.pages }}</a>
+        {% endif %}
+        <a href="{{ base }}&sess_page={{ sess_pg.page+1 }}" class="pg-btn {% if sess_pg.page >= sess_pg.pages %}disabled{% endif %}">next →</a>
+    </div>
+</div>
+{% endif %}

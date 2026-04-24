@@ -1,0 +1,159 @@
+{% extends "base/index.html" %}
+{% block title %}{{ obs.title | truncate(50) }} — CloudByte{% endblock %}
+{% block breadcrumb %}observations / detail{% endblock %}
+
+{% block head %}<link rel="stylesheet" href="/static/css/memory/observations.css">{% endblock %}
+
+{% block content %}
+
+<!-- Header card -->
+<div class="obs-detail-header section">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+            <span class="obs-type-badge {{ obs.type_meta.color }}" style="font-size:11px;padding:4px 12px;">
+                {{ obs.type_meta.icon }} {{ obs.type_meta.label }}
+            </span>
+
+        </div>
+        <div style="display:flex;gap:8px;">
+            <a href="/sessions/{{ obs.session_id }}" class="btn btn-ghost" style="font-size:11px;">session ↗</a>
+            <a href="/observations" class="btn btn-ghost" style="font-size:11px;">← observations</a>
+        </div>
+    </div>
+
+    <div class="obs-detail-title">{{ obs.title or '—' }}</div>
+    {% if obs.subtitle %}
+    <div class="obs-detail-subtitle">{{ obs.subtitle }}</div>
+    {% endif %}
+
+    <!-- Meta strip -->
+    <div class="obs-meta" style="flex-wrap:wrap;gap:14px;">
+        {% if obs.project_name %}
+        <span class="obs-meta-item">
+            <span style="color:var(--accent);">◎</span>
+            <a href="/projects" style="color:var(--text2);text-decoration:none;">{{ obs.project_name }}</a>
+        </span>
+        {% endif %}
+        <span class="obs-meta-item">
+            session
+            <a href="/sessions/{{ obs.session_id }}" class="mono" style="color:var(--accent);text-decoration:none;font-size:11px;">
+                {{ obs.session_id[:8] }}…{{ obs.session_id[-4:] }}
+            </a>
+        </span>
+        {% if obs.turn_number %}
+        <span class="obs-meta-item">turn <span class="mono" style="color:var(--text);">{{ obs.turn_number }}</span></span>
+        {% endif %}
+        {% if obs.created_at %}
+        <span class="obs-meta-item">{{ obs.created_at[:16].replace('T',' ') }}</span>
+        {% endif %}
+        {% if obs.cwd %}
+        <span class="obs-meta-item mono" style="font-size:10px;color:var(--text2);">{{ obs.cwd[-40:] }}</span>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Narrative -->
+{% if obs.narrative %}
+<div class="obs-detail-narrative section">
+    <div class="obs-section-label" style="margin-bottom:12px;">◈ narrative</div>
+    <div class="obs-narrative-text">{{ obs.narrative }}</div>
+</div>
+{% endif %}
+
+<!-- Facts + Concepts row -->
+{% if obs.facts or obs.concepts %}
+<div class="obs-detail-grid section">
+
+    {% if obs.facts %}
+    <div class="obs-detail-card">
+        <div class="obs-detail-card-title">
+            <span style="color:var(--accent);">·</span> facts ({{ obs.facts|length }})
+        </div>
+        <div class="facts-list">
+            {% for f in obs.facts %}
+            <div class="fact-item">{{ f }}</div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if obs.concepts %}
+    <div class="obs-detail-card">
+        <div class="obs-detail-card-title">
+            <span style="color:var(--purple);">◈</span> concepts ({{ obs.concepts|length }})
+        </div>
+        <div class="concepts-wrap">
+            {% for c in obs.concepts %}
+            <span class="concept-chip">{{ c }}</span>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+</div>
+{% endif %}
+
+<!-- Files row -->
+{% if obs.files_read or obs.files_modified %}
+<div class="obs-detail-grid section">
+
+    {% if obs.files_read %}
+    <div class="obs-detail-card">
+        <div class="obs-detail-card-title">
+            <span style="color:var(--accent);">→</span> files read ({{ obs.files_read|length }})
+        </div>
+        <div class="files-list">
+            {% for f in obs.files_read %}
+            <div class="file-item read">{{ f }}</div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if obs.files_modified %}
+    <div class="obs-detail-card">
+        <div class="obs-detail-card-title">
+            <span style="color:var(--amber);">✎</span> files modified ({{ obs.files_modified|length }})
+        </div>
+        <div class="files-list">
+            {% for f in obs.files_modified %}
+            <div class="file-item modified">{{ f }}</div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+</div>
+{% endif %}
+
+<!-- Nearby observations from same session -->
+{% if nearby %}
+<div class="section">
+    <div class="section-divider">
+        <span class="section-divider-title">Other observations from this session</span>
+        <div class="section-divider-line"></div>
+        <span class="dimmer mono" style="font-size:11px;">{{ nearby|length }} more</span>
+    </div>
+    {% for n in nearby %}
+    <a href="/observations/{{ n.id }}" class="nearby-card">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:5px;">
+            <span class="obs-type-badge {{ n.type_meta.color }}" style="font-size:9px;padding:2px 7px;">
+                {{ n.type_meta.icon }} {{ n.type_meta.label }}
+            </span>
+            <span class="mono dimmer" style="font-size:10px;">{{ n.created_at[:16].replace('T',' ') if n.created_at else '' }}</span>
+        </div>
+        <div class="nearby-title">{{ n.title or '—' }}</div>
+        {% if n.subtitle %}
+        <div class="nearby-meta">{{ n.subtitle | truncate(80) }}</div>
+        {% endif %}
+    </a>
+    {% endfor %}
+    <div style="margin-top:10px;">
+        <a href="/sessions/{{ obs.session_id }}" class="btn btn-ghost" style="font-size:11px;">
+            view full session ↗
+        </a>
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}

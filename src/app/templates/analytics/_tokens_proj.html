@@ -1,0 +1,45 @@
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Project</th>
+                <th style="text-align:center;">Sessions</th>
+                <th>Input</th>
+                <th>Output</th>
+                <th>Cache Rd.</th>
+                <th>Cache Cr.</th>
+                <th style="width:90px;"></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in proj_rows %}
+            <tr>
+                <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;" title="{{ row.project_name or '' }}">{{ row.project_name or '—' }}</td>
+                <td class="mono accent-text" style="text-align:center;">{{ row.session_count }}</td>
+                <td class="mono accent-text">{{ "{:,}".format(row.io_input or 0) }}</td>
+                <td class="mono green-text">{{ "{:,}".format(row.io_output or 0) }}</td>
+                <td class="mono" style="color:var(--purple);">{{ "{:,}".format(row.io_cache_read or 0) }}</td>
+                <td class="mono amber-text">{{ "{:,}".format(row.io_cache_create or 0) }}</td>
+                <td style="text-align:right;">
+                    <a href="/tokens/project/{{ row.project_id }}" class="tbl-btn analyse">analyse ↗</a>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7"><div class="no-data">{% if proj_search %}no projects matching "{{ proj_search }}"{% else %}no project data{% endif %}</div></td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% if proj_pg.total > 0 %}
+<div class="pagination">
+    <span class="pg-info">showing {{ ((proj_pg.page-1)*10)+1 }}–{{ [proj_pg.page*10, proj_pg.total]|min }} of {{ proj_pg.total }}</span>
+    <div class="pg-btns">
+        {% set base = '/tokens?dr='~dr~'&date_from='~date_from~'&date_to='~date_to~'&sess_search='~sess_search~'&proj_search='~proj_search %}
+        <a href="{{ base }}&proj_page={{ proj_pg.page-1 }}" class="pg-btn {% if proj_pg.page<=1 %}disabled{% endif %}">← prev</a>
+        {% if proj_pg.pg_start > 1 %}<a href="{{ base }}&proj_page=1" class="pg-btn">1</a>{% if proj_pg.pg_start > 2 %}<span class="pg-dots">…</span>{% endif %}{% endif %}
+        {% for pn in proj_pg.page_nums %}<a href="{{ base }}&proj_page={{ pn }}" class="pg-btn {% if pn==proj_pg.page %}active{% endif %}">{{ pn }}</a>{% endfor %}
+        {% if proj_pg.pg_end < proj_pg.pages %}{% if proj_pg.pg_end < proj_pg.pages-1 %}<span class="pg-dots">…</span>{% endif %}<a href="{{ base }}&proj_page={{ proj_pg.pages }}" class="pg-btn">{{ proj_pg.pages }}</a>{% endif %}
+        <a href="{{ base }}&proj_page={{ proj_pg.page+1 }}" class="pg-btn {% if proj_pg.page>=proj_pg.pages %}disabled{% endif %}">next →</a>
+    </div>
+</div>
+{% endif %}

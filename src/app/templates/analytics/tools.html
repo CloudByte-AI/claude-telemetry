@@ -1,0 +1,326 @@
+{% extends "base/index.html" %}
+{% block title %}Tool Calls — CloudByte{% endblock %}
+{% block breadcrumb %}tool calls{% endblock %}
+
+{% block head %}<link rel="stylesheet" href="/static/css/analytics/tools.css">{% endblock %}
+
+{# ── Pagination macro — reused for all 3 tables ─────────────────────────── #}
+{% macro pagination(pg, base_url) %}
+{% if pg.total > 0 %}
+<div class="pagination">
+    <span class="pg-info">
+        showing {{ ((pg.page-1)*10)+1 }}–{{ [pg.page*10, pg.total]|min }} of {{ pg.total }}
+    </span>
+    <div class="pg-btns">
+        <a href="{{ base_url }}&page={{ pg.page-1 }}" class="pg-btn {% if pg.page <= 1 %}disabled{% endif %}">← prev</a>
+        {% if pg.pg_start > 1 %}
+            <a href="{{ base_url }}&page=1" class="pg-btn">1</a>
+            {% if pg.pg_start > 2 %}<span class="pg-dots">…</span>{% endif %}
+        {% endif %}
+        {% for pn in pg.page_nums %}
+        <a href="{{ base_url }}&page={{ pn }}" class="pg-btn {% if pn == pg.page %}active{% endif %}">{{ pn }}</a>
+        {% endfor %}
+        {% if pg.pg_end < pg.pages %}
+            {% if pg.pg_end < pg.pages - 1 %}<span class="pg-dots">…</span>{% endif %}
+            <a href="{{ base_url }}&page={{ pg.pages }}" class="pg-btn">{{ pg.pages }}</a>
+        {% endif %}
+        <a href="{{ base_url }}&page={{ pg.page+1 }}" class="pg-btn {% if pg.page >= pg.pages %}disabled{% endif %}">next →</a>
+    </div>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% block content %}
+
+<!-- Chart data: forceescape keeps double-quoted JSON safe inside double-quoted HTML attrs -->
+<div id="chart-data" style="display:none;"
+     data-labels="{{ chart_labels | tojson | forceescape }}"
+     data-calls="{{ chart_calls | tojson | forceescape }}"
+     data-inp="{{ chart_inp | tojson | forceescape }}"
+     data-out="{{ chart_out | tojson | forceescape }}"
+     data-cache-rd="{{ chart_cache_read | tojson | forceescape }}"
+     data-cache-cr="{{ chart_cache_cr | tojson | forceescape }}">
+</div>
+
+<!-- ── Page header ── -->
+<div class="section" style="display:flex;align-items:center;justify-content:space-between;">
+    <div>
+        <div style="font-size:20px;font-weight:500;margin-bottom:4px;">Tool Calls</div>
+        <div class="dimmer mono" style="font-size:11px;">
+            {{ summary.total_calls }} calls · {{ summary.unique_tools }} tool types ·
+            {{ summary.sessions_with_tools }} session{{ 's' if summary.sessions_with_tools != 1 }} ·
+            {{ summary.projects_with_tools }} project{{ 's' if summary.projects_with_tools != 1 }}
+        </div>
+    </div>
+</div>
+
+<!-- ── Chart filter bar — clearly scoped to charts only ── -->
+<div class="chart-filter-bar">
+    <span class="chart-filter-label">chart range</span>
+    <div class="dr-pills">
+        <a href="/tools?dr=all&tool_search={{ tool_search }}&sess_search={{ sess_search }}&proj_search={{ proj_search }}"
+           class="dr-pill {% if dr == 'all' %}active{% endif %}">all time</a>
+        <a href="/tools?dr=today&tool_search={{ tool_search }}&sess_search={{ sess_search }}&proj_search={{ proj_search }}"
+           class="dr-pill {% if dr == 'today' %}active{% endif %}">today</a>
+        <a href="/tools?dr=7days&tool_search={{ tool_search }}&sess_search={{ sess_search }}&proj_search={{ proj_search }}"
+           class="dr-pill {% if dr == '7days' %}active{% endif %}">7 days</a>
+        <a href="/tools?dr=30days&tool_search={{ tool_search }}&sess_search={{ sess_search }}&proj_search={{ proj_search }}"
+           class="dr-pill {% if dr == '30days' %}active{% endif %}">30 days</a>
+    </div>
+    <span class="chart-filter-note">↑ filters charts only · tables are independent</span>
+</div>
+
+<!-- ── Charts — equal width, fixed height ── -->
+<div class="charts-row section">
+
+    <!-- Donut: call distribution — canvas centered, legend 2-col grid below -->
+    <div class="chart-card">
+        <div class="chart-card-header">
+            <span class="chart-card-title">Call Distribution</span>
+            <span class="chart-card-sub">top 5 + others · {{ d_from }}{% if d_from != d_to %} → {{ d_to }}{% endif %}</span>
+        </div>
+        <div class="chart-body">
+            <div class="donut-wrap">
+                <div class="donut-canvas-wrap">
+                    <canvas id="donut-chart" width="140" height="140"></canvas>
+                    <div class="donut-center">
+                        <div class="donut-center-val">{{ summary.total_calls }}</div>
+                        <div class="donut-center-label">calls</div>
+                    </div>
+                </div>
+                <div class="donut-legend">
+                    {% for label in chart_labels %}
+                    <div class="legend-item">
+                        <div class="legend-dot" data-index="{{ loop.index0 }}"></div>
+                        <span class="legend-name">{{ label }}</span>
+                        <span class="legend-count">{{ chart_calls[loop.index0] }}</span>
+                        <span class="legend-pct">{{ (chart_calls[loop.index0] / (summary.total_calls or 1) * 100) | round | int }}%</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stacked bar: token consumption per tool (top 5 + others) -->
+    <div class="chart-card">
+        <div class="chart-card-header">
+            <span class="chart-card-title">Token Consumption</span>
+            <span class="chart-card-sub">input · output · cache rd · cache cr</span>
+        </div>
+        <div class="chart-body-bar" id="bar-wrap">
+            <canvas id="bar-chart"></canvas>
+        </div>
+    </div>
+
+</div>
+
+<!-- ── Per-Tool Breakdown ── -->
+<div class="section">
+    <div class="section-divider">
+        <span class="section-divider-title">Per Tool Breakdown</span>
+        <div class="section-divider-line"></div>
+    </div>
+    <div class="card">
+        <div class="tbl-toolbar">
+            <div class="tbl-search-wrap">
+                <span class="tbl-search-icon">⌕</span>
+                <input type="text" name="tool_search" id="tool-search"
+                       class="tbl-search-input" value="{{ tool_search }}"
+                       placeholder="search tool name…"
+                       hx-get="/tools"
+                       hx-target="#tool-table-wrap"
+                       hx-trigger="keyup changed delay:400ms"
+                       hx-vals='{"top_n": "{{ top_n }}", "sess_search": "{{ sess_search }}", "proj_search": "{{ proj_search }}", "tool_page": "1"}'
+                       autocomplete="off">
+            </div>
+            {% if tool_search %}
+            <a href="/tools?top_n={{ top_n }}&sess_search={{ sess_search }}&proj_search={{ proj_search }}"
+               class="tbl-btn clear">clear ✕</a>
+            {% endif %}
+        </div>
+        <div id="tool-table-wrap">
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Tool</th>
+                        <th>Calls</th>
+                        <th>Share</th>
+                        <th>Input</th>
+                        <th>Output</th>
+                        <th>Cache Rd.</th>
+                        <th>Cache Cr.</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in tool_rows %}
+                    <tr>
+                        <td>
+                            <div class="tool-name-cell">
+                                <div class="tool-color-dot" data-index="{{ loop.index0 + (tool_pg.page - 1) * 10 }}"></div>
+                                <span class="mono" style="font-weight:600;color:var(--amber);">{{ row.tool_name }}</span>
+                            </div>
+                        </td>
+                        <td><span class="mono accent-text" style="font-weight:600;">{{ row.call_count }}</span></td>
+                        <td style="min-width:110px;">
+                            <div class="call-bar-wrap">
+                                <div class="call-bar-track">
+                                    <div class="call-bar-fill"
+                                         data-pct="{{ row.call_pct }}"
+                                         data-index="{{ loop.index0 + (tool_pg.page - 1) * 10 }}"></div>
+                                </div>
+                                <span class="mono dimmer" style="font-size:10px;">{{ row.call_pct }}%</span>
+                            </div>
+                        </td>
+                        <td class="mono accent-text">{{ "{:,}".format(row.input_tokens or 0) }}</td>
+                        <td class="mono green-text">{{ "{:,}".format(row.output_tokens or 0) }}</td>
+                        <td class="mono" style="color:var(--purple);">{{ "{:,}".format(row.cache_read_tokens or 0) }}</td>
+                        <td class="mono amber-text">{{ "{:,}".format(row.cache_creation_tokens or 0) }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="7"><div class="empty">{% if tool_search %}no tools matching "{{ tool_search }}"{% else %}no tool data{% endif %}</div></td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {{ pagination(tool_pg, '/tools?top_n='~top_n~'&tool_search='~tool_search~'&sess_search='~sess_search~'&proj_search='~proj_search) }}
+        </div><!-- end #tool-table-wrap -->
+    </div>
+</div>
+
+<!-- ── Per-Session Breakdown ── -->
+<div class="section">
+    <div class="section-divider">
+        <span class="section-divider-title">Per Session Breakdown</span>
+        <div class="section-divider-line"></div>
+    </div>
+    <div class="card">
+        <div class="tbl-toolbar">
+            <div class="tbl-search-wrap">
+                <span class="tbl-search-icon">⌕</span>
+                <input type="text" name="sess_search" id="sess-search"
+                       class="tbl-search-input" value="{{ sess_search }}"
+                       placeholder="search session id or project…"
+                       hx-get="/tools"
+                       hx-target="#sess-table-wrap"
+                       hx-trigger="keyup changed delay:400ms"
+                       hx-vals='{"top_n": "{{ top_n }}", "tool_search": "{{ tool_search }}", "proj_search": "{{ proj_search }}", "sess_page": "1"}'
+                       autocomplete="off">
+            </div>
+            {% if sess_search %}
+            <a href="/tools?top_n={{ top_n }}&tool_search={{ tool_search }}&proj_search={{ proj_search }}"
+               class="tbl-btn clear">clear ✕</a>
+            {% endif %}
+        </div>
+        <div id="sess-table-wrap">
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Session</th>
+                        <th>Project</th>
+                        <th>Date</th>
+                        <th>Tool Calls</th>
+                        <th>Unique Tools</th>
+                        <th>Input</th>
+                        <th>Output</th>
+                        <th>Cache Rd.</th>
+                        <th style="width:80px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in sess_rows %}
+                    <tr>
+                        <td style="white-space:nowrap;">
+                            <a href="/sessions/{{ row.session_id }}" class="mono accent-text" style="font-size:11px;text-decoration:none;">{{ row.session_id[:8] }}…</a>
+                        </td>
+                        <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;" title="{{ row.project_name or '' }}">{{ row.project_name or '—' }}</td>
+                        <td class="mono dimmer" style="font-size:11px;white-space:nowrap;">{{ row.session_date or '—' }}</td>
+                        <td><span class="tool-badge">{{ row.tool_calls }}</span></td>
+                        <td class="mono dimmer" style="text-align:center;">{{ row.unique_tools }}</td>
+                        <td class="mono accent-text">{{ "{:,}".format(row.input_tokens or 0) }}</td>
+                        <td class="mono green-text">{{ "{:,}".format(row.output_tokens or 0) }}</td>
+                        <td class="mono" style="color:var(--purple);">{{ "{:,}".format(row.cache_read_tokens or 0) }}</td>
+                        <td style="text-align:right;">
+                            <a href="/tools/session/{{ row.session_id }}" class="tbl-btn explore" style="font-size:10px;padding:3px 8px;">analyse ↗</a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="9"><div class="empty">{% if sess_search %}no sessions matching "{{ sess_search }}"{% else %}no session data{% endif %}</div></td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {{ pagination(sess_pg, '/tools?top_n='~top_n~'&tool_search='~tool_search~'&sess_search='~sess_search~'&proj_search='~proj_search) }}
+        </div><!-- end #sess-table-wrap -->
+    </div>
+</div>
+
+<!-- ── Per-Project Breakdown ── -->
+<div class="section">
+    <div class="section-divider">
+        <span class="section-divider-title">Per Project Breakdown</span>
+        <div class="section-divider-line"></div>
+    </div>
+    <div class="card">
+        <div class="tbl-toolbar">
+            <div class="tbl-search-wrap">
+                <span class="tbl-search-icon">⌕</span>
+                <input type="text" name="proj_search" id="proj-search"
+                       class="tbl-search-input" value="{{ proj_search }}"
+                       placeholder="search project name…"
+                       hx-get="/tools"
+                       hx-target="#proj-table-wrap"
+                       hx-trigger="keyup changed delay:400ms"
+                       hx-vals='{"top_n": "{{ top_n }}", "tool_search": "{{ tool_search }}", "sess_search": "{{ sess_search }}", "proj_page": "1"}'
+                       autocomplete="off">
+            </div>
+            {% if proj_search %}
+            <a href="/tools?top_n={{ top_n }}&tool_search={{ tool_search }}&sess_search={{ sess_search }}"
+               class="tbl-btn clear">clear ✕</a>
+            {% endif %}
+        </div>
+        <div id="proj-table-wrap">
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Project</th>
+                        <th>Sessions</th>
+                        <th>Tool Calls</th>
+                        <th>Unique Tools</th>
+                        <th>Input</th>
+                        <th>Output</th>
+                        <th>Cache Rd.</th>
+                        <th style="width:80px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in proj_rows %}
+                    <tr>
+                        <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;" title="{{ row.project_name or '' }}">{{ row.project_name or '—' }}</td>
+                        <td class="mono accent-text">{{ row.session_count }}</td>
+                        <td><span class="tool-badge">{{ row.tool_calls }}</span></td>
+                        <td class="mono dimmer" style="text-align:center;">{{ row.unique_tools }}</td>
+                        <td class="mono accent-text">{{ "{:,}".format(row.input_tokens or 0) }}</td>
+                        <td class="mono green-text">{{ "{:,}".format(row.output_tokens or 0) }}</td>
+                        <td class="mono" style="color:var(--purple);">{{ "{:,}".format(row.cache_read_tokens or 0) }}</td>
+                        <td style="text-align:right;">
+                            <a href="/tools/project/{{ row.project_id }}" class="tbl-btn explore" style="font-size:10px;padding:3px 8px;">analyse ↗</a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="8"><div class="empty">{% if proj_search %}no projects matching "{{ proj_search }}"{% else %}no project data{% endif %}</div></td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {{ pagination(proj_pg, '/tools?top_n='~top_n~'&tool_search='~tool_search~'&sess_search='~sess_search~'&proj_search='~proj_search) }}
+        </div><!-- end #proj-table-wrap -->
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script><script src="/static/js/analytics/tools.js"></script>{% endblock %}

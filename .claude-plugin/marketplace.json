@@ -1,0 +1,16 @@
+{
+  "name": "claude-telemetry",
+  "owner": {
+    "name": "CloudByte-AI"
+  },
+  "plugins": [
+    {
+      "name": "CloudByte",
+      "source": {
+        "source": "github",
+        "repo": "CloudByte-AI/claude-telemetry"
+      },
+      "description": "CloudByte Plugin for Your Project Management & Tracking System"
+    }
+  ]
+}

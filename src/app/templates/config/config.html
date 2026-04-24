@@ -1,0 +1,210 @@
+{% extends "base/index.html" %}
+{% block title %}Configuration — CloudByte{% endblock %}
+{% block breadcrumb %}configuration{% endblock %}
+
+{% block head %}<link rel="stylesheet" href="/static/css/config/config.css">{% endblock %}
+
+{% block content %}
+
+<!-- Page header -->
+<div class="section" style="display:flex;align-items:center;justify-content:space-between;">
+    <div>
+        <div style="font-size:20px;font-weight:500;margin-bottom:4px;">Configuration</div>
+        <div class="dimmer mono" style="font-size:11px;">
+            {% if config_exists %}
+                loaded from ~/.cloudbyte/config.json
+            {% else %}
+                no config file found · defaults shown · file created on first save
+            {% endif %}
+        </div>
+    </div>
+    {% if not config_exists %}
+        <span class="badge badge-amber">not configured</span>
+    {% elif api_key_set %}
+        <span class="badge badge-green">configured</span>
+    {% else %}
+        <span class="badge badge-amber">api key missing</span>
+    {% endif %}
+</div>
+
+<!-- Save feedback -->
+{% if save_message %}
+<div class="save-alert {% if save_success %}{% if 'warning' in save_message.lower() or 'without' in save_message.lower() %}warning{% else %}success{% endif %}{% else %}error{% endif %} section">
+    <span class="save-alert-icon">{% if save_success %}{% if 'without' in save_message.lower() %}⚠{% else %}✓{% endif %}{% else %}✗{% endif %}</span>
+    {{ save_message }}
+</div>
+{% endif %}
+
+<!-- Feature warning — shown when features enabled but key missing -->
+{% if feature_warning %}
+<div class="save-alert warning section">
+    <span class="save-alert-icon">⚠</span>
+    Features are currently enabled in config but no valid API key is set —
+    observations will not work until you provide a real API key below.
+</div>
+{% endif %}
+
+<form method="post" action="/config" id="config-form" data-api-set="{{ 'true' if api_key_set else 'false' }}">
+
+    <!-- ── Features ── -->
+    <div class="config-section section">
+        <div class="config-section-header">
+            <div>
+                <div class="config-section-title"><span class="config-section-icon">◉</span>Features</div>
+                <div class="config-section-sub">Enable AI-powered observation extraction</div>
+            </div>
+            {% if not api_key_set %}
+            <span class="status-pill missing">○ set API key to use features</span>
+            {% else %}
+            <span class="status-pill ready">● API key set</span>
+            {% endif %}
+        </div>
+        <div class="config-section-body">
+
+            <div class="toggle-row">
+                <div class="toggle-info">
+                    <div class="toggle-label">Observations</div>
+                    <div class="toggle-desc">Automatically extract and store observations from conversations using LLM analysis</div>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="obs-cb"
+                           {% if settings.enable_observations %}checked{% endif %}
+                           onchange="syncToggle('obs-cb','enable_observations')">
+                    <input type="hidden" name="enable_observations" id="enable_observations"
+                           value="{{ '1' if settings.enable_observations else '0' }}">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+
+
+        </div>
+    </div>
+
+    <!-- ── LLM Provider ── -->
+    <div class="config-section section">
+        <div class="config-section-header">
+            <div>
+                <div class="config-section-title"><span class="config-section-icon">◈</span>LLM Provider</div>
+                <div class="config-section-sub">Model used for observation extraction</div>
+            </div>
+            {% if api_key_set %}
+            <span class="status-pill ready">● API key set</span>
+            {% else %}
+            <span class="status-pill missing">○ API key required</span>
+            {% endif %}
+        </div>
+        <div class="config-section-body">
+            <div class="field-grid">
+
+                <!-- Provider — plain text, shows whatever is in the file -->
+                <div class="field-group">
+                    <label class="field-label">Provider</label>
+                    <input type="text" name="provider" class="field-input"
+                           value="{{ endpoint.provider or '' }}"
+                           placeholder="e.g. gemini/gemini-api">
+                    <div class="field-hint">API provider and protocol</div>
+                </div>
+
+                <!-- Model -->
+                <div class="field-group">
+                    <label class="field-label">Model</label>
+                    <input type="text" name="model" class="field-input"
+                           value="{{ endpoint.model or '' }}"
+                           placeholder="e.g. gemini-3-flash-preview">
+                    <div class="field-hint">Model name as expected by the provider</div>
+                </div>
+
+                <!-- API Key — full width -->
+                <div class="field-group field-full">
+                    <label class="field-label">
+                        API Key
+                        {% if api_key_set %}
+                        <span class="field-label-badge set">● set</span>
+                        {% else %}
+                        <span class="field-label-badge unset">○ not set</span>
+                        {% endif %}
+                    </label>
+                    <input type="password" name="api_key" id="api-key-input"
+                           class="field-input {% if not api_key_set %}field-input-required{% endif %}"
+                           placeholder="{% if api_key_set %}Enter new key to replace existing{% else %}Enter your API key{% endif %}"
+                           autocomplete="off">
+                    <div class="field-hint">
+                        Stored in ~/.cloudbyte/config.json · leave blank to keep existing key
+                    </div>
+                </div>
+
+                <!-- Temperature — text input, no browser validation -->
+                <div class="field-group">
+                    <label class="field-label">Temperature</label>
+                    <input type="text" name="temperature" class="field-input"
+                           value="{{ endpoint.temperature if endpoint.temperature is not none else '0.7' }}"
+                           placeholder="0.7">
+                    <div class="field-hint">0.0 (focused) → 2.0 (creative)</div>
+                </div>
+
+                <!-- Max tokens — text input, no browser validation -->
+                <div class="field-group">
+                    <label class="field-label">Max Tokens</label>
+                    <input type="text" name="max_tokens" class="field-input"
+                           value="{{ endpoint.max_tokens if endpoint.max_tokens is not none else '4000' }}"
+                           placeholder="4000">
+                    <div class="field-hint">Maximum tokens per LLM response</div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Worker Port ── -->
+    <div class="config-section section">
+        <div class="config-section-header">
+            <div>
+                <div class="config-section-title"><span class="config-section-icon">⚙</span>Worker Port</div>
+                <div class="config-section-sub">Change only if the default port 8765 is already in use</div>
+            </div>
+        </div>
+        <div class="config-section-body">
+
+            <div class="port-warning">
+                <span class="port-warning-icon">⚠</span>
+                <div>
+                    <div style="font-weight:600;margin-bottom:2px;">Restart required after changing port</div>
+                    <div style="font-size:12px;color:var(--text2);">
+                        If you change the port, Claude Code must be restarted for the new port to take effect.
+                        The plugin and dashboard must both use the same port.
+                    </div>
+                </div>
+            </div>
+
+            <div style="margin-top:18px;max-width:240px;">
+                <div class="field-group">
+                    <label class="field-label">Worker Port</label>
+                    <input type="text" name="worker_port" class="field-input"
+                           value="{{ worker.port if worker.port is not none else '8765' }}"
+                           placeholder="8765">
+                    <div class="field-hint">Default: 8765 · Range: 1024 – 65535</div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Save bar -->
+    <div class="save-bar section">
+        <div class="save-bar-note mono dimmer">saved to ~/.cloudbyte/config.json</div>
+        <button type="submit" class="save-btn">save configuration</button>
+    </div>
+
+</form>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function syncToggle(cbId, hiddenId) {
+    var cb     = document.getElementById(cbId);
+    var hidden = document.getElementById(hiddenId);
+    if (hidden) hidden.value = cb.checked ? '1' : '0';
+}
+</script>
+{% endblock %}
