@@ -18,11 +18,11 @@ venv/
 *.pid
 
 # Ignore hooks config (user-specific)
-.claude/hooks.json
+# .claude/hooks.json
 .claude/settings.local.json
 
 # Ignore hooks config (marketplace version is source of truth)
-hooks/hooks.json
+# hooks/hooks.json
 
 # Test and temporary files
 test/
