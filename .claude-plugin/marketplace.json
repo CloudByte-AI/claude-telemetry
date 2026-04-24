@@ -5,7 +5,7 @@
   },
   "plugins": [
     {
-      "name": "CloudByte",
+      "name": "claude-telemetry",
       "source": {
         "source": "github",
         "repo": "CloudByte-AI/claude-telemetry"
