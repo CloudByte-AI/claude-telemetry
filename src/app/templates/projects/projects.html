@@ -7,93 +7,61 @@
 {% block content %}
 
 <!-- Page header -->
-<div class="section" style="display:flex;align-items:center;justify-content:space-between;">
-    <div>
-        <div style="font-size:20px;font-weight:500;margin-bottom:4px;">Projects</div>
-        <div class="dimmer mono" style="font-size:11px;">
-            {{ projects|length }} project{{ 's' if projects|length != 1 }} tracked
-        </div>
+<div class="section" style="margin-bottom: 40px; padding-top: 10px;">
+    <h1 style="font-size: 54px; font-weight: 400; color: var(--text); line-height: 1.0; letter-spacing: -0.05em;">Projects</h1>
+    <div class="dimmer" style="font-size: 16px; margin-top: 12px; font-weight: 400; letter-spacing: -0.02em;">
+        {{ projects|length }} active workspace{{ 's' if projects|length != 1 }} monitored
     </div>
 </div>
 
 <!-- Project cards grid -->
-<div class="projects-grid section">
+<div class="grid-3 section">
     {% for p in projects %}
-    <div class="project-card">
-
-        <!-- Card top accent line (green) -->
-        <div class="project-card-accent"></div>
-
-        <div class="project-card-body">
-
-            <!-- Name + ID + sessions button on same row -->
-            <div class="project-name-row">
-                <div style="min-width:0;flex:1;">
-                    <div class="project-name" title="{{ p.name or 'Unnamed' }}">{{ p.name or 'Unnamed' }}</div>
-                    <span class="project-id-badge">{{ p.project_id[:8] }}…</span>
+    {% set proj_name = (p.path|replace('\\', '/') if p.path else '').split('/')|last or p.name or 'Unnamed' %}
+    <div class="card" style="display:flex; flex-direction:column; height:100%; transition:transform 0.2s; border:1px solid var(--border); background:var(--bg-surface);">
+        <div style="padding:28px; flex:1;">
+            <div style="margin-bottom:24px;">
+                <h3 style="font-size:24px; font-weight:400; color:var(--text); margin-bottom:8px; letter-spacing:-0.04em;">{{ proj_name }}</h3>
+                <div class="mono" style="font-size:10px; color:var(--text-dim); background:var(--bg-alt); padding:8px 12px; border-radius:0px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; border:1px solid var(--border);" title="{{ p.path or '' }}">
+                    {{ p.path or 'No path registered' }}
                 </div>
-                <a href="/sessions?project={{ p.project_id }}" class="project-btn primary" style="flex-shrink:0;align-self:flex-start;">
-                    {{ p.session_count }} session{{ 's' if p.session_count != 1 }} →
-                </a>
             </div>
 
-            <!-- Path -->
-            <div class="project-path" title="{{ p.path or '' }}">
-                {{ p.path or '—' }}
-            </div>
-
-            <!-- Stats grid: 4 metrics -->
-            <div class="project-stats-grid">
-                <div class="project-stat">
-                    <div class="project-stat-val accent-text">{{ p.session_count }}</div>
-                    <div class="project-stat-label">sessions</div>
+            <div style="display:flex; gap:1px; background:var(--border); border-radius:0px; overflow:hidden; border:1px solid var(--border); margin-bottom:20px;">
+                <div style="flex:1; background:var(--bg-alt); padding:14px 10px; display:flex; flex-direction:column; align-items:center; gap:2px;">
+                    <span style="font-size:16px; font-weight:700; color:var(--text);">{{ p.session_count }}</span>
+                    <span style="font-size:8px; text-transform:uppercase; color:var(--text-dim); letter-spacing:0.5px; font-weight:700;">sessions</span>
                 </div>
-                <div class="project-stat">
-                    <div class="project-stat-val green-text">{{ p.prompt_count }}</div>
-                    <div class="project-stat-label">prompts</div>
+                <div style="flex:1; background:var(--bg-alt); padding:14px 10px; display:flex; flex-direction:column; align-items:center; gap:2px;">
+                    <span style="font-size:16px; font-weight:700; color:var(--accent);">{{ p.prompt_count }}</span>
+                    <span style="font-size:8px; text-transform:uppercase; color:var(--text-dim); letter-spacing:0.5px; font-weight:700;">prompts</span>
                 </div>
-                <div class="project-stat">
-                    <div class="project-stat-val amber-text">{{ p.tool_count }}</div>
-                    <div class="project-stat-label">tool calls</div>
-                </div>
-                <div class="project-stat">
-                    <div class="project-stat-val" style="color:var(--purple);">
+                <div style="flex:1; background:var(--bg-alt); padding:14px 10px; display:flex; flex-direction:column; align-items:center; gap:2px;">
+                    <span style="font-size:16px; font-weight:700; color:var(--text);">
                         {% set v = p.io_tokens or 0 %}
                         {% if v >= 1000000 %}{{ "%.1f"|format(v/1000000) }}M
                         {% elif v >= 1000 %}{{ "%.1f"|format(v/1000) }}K
                         {% else %}{{ v }}{% endif %}
-                    </div>
-                    <div class="project-stat-label">IO tokens</div>
+                    </span>
+                    <span style="font-size:8px; text-transform:uppercase; color:var(--text-dim); letter-spacing:0.5px; font-weight:700;">tokens</span>
                 </div>
             </div>
 
-            <!-- Meta row: tools + last session -->
-            <div class="project-meta-row">
-                <span class="project-meta-item">
-                    <span class="project-meta-dot" style="background:var(--amber);"></span>
-                    {{ p.unique_tools or 0 }} tool type{{ 's' if (p.unique_tools or 0) != 1 }}
-                </span>
-                <span class="project-meta-item">
-                    <span class="project-meta-dot" style="background:var(--green);"></span>
-                    last active {{ p.last_session or 'never' }}
-                </span>
+            <div class="dimmer mono" style="font-size:10px; opacity:0.7;">
+                Last active {{ p.last_session[:10] if p.last_session else 'Never' }}
             </div>
+        </div>
 
-            <!-- Analysis buttons side by side with icons -->
-            <div class="project-actions">
-                <a href="/tokens/project/{{ p.project_id }}" class="project-btn token">
-                    ◈ token analysis ↗
-                </a>
-                <a href="/tools/project/{{ p.project_id }}" class="project-btn tool">
-                    ⚙ tool analysis ↗
-                </a>
-            </div>
-
+        <div style="display:flex; border-top:1px solid var(--border); background:var(--bg-alt);">
+            <a href="/sessions?project={{ p.project_id }}" class="proj-btn">VIEW SESSIONS</a>
+            <a href="/tokens/project/{{ p.project_id }}" class="proj-btn" style="color:var(--text-muted);">ANALYTICS</a>
         </div>
     </div>
     {% else %}
-    <div style="grid-column:1/-1;">
-        <div class="card"><div class="empty">no projects found</div></div>
+    <div style="grid-column: 1 / -1;">
+        <div class="card card-body" style="text-align: center; padding: 48px;">
+            <div class="dimmer">No projects tracked yet.</div>
+        </div>
     </div>
     {% endfor %}
 </div>

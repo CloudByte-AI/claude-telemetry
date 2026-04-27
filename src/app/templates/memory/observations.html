@@ -1,6 +1,6 @@
 {% extends "base/index.html" %}
-{% block title %}Observations — CloudByte{% endblock %}
-{% block breadcrumb %}observations{% endblock %}
+{% block title %}Intelligence Memory · Observations — CloudByte{% endblock %}
+{% block breadcrumb %}intelligence / memory / observations{% endblock %}
 
 {% block head %}
 <link rel="stylesheet" href="/static/css/memory/observations.css">
@@ -9,228 +9,139 @@
 {% block content %}
 
 <!-- Chart data -->
-<div id="bubble-data" style="display:none;"
-     data-datasets="{{ bubble_datasets | tojson | forceescape }}"
-     data-x-labels="{{ bubble_x_labels | tojson | forceescape }}"
-     data-y-labels="{{ bubble_y_labels | tojson | forceescape }}">
+<div id="chart-data" style="display:none;"
+     data-timeline-labels="{{ timeline_labels | tojson | forceescape }}"
+     data-timeline-values="{{ timeline_values | tojson | forceescape }}"
+     data-donut-labels="{{ donut_labels | tojson | forceescape }}"
+     data-donut-values="{{ donut_values | tojson | forceescape }}">
 </div>
 
 <!-- Page header -->
-<div class="section" style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">
-    <div>
-        <div style="font-size:20px;font-weight:500;margin-bottom:6px;">Observations</div>
-        <div class="dimmer mono" style="font-size:11px;">
-            LLM-extracted insights · {{ total }} observation{{ 's' if total != 1 }}
-            {% if type_filter %} · filtered by {{ type_meta[type_filter].label if type_filter in type_meta else type_filter }}{% endif %}
-        </div>
-    </div>
-    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex-shrink:0;">
-        <!-- Date filter — top right, applies to chart + list -->
-        <div style="display:flex;align-items:center;gap:6px;flex-wrap:nowrap;">
-            <span class="dimmer mono" style="font-size:10px;">from</span>
-            <input type="date" id="obs-date-from" class="obs-date-input"
-                   value="{{ date_from }}" name="date_from"
-                   style="color-scheme:light dark;">
-            <span class="dimmer mono" style="font-size:10px;">to</span>
-            <input type="date" id="obs-date-to" class="obs-date-input"
-                   value="{{ date_to }}" name="date_to"
-                   style="color-scheme:light dark;">
-            <button type="button" class="obs-apply-btn" onclick="applyDates()">apply →</button>
-            <button type="button" class="obs-clear-date" id="obs-clear-btn"
-                    onclick="clearDates()"
-                    data-active="{{ 'true' if (date_from or date_to) else 'false' }}">clear ✕</button>
-        </div>
-    </div>
-</div>
-
-<!-- Bubble chart — sessions × types -->
-{% if bubble_datasets %}
-<div class="card section">
-    <div style="padding:14px 18px 10px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid var(--border);">
+<div class="section" style="margin-bottom: 32px; padding-top: 10px;">
+    <div style="display:flex; justify-content:space-between; align-items:flex-end;">
         <div>
-            <span style="font-size:13px;font-weight:500;color:var(--text);">Observation Distribution</span>
-            <span class="dimmer mono" style="font-size:11px;margin-left:10px;">sessions × type · bubble size = count</span>
+            <div style="font-size:10px; font-weight:800; color:var(--amber); text-transform:uppercase; letter-spacing:0.12em; margin-bottom:8px;">Semantic Intelligence</div>
+            <h1 style="font-size: 48px; font-weight: 400; color: var(--text); line-height: 1.0; letter-spacing: -0.05em; margin:0;">Observations</h1>
         </div>
-    </div>
-    <div style="padding:16px 18px;height:220px;position:relative;">
-        <canvas id="bubble-chart"></canvas>
+        
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <div class="dr-pills" style="position:relative; display:flex;">
+                <input type="date" id="obs-date-from" class="date-input-hidden" value="{{ date_from }}" name="date_from" 
+                       onchange="applyFilters()" style="position:absolute; visibility:hidden; width:1px; height:1px;">
+                <input type="date" id="obs-date-to" class="date-input-hidden" value="{{ date_to }}" name="date_to" 
+                       onchange="applyFilters()" style="position:absolute; visibility:hidden; width:1px; height:1px;">
+                
+                <button type="button" class="tbl-btn" onclick="document.getElementById('obs-date-from').showPicker()" style="border-right:0;">
+                    {% if date_from %}{{ date_from }}{% else %}START DATE{% endif %}
+                </button>
+                <button type="button" class="tbl-btn" onclick="document.getElementById('obs-date-to').showPicker()">
+                    {% if date_to %}{{ date_to }}{% else %}END DATE{% endif %}
+                </button>
+            </div>
+            <button type="button" class="tbl-btn" onclick="applyFilters()" style="background:#fe4c02; border-color:#fe4c02; color:#fff;">REFRESH ↗</button>
+            {% if date_from or date_to %}
+            <button type="button" class="tbl-btn" onclick="clearDates()" style="color: var(--red); border-color: var(--red); background:transparent;">CLEAR</button>
+            {% endif %}
+        </div>
     </div>
 </div>
-{% endif %}
 
-<!-- Filter bar -->
+<!-- High-Density Analytics Row -->
+<div class="section" style="display:grid; grid-template-columns: 2fr 1fr 1fr; gap:1px; background:var(--border); border:1px solid var(--border); margin-bottom: 32px;">
+    <!-- Timeline Chart -->
+    <div style="background:var(--bg-surface); padding:24px;">
+        <div style="font-size:10px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:16px;">Discovery Timeline</div>
+        <div style="height:140px; position:relative;">
+            <canvas id="timeline-chart"></canvas>
+        </div>
+    </div>
+    <!-- Donut Chart -->
+    <div style="background:var(--bg-surface); padding:24px; border-left:1px solid var(--border);">
+        <div style="font-size:10px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:16px;">Category Mix</div>
+        <div style="height:140px; position:relative; display:flex; align-items:center; justify-content:center;">
+            <canvas id="donut-chart"></canvas>
+            <div id="donut-center" style="position:absolute; text-align:center; pointer-events:none;">
+                <div style="font-size:24px; font-weight:400; color:var(--text);">{{ total }}</div>
+                <div style="font-size:8px; font-weight:800; color:var(--text-dim); text-transform:uppercase;">Insights</div>
+            </div>
+        </div>
+    </div>
+    <!-- Billboard Stats -->
+    <div style="background:var(--bg-surface); padding:24px; border-left:1px solid var(--border); display:flex; flex-direction:column; justify-content:center;">
+        <div style="margin-bottom:20px;">
+            <div style="font-size:9px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:4px;">Avg Density</div>
+            <div style="font-size:32px; font-weight:400; color:#fe4c02; line-height:1; letter-spacing:-0.04em;">
+                {% if session_task_counts|length > 0 %}{{ "%.1f"|format(total / session_task_counts|length) }}{% else %}0{% endif %}
+            </div>
+        </div>
+        <div>
+            <div style="font-size:9px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:4px;">Unique Contexts</div>
+            <div style="font-size:32px; font-weight:400; color:var(--text); line-height:1; letter-spacing:-0.04em;">{{ session_task_counts|length }}</div>
+        </div>
+    </div>
+</div>
+
+<!-- Filters and List -->
 <div class="section">
-    <div class="obs-filter-bar">
+    <div class="filter-panel card" style="background:var(--bg-alt); border-bottom:0;">
+        <div class="card-body" style="padding: 16px; display: flex; align-items: center; gap: 20px;">
+            <div class="search-wrap" style="flex: 1; max-width: 400px; position:relative;">
+                <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="position:absolute; left:12px; top:50%; transform:translateY(-50%); width:14px;height:14px; color:var(--text-dim);">
+                    <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+                </svg>
+                <input type="text" id="obs-search" class="search-input"
+                       style="width:100%; padding:10px 10px 10px 38px; background:var(--bg-surface); border:1px solid var(--border); border-radius:0px; font-family:'IBM Plex Mono'; font-size:12px; font-weight:500;"
+                       value="{{ search }}"
+                       placeholder="Search insights or session IDs..."
+                       hx-get="/observations"
+                       hx-trigger="keyup changed delay:400ms"
+                       hx-target="#obs-content"
+                       name="search">
+            </div>
 
-        <!-- Search — HTMX -->
-        <div class="obs-search-wrap" style="max-width:180px;">
-            <span class="obs-search-icon">⌕</span>
-            <input type="text" id="obs-search" class="obs-search-input"
-                   value="{{ search }}"
-                   placeholder="search title, session id, project…"
-                   autocomplete="off"
-                   hx-get="/observations"
-                   hx-trigger="keyup changed delay:400ms"
-                   hx-target="#obs-content"
-                   hx-include="#obs-search,#hidden-type"
-                   name="search">
+            <div class="type-pills">
+                <button type="button" class="type-pill {% if not type_filter %}active{% endif %}" onclick="setType('')">
+                    All ({{ total }})
+                </button>
+                {% for t in all_types %}{% set cnt = type_counts.get(t,0) %}{% if cnt > 0 %}
+                <button type="button" class="type-pill {% if type_filter == t %}active{% endif %}" onclick="setType('{{ t }}')">
+                    {{ type_meta[t].label }} ({{ cnt }})
+                </button>
+                {% endif %}{% endfor %}
+            </div>
         </div>
-
-        <!-- Hidden state input for type filter (HTMX) -->
-        <input type="hidden" id="hidden-type" name="type_filter" value="{{ type_filter }}">
-
-        <!-- Type pills — HTMX toggle -->
-        <div class="type-pills">
-            <button type="button"
-                    class="type-pill all {% if not type_filter %}active{% endif %}"
-                    onclick="setType('')">
-                all <span class="type-pill-count">{{ total }}</span>
-            </button>
-            {% for t in all_types %}{% set cnt = type_counts.get(t,0) %}{% if cnt > 0 %}
-            <button type="button"
-                    class="type-pill {{ type_meta[t].color }} {% if type_filter == t %}active{% endif %}"
-                    onclick="setType('{{ t }}')">
-                {{ type_meta[t].icon }} {{ type_meta[t].label }}
-                <span class="type-pill-count">{{ cnt }}</span>
-            </button>
-            {% endif %}{% endfor %}
-        </div>
-
     </div>
 
-    <!-- Active filter chips -->
-    {% if search or type_filter or date_from or date_to %}
-    <div class="obs-active-filters">
-        {% if search %}
-        <span class="obs-active-chip">search: "{{ search }}" <button onclick="clearSearch()">✕</button></span>
-        {% endif %}
-        {% if type_filter and type_filter in type_meta %}
-        <span class="obs-active-chip">type: {{ type_meta[type_filter].label }} <button onclick="setType('')">✕</button></span>
-        {% endif %}
-        {% if date_from or date_to %}
-        <span class="obs-active-chip">date: {{ date_from or '…' }} → {{ date_to or '…' }} <button onclick="clearDates()">✕</button></span>
-        {% endif %}
-    </div>
-    {% endif %}
+    <!-- Hidden state input for type filter (HTMX) -->
+    <input type="hidden" id="hidden-type" name="type_filter" value="{{ type_filter }}">
 
-    <!-- HTMX target for list + pagination -->
+    <!-- HTMX target for list -->
     <div id="obs-content">
         {% include "memory/_obs_content.html" %}
     </div>
-
 </div>
 
 {% endblock %}
 
 {% block scripts %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="/static/js/analytics/observations.js"></script>
 <script>
-(function () {
-    /* ── Bubble chart ── */
-    var el = document.getElementById('bubble-data');
-    if (!el) return;
-    var datasets = JSON.parse(el.getAttribute('data-datasets') || '[]');
-    var xLabels  = JSON.parse(el.getAttribute('data-x-labels') || '[]');
-    var yLabels  = JSON.parse(el.getAttribute('data-y-labels') || '[]');
-
-    if (!datasets.length) return;
-
-    Chart.defaults.font.family = "'IBM Plex Mono', monospace";
-    Chart.defaults.color       = '#7a9ab8';
-
-    new Chart(document.getElementById('bubble-chart'), {
-        type: 'bubble',
-        data: { datasets: datasets },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            onClick: function(evt, elements) {
-                if (elements.length > 0) {
-                    var pt = elements[0];
-                    var sid = datasets[pt.datasetIndex].data[pt.index].session;
-                    if (sid) {
-                        document.getElementById('obs-search').value = sid.replace('…','');
-                        htmx.trigger('#obs-search', 'keyup');
-                    }
-                }
-            },
-            onHover: function(evt, elements) {
-                evt.native.target.style.cursor = elements.length ? 'pointer' : 'default';
-            },
-            plugins: {
-                legend: { display: true, position: 'bottom', labels: { boxWidth: 10, boxHeight: 10, padding: 14, font: { size: 11 } } },
-                tooltip: {
-                    callbacks: {
-                        label: function(ctx) {
-                            var d = ctx.raw;
-                            return [
-                                ' ' + ctx.dataset.label,
-                                ' session: ' + d.session,
-                                ' project: ' + d.project,
-                                ' count: ' + d.count
-                            ];
-                        }
-                    }
-                }
-            },
-            scales: {
-                x: {
-                    type: 'linear',
-                    ticks: { stepSize: 1, callback: function(v) { return xLabels[v] || ''; }, font: { size: 10 } },
-                    grid: { color: 'rgba(255,255,255,0.04)' }
-                },
-                y: {
-                    type: 'linear',
-                    min: -0.5,
-                    max: yLabels.length - 0.5,
-                    ticks: { stepSize: 1, callback: function(v) { return yLabels[Math.round(v)] || ''; }, font: { size: 11 } },
-                    grid: { color: 'rgba(255,255,255,0.04)' }
-                }
-            }
-        }
-    });
-}());
-
-/* ── Type pill toggle — HTMX ── */
+/* ── Filter Actions ── */
 function setType(t) {
     var hidden = document.getElementById('hidden-type');
-    var current = hidden.value;
-    // Toggle: clicking active type deselects it
-    hidden.value = (current === t) ? '' : t;
-
-    // Update pill active states
-    document.querySelectorAll('.type-pill').forEach(function(p) {
-        p.classList.remove('active');
-    });
-    var target = hidden.value;
-    document.querySelectorAll('.type-pill').forEach(function(p) {
-        var onclick = p.getAttribute('onclick') || '';
-        if (target === '' && onclick.includes("setType('')")) p.classList.add('active');
-        if (target && onclick.includes("'" + target + "'")) p.classList.add('active');
-    });
-
-    htmx.ajax('GET', '/observations', {
-        target: '#obs-content',
-        values: {
-            search:      document.getElementById('obs-search').value,
-            type_filter: hidden.value,
-            date_from:   document.getElementById('obs-date-from').value,
-            date_to:     document.getElementById('obs-date-to').value,
-        }
-    });
+    hidden.value = (hidden.value === t) ? '' : t;
+    applyFilters();
 }
 
-function clearSearch() {
-    document.getElementById('obs-search').value = '';
-    htmx.trigger('#obs-search', 'keyup');
-}
-
-function applyDates() {
+function applyFilters() {
     var df = document.getElementById('obs-date-from').value;
     var dt = document.getElementById('obs-date-to').value;
     var s  = document.getElementById('obs-search').value;
     var tf = document.getElementById('hidden-type').value;
-    // Full page reload — chart and list both re-render with date-filtered data
+    
+    // For now, full reload ensures charts sync with list. 
+    // Optimization: HTMX trigger for list + partial for charts.
     window.location.href = '/observations?search=' + encodeURIComponent(s)
         + '&type_filter=' + encodeURIComponent(tf)
         + '&date_from=' + encodeURIComponent(df)
@@ -240,29 +151,7 @@ function applyDates() {
 function clearDates() {
     document.getElementById('obs-date-from').value = '';
     document.getElementById('obs-date-to').value   = '';
-    var btn = document.getElementById('obs-clear-btn');
-    if (btn) btn.style.display = 'none';
-    window.location.href = '/observations?search='
-        + encodeURIComponent(document.getElementById('obs-search').value)
-        + '&type_filter='
-        + encodeURIComponent(document.getElementById('hidden-type').value);
+    applyFilters();
 }
-
-// Set initial clear button visibility from server-rendered data attribute
-document.addEventListener('DOMContentLoaded', function() {
-    var btn = document.getElementById('obs-clear-btn');
-    if (btn) {
-        btn.style.display = btn.getAttribute('data-active') === 'true' ? 'inline-flex' : 'none';
-    }
-    ['obs-date-from','obs-date-to'].forEach(function(id) {
-        var el = document.getElementById(id);
-        if (el) el.addEventListener('change', function() {
-            var b = document.getElementById('obs-clear-btn');
-            if (b && (document.getElementById('obs-date-from').value || document.getElementById('obs-date-to').value)) {
-                b.style.display = 'inline-flex';
-            }
-        });
-    });
-});
 </script>
 {% endblock %}

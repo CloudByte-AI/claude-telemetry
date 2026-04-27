@@ -69,7 +69,7 @@ def setup() -> None:
         config_file = get_config_file()
         if not config_file.exists():
             default_config = {
-                "version": "0.1.0",
+                "version": "0.1.1",
                 "created_at": datetime.now().isoformat(),
                 "settings": {
                     "log_level": "INFO",

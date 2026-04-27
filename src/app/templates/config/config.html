@@ -1,198 +1,124 @@
 {% extends "base/index.html" %}
-{% block title %}Configuration — CloudByte{% endblock %}
-{% block breadcrumb %}configuration{% endblock %}
+{% block title %}System Configuration — CloudByte{% endblock %}
+{% block breadcrumb %}system / configuration{% endblock %}
 
-{% block head %}<link rel="stylesheet" href="/static/css/config/config.css">{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="/static/css/config/config.css">
+{% endblock %}
 
 {% block content %}
-
 <!-- Page header -->
-<div class="section" style="display:flex;align-items:center;justify-content:space-between;">
-    <div>
-        <div style="font-size:20px;font-weight:500;margin-bottom:4px;">Configuration</div>
-        <div class="dimmer mono" style="font-size:11px;">
-            {% if config_exists %}
-                loaded from ~/.cloudbyte/config.json
+<div class="section" style="margin-bottom: 48px; padding-top: 10px;">
+    <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:24px;">
+        <div>
+            <div style="font-size:10px; font-weight:800; color:var(--amber); text-transform:uppercase; letter-spacing:0.12em; margin-bottom:8px;">Root Administration</div>
+            <h1 style="font-size: 54px; font-weight: 400; color: var(--text); line-height: 1.0; letter-spacing: -0.05em; margin:0;">System Config</h1>
+        </div>
+        
+        <div style="display: flex; align-items: center; gap: 8px;">
+            {% if not config_exists %}
+                <span class="badge" style="color: var(--amber); border-color: var(--amber); border-radius:0px;">UNINITIALIZED</span>
+            {% elif api_key_set %}
+                <span class="badge" style="color: #fe4c02; border-color: #fe4c02; border-radius:0px;">ENGINE READY</span>
             {% else %}
-                no config file found · defaults shown · file created on first save
+                <span class="badge" style="color: var(--amber); border-color: var(--amber); border-radius:0px;">AUTH REQUIRED</span>
             {% endif %}
         </div>
     </div>
-    {% if not config_exists %}
-        <span class="badge badge-amber">not configured</span>
-    {% elif api_key_set %}
-        <span class="badge badge-green">configured</span>
-    {% else %}
-        <span class="badge badge-amber">api key missing</span>
-    {% endif %}
-</div>
 
-<!-- Save feedback -->
-{% if save_message %}
-<div class="save-alert {% if save_success %}{% if 'warning' in save_message.lower() or 'without' in save_message.lower() %}warning{% else %}success{% endif %}{% else %}error{% endif %} section">
-    <span class="save-alert-icon">{% if save_success %}{% if 'without' in save_message.lower() %}⚠{% else %}✓{% endif %}{% else %}✗{% endif %}</span>
-    {{ save_message }}
-</div>
-{% endif %}
-
-<!-- Feature warning — shown when features enabled but key missing -->
-{% if feature_warning %}
-<div class="save-alert warning section">
-    <span class="save-alert-icon">⚠</span>
-    Features are currently enabled in config but no valid API key is set —
-    observations will not work until you provide a real API key below.
-</div>
-{% endif %}
-
-<form method="post" action="/config" id="config-form" data-api-set="{{ 'true' if api_key_set else 'false' }}">
-
-    <!-- ── Features ── -->
-    <div class="config-section section">
-        <div class="config-section-header">
-            <div>
-                <div class="config-section-title"><span class="config-section-icon">◉</span>Features</div>
-                <div class="config-section-sub">Enable AI-powered observation extraction</div>
-            </div>
-            {% if not api_key_set %}
-            <span class="status-pill missing">○ set API key to use features</span>
-            {% else %}
-            <span class="status-pill ready">● API key set</span>
-            {% endif %}
+    <!-- Technical Meta Strip -->
+    <div style="display:flex; align-items:center; gap:20px; background:var(--bg-alt); padding:10px 20px; border:1px solid var(--border); width:fit-content;">
+        <div style="display:flex; align-items:center; gap:8px;">
+            <span class="mono dimmer" style="font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:0.05em;">Config Path:</span>
+            <span class="mono" style="font-weight:700; font-size:11px; color:var(--text);">~/.cloudbyte/config.json</span>
         </div>
-        <div class="config-section-body">
+        <div style="width:1px; height:12px; background:var(--border);"></div>
+        <div style="display:flex; align-items:center; gap:8px;">
+            <span class="mono dimmer" style="font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:0.05em;">State:</span>
+            <span class="mono" style="font-weight:700; font-size:11px; color:{% if config_exists %}#fe4c02{% else %}var(--text-dim){% endif %};">
+                {% if config_exists %}Persistence Active{% else %}Transient Defaults{% endif %}
+            </span>
+        </div>
+    </div>
+</div>
 
-            <div class="toggle-row">
-                <div class="toggle-info">
-                    <div class="toggle-label">Observations</div>
-                    <div class="toggle-desc">Automatically extract and store observations from conversations using LLM analysis</div>
-                </div>
+<!-- Feedback alerts -->
+{% if save_message %}
+<div class="section" style="margin-bottom: 32px;">
+    <div style="padding: 16px 24px; background: var(--bg-alt); border-left: 4px solid {% if save_success %}#fe4c02{% else %}var(--red){% endif %}; font-family:'IBM Plex Mono'; font-size:12px; font-weight:700; color:var(--text);">
+        {{ '✓' if save_success else '✗' }} {{ save_message | upper }}
+    </div>
+</div>
+{% endif %}
+
+<form method="post" action="/config" id="config-form" class="config-form-container">
+
+    <!-- Features -->
+    <div class="section">
+        <div class="config-section-label">◈ Feature Intelligence</div>
+        <div class="toggle-row">
+            <div class="toggle-info">
+                <div class="toggle-label">Observations Extraction</div>
+                <div style="font-size: 13px; color: var(--text-dim); line-height: 1.4;">Automatically analyze conversations to build memory and project insights.</div>
+            </div>
+            <div style="display:flex; align-items:center; gap:16px;">
+                {% if not api_key_set %}
+                <span class="mono" style="font-size:10px; color:var(--amber); font-weight:800; text-transform:uppercase;">Key required</span>
+                {% endif %}
                 <label class="toggle-switch">
-                    <input type="checkbox" id="obs-cb"
-                           {% if settings.enable_observations %}checked{% endif %}
-                           onchange="syncToggle('obs-cb','enable_observations')">
-                    <input type="hidden" name="enable_observations" id="enable_observations"
-                           value="{{ '1' if settings.enable_observations else '0' }}">
+                    <input type="checkbox" id="obs-cb" {% if settings.enable_observations %}checked{% endif %} onchange="syncToggle('obs-cb','enable_observations')">
+                    <input type="hidden" name="enable_observations" id="enable_observations" value="{{ '1' if settings.enable_observations else '0' }}">
                     <span class="toggle-slider"></span>
                 </label>
             </div>
-
-
         </div>
     </div>
 
-    <!-- ── LLM Provider ── -->
-    <div class="config-section section">
-        <div class="config-section-header">
-            <div>
-                <div class="config-section-title"><span class="config-section-icon">◈</span>LLM Provider</div>
-                <div class="config-section-sub">Model used for observation extraction</div>
+    <!-- Provider -->
+    <div class="section">
+        <div class="config-section-label">◎ LLM Infrastructure</div>
+        <div class="field-grid">
+            <div class="field-group">
+                <label class="field-label">Provider String</label>
+                <input type="text" name="provider" class="field-input" value="{{ endpoint.provider or '' }}" placeholder="gemini/gemini-api">
             </div>
-            {% if api_key_set %}
-            <span class="status-pill ready">● API key set</span>
-            {% else %}
-            <span class="status-pill missing">○ API key required</span>
-            {% endif %}
-        </div>
-        <div class="config-section-body">
-            <div class="field-grid">
-
-                <!-- Provider — plain text, shows whatever is in the file -->
-                <div class="field-group">
-                    <label class="field-label">Provider</label>
-                    <input type="text" name="provider" class="field-input"
-                           value="{{ endpoint.provider or '' }}"
-                           placeholder="e.g. gemini/gemini-api">
-                    <div class="field-hint">API provider and protocol</div>
-                </div>
-
-                <!-- Model -->
-                <div class="field-group">
-                    <label class="field-label">Model</label>
-                    <input type="text" name="model" class="field-input"
-                           value="{{ endpoint.model or '' }}"
-                           placeholder="e.g. gemini-3-flash-preview">
-                    <div class="field-hint">Model name as expected by the provider</div>
-                </div>
-
-                <!-- API Key — full width -->
-                <div class="field-group field-full">
-                    <label class="field-label">
-                        API Key
-                        {% if api_key_set %}
-                        <span class="field-label-badge set">● set</span>
-                        {% else %}
-                        <span class="field-label-badge unset">○ not set</span>
-                        {% endif %}
-                    </label>
-                    <input type="password" name="api_key" id="api-key-input"
-                           class="field-input {% if not api_key_set %}field-input-required{% endif %}"
-                           placeholder="{% if api_key_set %}Enter new key to replace existing{% else %}Enter your API key{% endif %}"
-                           autocomplete="off">
-                    <div class="field-hint">
-                        Stored in ~/.cloudbyte/config.json · leave blank to keep existing key
-                    </div>
-                </div>
-
-                <!-- Temperature — text input, no browser validation -->
-                <div class="field-group">
-                    <label class="field-label">Temperature</label>
-                    <input type="text" name="temperature" class="field-input"
-                           value="{{ endpoint.temperature if endpoint.temperature is not none else '0.7' }}"
-                           placeholder="0.7">
-                    <div class="field-hint">0.0 (focused) → 2.0 (creative)</div>
-                </div>
-
-                <!-- Max tokens — text input, no browser validation -->
-                <div class="field-group">
-                    <label class="field-label">Max Tokens</label>
-                    <input type="text" name="max_tokens" class="field-input"
-                           value="{{ endpoint.max_tokens if endpoint.max_tokens is not none else '4000' }}"
-                           placeholder="4000">
-                    <div class="field-hint">Maximum tokens per LLM response</div>
-                </div>
-
+            <div class="field-group">
+                <label class="field-label">Model Name</label>
+                <input type="text" name="model" class="field-input" value="{{ endpoint.model or '' }}" placeholder="gemini-3-flash-preview">
+            </div>
+            <div class="field-group full-width">
+                <label class="field-label">API Access Key</label>
+                <input type="password" name="api_key" class="field-input" placeholder="{% if api_key_set %}•••••••••••••••• (Encrypted · Leave blank to keep current){% else %}Enter your API key{% endif %}">
+            </div>
+            <div class="field-group">
+                <label class="field-label">Sampling Temperature</label>
+                <input type="text" name="temperature" class="field-input" value="{{ endpoint.temperature if endpoint.temperature is not none else '0.7' }}">
+            </div>
+            <div class="field-group">
+                <label class="field-label">Max Token Ceiling</label>
+                <input type="text" name="max_tokens" class="field-input" value="{{ endpoint.max_tokens if endpoint.max_tokens is not none else '4000' }}">
             </div>
         </div>
     </div>
 
-    <!-- ── Worker Port ── -->
-    <div class="config-section section">
-        <div class="config-section-header">
-            <div>
-                <div class="config-section-title"><span class="config-section-icon">⚙</span>Worker Port</div>
-                <div class="config-section-sub">Change only if the default port 8765 is already in use</div>
+    <!-- System -->
+    <div class="section">
+        <div class="config-section-label">▤ Network & Runtime</div>
+        <div style="display:flex; gap:32px; align-items:flex-start;">
+            <div class="field-group" style="width: 240px;">
+                <label class="field-label">Worker Interface Port</label>
+                <input type="text" name="worker_port" class="field-input" value="{{ worker.port if worker.port is not none else '8765' }}">
             </div>
-        </div>
-        <div class="config-section-body">
-
-            <div class="port-warning">
-                <span class="port-warning-icon">⚠</span>
-                <div>
-                    <div style="font-weight:600;margin-bottom:2px;">Restart required after changing port</div>
-                    <div style="font-size:12px;color:var(--text2);">
-                        If you change the port, Claude Code must be restarted for the new port to take effect.
-                        The plugin and dashboard must both use the same port.
-                    </div>
-                </div>
+            <div style="padding-top:34px;">
+                <div style="font-family:'IBM Plex Mono'; font-size:11px; color:var(--amber); font-weight:700;">⚠ SERVICE RESTART REQUIRED</div>
+                <div style="font-size:11px; color:var(--text-dim); margin-top:4px;">Port changes require a full process recycle to take effect.</div>
             </div>
-
-            <div style="margin-top:18px;max-width:240px;">
-                <div class="field-group">
-                    <label class="field-label">Worker Port</label>
-                    <input type="text" name="worker_port" class="field-input"
-                           value="{{ worker.port if worker.port is not none else '8765' }}"
-                           placeholder="8765">
-                    <div class="field-hint">Default: 8765 · Range: 1024 – 65535</div>
-                </div>
-            </div>
-
         </div>
     </div>
 
-    <!-- Save bar -->
-    <div class="save-bar section">
-        <div class="save-bar-note mono dimmer">saved to ~/.cloudbyte/config.json</div>
-        <button type="submit" class="save-btn">save configuration</button>
+    <!-- Actions -->
+    <div class="section" style="display: flex; justify-content: flex-end; margin-top: 24px; border-top: 1px solid var(--border); padding-top: 32px;">
+        <button type="submit" class="btn-save">SAVE SYSTEM CHANGES ↗</button>
     </div>
 
 </form>

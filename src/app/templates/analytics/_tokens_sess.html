@@ -19,15 +19,18 @@
                 <td style="white-space:nowrap;">
                     <a href="/sessions/{{ row.session_id }}" class="mono accent-text" style="font-size:11px;text-decoration:none;">{{ row.session_id[:8] }}…</a>
                 </td>
-                <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;" title="{{ row.project_name or '' }}">{{ row.project_name or '—' }}</td>
+                <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;" title="{{ row.project_name or row.cwd or '' }}">
+                    {% set raw_p = row.project_name or row.cwd or '—' %}
+                    {{ (raw_p|replace('--', '/')|replace('\\', '/') if raw_p else '').split('/')|last }}
+                </td>
                 <td class="mono dimmer" style="font-size:11px;white-space:nowrap;">{{ row.session_date or '—' }}</td>
                 <td class="mono dimmer" style="text-align:center;">{{ row.turn_count }}</td>
-                <td class="mono accent-text">{{ "{:,}".format(row.io_input or 0) }}</td>
-                <td class="mono green-text">{{ "{:,}".format(row.io_output or 0) }}</td>
-                <td class="mono" style="color:var(--purple);">{{ "{:,}".format(row.io_cache_read or 0) }}</td>
-                <td class="mono amber-text">{{ "{:,}".format(row.io_cache_create or 0) }}</td>
+                <td class="mono" style="color:var(--text); font-weight:700;">{{ "{:,}".format(row.io_input or 0) }}</td>
+                <td class="mono" style="color:#fe4c02; font-weight:600;">{{ "{:,}".format(row.io_output or 0) }}</td>
+                <td class="mono" style="color:#ff6d31; font-weight:500;">{{ "{:,}".format(row.io_cache_read or 0) }}</td>
+                <td class="mono" style="color:#ff8e5f; font-weight:400;">{{ "{:,}".format(row.io_cache_create or 0) }}</td>
                 <td style="text-align:right;">
-                    <a href="/tokens/session/{{ row.session_id }}" class="tbl-btn analyse">analyse ↗</a>
+                    <a href="/tokens/session/{{ row.session_id }}" class="tbl-btn">analyse ↗</a>
                 </td>
             </tr>
             {% else %}

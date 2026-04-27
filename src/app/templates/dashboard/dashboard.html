@@ -9,152 +9,164 @@
 {% block content %}
 
 <!-- Data for JS -->
-<div id="dash-data" style="display:none;"
-     data-proj-labels="{{ proj_labels | tojson | forceescape }}"
-     data-proj-datasets="{{ proj_radar_datasets | tojson | forceescape }}"
-     data-obs-labels="{{ obs_radar_labels | tojson | forceescape }}"
-     data-obs-datasets="{{ obs_radar_datasets | tojson | forceescape }}"
-     data-heat="{{ heat_data_json | tojson | forceescape }}"
-     data-heat-max="{{ heat_max }}"
-     data-heat-months="{{ heat_months | tojson | forceescape }}">
+<div id="dash-data" style="display:none;" data-proj-labels="{{ proj_labels | tojson | forceescape }}"
+    data-proj-datasets="{{ proj_radar_datasets | tojson | forceescape }}"
+    data-obs-labels="{{ obs_radar_labels | tojson | forceescape }}"
+    data-obs-datasets="{{ obs_radar_datasets | tojson | forceescape }}"
+    data-heat="{{ heat_data_json | tojson | forceescape }}" data-heat-max="{{ heat_max }}"
+    data-heat-months="{{ heat_months | tojson | forceescape }}">
 </div>
 <div id="heat-tooltip" class="heat-tooltip">
     <div class="heat-tooltip-date" id="tt-date"></div>
-    <div class="heat-tooltip-val"  id="tt-val"></div>
+    <div class="heat-tooltip-val" id="tt-val"></div>
 </div>
 
 <!-- Page header -->
-<div class="section" style="display:flex;align-items:center;justify-content:space-between;">
-    <div>
-        <div style="font-size:20px;font-weight:500;margin-bottom:4px;">Dashboard</div>
-        <div class="dimmer mono" style="font-size:11px;">CloudByte · Claude Code analytics</div>
+<div class="section" style="margin-bottom: 40px; padding-top: 10px;">
+    <h1 style="font-size: 54px; font-weight: 400; color: var(--text); line-height: 1.0; letter-spacing: -0.05em;">
+        Dashboard</h1>
+    <div class="dimmer" style="font-size: 16px; margin-top: 12px; font-weight: 400; letter-spacing: -0.02em;">Platform
+        Overview & Activity Metrics</div>
+</div>
+
+<!-- Stats Grid -->
+<div class="grid-3 section">
+    <div class="card stat-card">
+        <div class="stat-label">Total Projects</div>
+        <div class="stat-value">{{ stats.total_projects }}</div>
+    </div>
+    <div class="card stat-card">
+        <div class="stat-label">Total Sessions</div>
+        <div class="stat-value">{{ stats.total_sessions }}</div>
+    </div>
+    <div class="card stat-card">
+        <div class="stat-label">Total Prompts</div>
+        <div class="stat-value" style="color:var(--accent);">{{ stats.total_prompts }}</div>
     </div>
 </div>
 
 
 
-<!-- ── GitHub-style Activity Heatmap ── -->
-<div class="gh-heatmap-card section">
-    <div class="gh-heatmap-header">
-        <div>
-            <span class="gh-heatmap-title" id="gh-total-label">— prompts</span>
-            <span class="gh-heatmap-sub" id="gh-year-label"></span>
-        </div>
+<!-- Activity Heatmap -->
+<div class="card section" style="border:none; background:transparent;">
+    <div style="display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:20px;">
+        <div id="gh-total-label"
+            style="font-size:32px; font-weight:400; letter-spacing:-0.04em; color:var(--text); line-height:1.0;">0
+            prompts</div>
+        <div id="gh-year-btns" class="gh-year-btns"></div>
     </div>
-    <!-- Body: grid on left, year buttons on right -->
-    <div style="display:flex;align-items:flex-start;gap:0;">
-        <!-- Scroll area with grid -->
-        <div style="display:flex;align-items:flex-start;flex:1;min-width:0;">
-            <!-- Day labels — outside scroll so never clipped -->
-            <div id="gh-day-labels" style="width:34px;flex-shrink:0;display:flex;flex-direction:column;"></div>
-            <!-- Scrollable grid + month row -->
-            <div class="gh-heatmap-scroll" style="flex:1;min-width:0;">
-                <div class="gh-heatmap-inner">
-                    <div class="gh-month-row" id="gh-month-row"></div>
-                    <div id="gh-grid"></div>
+
+    <div class="card" style="padding:24px 32px; background:var(--bg-surface);">
+        <div class="gh-heatmap-scroll">
+            <div class="gh-heatmap-inner" style="padding:0;">
+                <div style="display:flex;">
+                    <div id="gh-day-labels" class="gh-day-labels" style="padding-top:26px;"></div>
+                    <div style="flex:1;">
+                        <div id="gh-month-row" class="gh-month-row" style="margin-bottom:8px;"></div>
+                        <div id="gh-grid"></div>
+                    </div>
                 </div>
-                <!-- Legend bottom right under grid -->
-                <div class="gh-legend" style="margin-top:10px;justify-content:flex-end;">
-                    <span class="gh-legend-label">less</span>
+                <div class="gh-legend" style="margin-top:24px;">
+                    <span class="gh-legend-label">Less</span>
                     <div id="gh-legend-cells" class="gh-legend-cells"></div>
-                    <span class="gh-legend-label">more</span>
+                    <span class="gh-legend-label">More</span>
                 </div>
             </div>
         </div>
-        <!-- Year buttons stacked on right -->
-        <div class="gh-year-btns" id="gh-year-btns"></div>
     </div>
 </div>
 
-<!-- ── Radar charts row ── -->
-<div class="dash-charts-row section">
-
-    <!-- Project Profile Radar -->
-    <div class="dash-chart-card">
-        <div class="dash-chart-head">
-            <span class="dash-chart-title">Project Profile</span>
-            <span class="dash-chart-sub">sessions · prompts · observations</span>
+<!-- Radar charts row -->
+<div class="grid-2 section">
+    <div class="card">
+        <div class="card-header">
+            <div class="card-title">Project Profile</div>
+            <div class="badge">Session Distribution</div>
         </div>
-        <div class="dash-chart-body" style="height:280px;position:relative;">
+        <div class="card-body" style="height:320px;position:relative;">
             <canvas id="proj-radar"></canvas>
         </div>
     </div>
 
-    <!-- Observation Types Radar -->
-    <div class="dash-chart-card">
-        <div class="dash-chart-head">
-            <span class="dash-chart-title">Observation Types</span>
-            <span class="dash-chart-sub">per project · bugfix · feature · refactor…</span>
+    <div class="card">
+        <div class="card-header">
+            <div class="card-title">Observation Types</div>
+            <div class="badge">Analysis Mix</div>
         </div>
-        <div class="dash-chart-body" style="height:280px;position:relative;">
+        <div class="card-body" style="height:320px;position:relative;">
             {% if has_obs_data %}
             <canvas id="obs-radar"></canvas>
             {% else %}
-            <div class="dash-empty" style="padding-top:80px;">
-                no observations yet ·
-                <a href="/config" style="color:var(--accent);">enable in config</a>
+            <div class="empty">
+                No observations recorded yet.
             </div>
             {% endif %}
         </div>
     </div>
-
 </div>
 
-<!-- ── Bottom row: Recent Sessions + Latest Observations ── -->
-<div class="dash-charts-row section">
-
-    <div class="dash-chart-card">
-        <div class="dash-chart-head">
-            <span class="dash-chart-title">Recent Sessions</span>
-            <a href="/sessions" style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--accent);text-decoration:none;">view all →</a>
+<!-- Bottom row: Recent Sessions + Latest Observations -->
+<div class="grid-2 section">
+    <div class="card">
+        <div class="card-header">
+            <div class="card-title">Recent Sessions</div>
+            <a href="/sessions" class="btn btn-primary" style="padding:4px 10px;font-size:10px;">View All</a>
         </div>
-        {% if recent_sessions %}
-        <div class="dash-sessions-list">
-            {% for s in recent_sessions %}
-            <a href="/sessions/{{ s.session_id }}" class="dash-session-row">
-                <span class="dash-session-id">{{ s.session_id[:8] }}…</span>
-                <span class="dash-session-project">{{ s.project_name or 'Unknown' }}</span>
-                <div class="dash-session-meta">
-                    <span class="dash-session-badge">{{ s.prompt_count }} prompts</span>
-                    <span class="dash-session-badge" style="color:var(--amber);">{{ s.tool_count }} tools</span>
-                    <span class="mono dimmer" style="font-size:10px;">{{ s.created_at[:10] if s.created_at else '' }}</span>
-                </div>
-            </a>
-            {% endfor %}
+        <div class="card-body" style="padding:0;">
+            {% if recent_sessions %}
+            <div class="session-list">
+                {% for s in recent_sessions %}
+                {% set proj_display = (s.cwd|replace('--', '/')|replace('\\', '/') if s.cwd else '').split('/')|last or
+                'Default' %}
+                <a href="/sessions/{{ s.session_id }}" class="session-row" title="Full ID: {{ s.session_id }}">
+                    <div class="session-info">
+                        <span class="session-proj">{{ proj_display }}</span>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span class="session-id mono">{{ s.session_id[:12] }}…</span>
+                            <span class="mono dimmer" style="font-size:9px;">{{ s.created_at[:10] if s.created_at else
+                                '' }}</span>
+                        </div>
+                    </div>
+                    <div class="session-stats">
+                        <div class="stat-highlight">
+                            <span class="stat-num">{{ s.prompt_count }}</span>
+                            <span class="stat-unit">prompts</span>
+                        </div>
+                    </div>
+                </a>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="empty">No recent sessions found.</div>
+            {% endif %}
         </div>
-        {% else %}
-        <div class="dash-empty">no sessions yet</div>
-        {% endif %}
     </div>
 
-    <div class="dash-chart-card">
-        <div class="dash-chart-head">
-            <span class="dash-chart-title">Latest Observations</span>
-            <a href="/observations" style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--accent);text-decoration:none;">view all →</a>
+    <div class="card">
+        <div class="card-header">
+            <div class="card-title">Latest Observations</div>
+            <a href="/observations" class="btn btn-primary" style="padding:4px 10px;font-size:10px;">View All</a>
         </div>
-        {% if latest_obs %}
-        <div class="dash-obs-grid">
-            {% for obs in latest_obs %}
-            <a href="/observations/{{ obs.id }}" class="dash-obs-card">
-                <div class="dash-obs-type">✦ {{ obs.type or 'observation' }}</div>
-                <div class="dash-obs-title">{{ obs.title | truncate(60) if obs.title else '—' }}</div>
-                {% if obs.subtitle %}
-                <div class="dash-obs-subtitle">{{ obs.subtitle | truncate(80) }}</div>
-                {% endif %}
-                <div class="dash-obs-meta">
-                    {{ obs.project_name or '' }}{% if obs.created_at %} · {{ obs.created_at[:10] }}{% endif %}
-                </div>
-            </a>
-            {% endfor %}
+        <div class="card-body" style="padding:0;">
+            {% if latest_obs %}
+            <div class="obs-list">
+                {% for obs in latest_obs %}
+                <a href="/observations/{{ obs.id }}" class="obs-row">
+                    <div class="obs-main">
+                        <div style="display:flex; align-items:center; gap:12px; margin-bottom:4px;">
+                            <span class="type-pill-mini {{ obs.type|lower }}">{{ obs.type or 'Observation' }}</span>
+                            <div class="obs-title">{{ obs.title | truncate(60) }}</div>
+                        </div>
+                        <div class="obs-meta dimmer mono">{{ obs.project_name }} · {{ obs.created_at[:10] }}</div>
+                    </div>
+                </a>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="empty">No observations recorded yet.</div>
+            {% endif %}
         </div>
-        {% else %}
-        <div class="dash-empty">
-            no observations yet ·
-            <a href="/config" style="color:var(--accent);">enable in configuration</a>
-        </div>
-        {% endif %}
     </div>
-
 </div>
 
 {% endblock %}

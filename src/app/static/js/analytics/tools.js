@@ -1,16 +1,16 @@
 (function () {
-    var COLORS = ['#00d4ff','#00e5a0','#a78bfa','#ffb347','#ff5f5f','#58b4d4','#3ec898','#9ca3af'];
-
+    /* ── Monochromatic Fin Orange Ramp ── */
+    var COLORS = ['#fe4c02','#ff6a2d','#ff8e5f','#ffad89','#ffcbb1','#ffe6d8','#7b2a00','#4a1900'];
     function color(i) { return COLORS[i % COLORS.length]; }
 
     function toK(v) {
-        return v >= 1000000 ? (v/1000000).toFixed(1)+'M'
-             : v >= 1000    ? (v/1000).toFixed(1)+'K'
-             : String(v);
+        if (v >= 1000000) return (v/1000000).toFixed(1) + 'M';
+        if (v >= 1000) return (v/1000).toFixed(1) + 'K';
+        return v;
     }
 
-    /* ── Read chart data — getAttribute avoids dataset camelCase issues ── */
     var cd      = document.getElementById('chart-data');
+    if(!cd) return;
     var labels  = JSON.parse(cd.getAttribute('data-labels'));
     var calls   = JSON.parse(cd.getAttribute('data-calls'));
     var inp     = JSON.parse(cd.getAttribute('data-inp'));
@@ -18,97 +18,157 @@
     var cacheRd = JSON.parse(cd.getAttribute('data-cache-rd'));
     var cacheCr = JSON.parse(cd.getAttribute('data-cache-cr'));
 
-    /* ── Color all data-index dots ── */
+    /* Update Legend Dots */
     document.querySelectorAll('[data-index]').forEach(function (el) {
         var i = parseInt(el.getAttribute('data-index'), 10);
         el.style.background = color(i);
     });
 
-    /* ── Animate call-bar fills ── */
-    setTimeout(function () {
-        document.querySelectorAll('.call-bar-fill[data-pct]').forEach(function (el) {
-            el.style.background = color(parseInt(el.getAttribute('data-index') || '0', 10));
-            el.style.width = el.getAttribute('data-pct') + '%';
+    /* Chart.js Defaults */
+    Chart.defaults.font.family = "'Inter', sans-serif";
+    Chart.defaults.font.weight = 500;
+
+    var donut, bar;
+
+    function updateThemeStyles() {
+        var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        var tickColor = isDark ? '#a0a0a0' : '#626260';
+        var labelColor = isDark ? '#efefef' : '#111';
+        var inputColor = isDark ? '#faf9f6' : '#111111';
+        var gridColor = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)';
+
+        // Force update HTML legend squares
+        document.querySelectorAll('.theme-square').forEach(function(el) {
+            el.style.background = inputColor;
         });
-    }, 100);
 
-    /* ── Chart.js defaults ── */
-    Chart.defaults.font.family = "'IBM Plex Mono', monospace";
-    Chart.defaults.color       = '#6b7d8f';
+        if (donut) {
+            donut.update();
+        }
 
-    /* ── Donut ── */
-    new Chart(document.getElementById('donut-chart'), {
-        type: 'doughnut',
-        data: {
-            labels: labels,
-            datasets: [{
-                data:             calls,
-                backgroundColor:  labels.map(function (_, i) { return color(i); }),
-                borderWidth:      2,
-                borderColor:      '#111418',
-                hoverBorderWidth: 0,
-            }]
-        },
-        options: {
-            cutout: '70%',
-            responsive: true,
-            maintainAspectRatio: true,
-            plugins: {
-                legend: { display: false },
-                tooltip: {
-                    callbacks: {
-                        label: function (ctx) {
-                            var total = calls.reduce(function (a, b) { return a+b; }, 0);
-                            return ' ' + ctx.parsed + ' calls (' + Math.round(ctx.parsed/total*100) + '%)';
+        if (bar) {
+            bar.data.datasets[0].backgroundColor = inputColor;
+            bar.options.scales.x.grid.color = gridColor;
+            bar.options.scales.x.ticks.color = tickColor;
+            bar.options.scales.y.ticks.color = labelColor;
+            bar.update();
+        }
+    }
+
+    /* ── Donut Chart ── */
+    var donutCtx = document.getElementById('donut-chart');
+    if (donutCtx) {
+        donut = new Chart(donutCtx, {
+            type: 'doughnut',
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: calls,
+                    backgroundColor: labels.map(function (_, i) { return color(i); }),
+                    borderWidth: 2,
+                    borderColor: 'var(--bg-surface)',
+                    hoverBorderWidth: 0,
+                    borderRadius: 0,
+                    hoverOffset: 12
+                }]
+            },
+            options: {
+                cutout: '76%',
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: 'rgba(17, 17, 17, 0.98)',
+                        padding: 12,
+                        cornerRadius: 0,
+                        displayColors: false,
+                        callbacks: {
+                            label: function (ctx) {
+                                var total = calls.reduce(function (a, b) { return a+b; }, 0);
+                                return ' ' + ctx.parsed + ' CALLS (' + Math.round(ctx.parsed/total*100) + '%)';
+                            }
                         }
                     }
                 }
             }
-        }
-    });
+        });
+        var totalCalls = calls.reduce(function(a,b){return a+b;}, 0);
+        var dt = document.getElementById('donut-total');
+        if(dt) dt.innerText = totalCalls;
+    }
 
-    /* ── Stacked bar ── */
-    new Chart(document.getElementById('bar-chart'), {
-        type: 'bar',
-        data: {
-            labels: labels,
-            datasets: [
-                { label:'Input',        data:inp,     backgroundColor:'rgba(0,212,255,0.8)',   borderRadius:2 },
-                { label:'Output',       data:out,     backgroundColor:'rgba(255,179,71,0.8)',  borderRadius:2 },
-                { label:'Cache Read',   data:cacheRd, backgroundColor:'rgba(167,139,250,0.8)', borderRadius:2 },
-                { label:'Cache Create', data:cacheCr, backgroundColor:'rgba(0,229,160,0.8)',   borderRadius:2 },
-            ]
-        },
-        options: {
-            indexAxis: 'y',
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    display: true, position: 'bottom',
-                    labels: { boxWidth:10, boxHeight:10, padding:14, font:{ size:10 } }
+    /* ── Stacked Bar Chart ── */
+    var barCtx = document.getElementById('bar-chart');
+    if (barCtx) {
+        bar = new Chart(barCtx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [
+                    { label:'INPUT',        data:inp,     backgroundColor: '#111', borderRadius:0 },
+                    { label:'OUTPUT',       data:out,     backgroundColor:'#fe4c02',  borderRadius:0 },
+                    { label:'CACHE READ',   data:cacheRd, backgroundColor:'#ff8e5f',  borderRadius:0 },
+                    { label:'CACHE CREATE', data:cacheCr, backgroundColor:'#ffcbb1',  borderRadius:0 },
+                ]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: 'rgba(17, 17, 17, 0.98)',
+                        cornerRadius: 0,
+                        bodyFont: { family: "'IBM Plex Mono', monospace" },
+                        callbacks: {
+                            label: function (ctx) { return ' '+ctx.dataset.label+': '+toK(ctx.parsed.x); }
+                        }
+                    }
                 },
-                tooltip: {
-                    callbacks: {
-                        label: function (ctx) { return ' '+ctx.dataset.label+': '+toK(ctx.parsed.x); }
+                scales: {
+                    x: { 
+                        stacked:true, 
+                        grid:{ drawBorder:false }, 
+                        ticks:{ font:{ size:10, family:"'IBM Plex Mono'" }, callback: function(v){ return toK(v); } } 
+                    },
+                    y: { 
+                        stacked:true, 
+                        grid:{ display:false }, 
+                        ticks:{ font:{ size:11, weight:600 } } 
                     }
                 }
-            },
-            scales: {
-                x: { stacked:true, grid:{ color:'rgba(255,255,255,0.04)' }, ticks:{ font:{ size:10 }, callback: function(v){ return toK(v); } } },
-                y: { stacked:true, grid:{ display:false }, ticks:{ font:{ size:11 } } }
             }
-        }
-    });
+        });
+    }
 
-    /* ── Per-table Enter-to-search ── */
-    ['tool-search','sess-search','proj-search'].forEach(function (id) {
-        var el = document.getElementById(id);
-        if (el) {
-            el.addEventListener('keydown', function (e) {
-                if (e.key === 'Enter') { e.preventDefault(); el.closest('form').submit(); }
-            });
-        }
+    /* Listen for Theme Changes */
+    var observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+            if (mutation.attributeName === 'data-theme') updateThemeStyles();
+        });
     });
+    observer.observe(document.documentElement, { attributes: true });
 
+    /* Initial Theme Apply */
+    updateThemeStyles();
+
+    /* Interactive Legend */
+    window.toggleDonutSegment = function(el) {
+        if(!donut) return;
+        var idx = parseInt(el.getAttribute('data-idx'));
+        var meta = donut.getDatasetMeta(0);
+        var item = meta.data[idx];
+        if (item.hidden) {
+            item.hidden = false;
+            el.style.opacity = "1";
+            el.style.background = "var(--bg-alt)";
+        } else {
+            item.hidden = true;
+            el.style.opacity = "0.3";
+            el.style.background = "transparent";
+        }
+        donut.update();
+    };
 }());

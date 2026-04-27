@@ -1,8 +1,8 @@
 /* ── Analysis header card ── */
 .analysis-header-card {
-    background: var(--bg2);
+    background: var(--bg-surface);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 0px;
     padding: 18px 22px;
     display: flex;
     align-items: center;
@@ -36,9 +36,9 @@
 }
 
 .chart-card {
-    background: var(--bg2);
+    background: var(--bg-surface);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 0px;
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -83,9 +83,9 @@
 .donut-center-label { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 3px; }
 .donut-legend { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 5px 12px; }
 .legend-item { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.legend-dot  { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-.legend-name { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.legend-val  { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--text2); white-space: nowrap; }
+.legend-dot  { width: 8px; height: 8px; border-radius: 0px; flex-shrink: 0; }
+.legend-name { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.legend-val  { font-family: 'IBM Plex Mono', monospace; font-size: 9px; color: var(--text2); white-space: nowrap; font-weight: 700; }
 
 /* ── Section dividers ── */
 .section-divider { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
@@ -96,12 +96,44 @@
 .turn-num-cell {
     font-family: 'IBM Plex Mono', monospace;
     font-size: 11px;
-    color: var(--text2);
-    background: var(--bg3);
+    color: var(--text);
+    background: var(--bg-alt);
     border: 1px solid var(--border);
-    border-radius: 4px;
+    border-radius: 0px;
     padding: 2px 6px;
     white-space: nowrap;
+    font-weight: 700;
 }
 
 .no-data { padding: 48px; text-align: center; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--text2); }
+
+/* ── Table Styles ── */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th {
+    text-align: left; font-family: 'IBM Plex Mono', monospace; font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); padding: 12px 16px;
+    border-bottom: 1px solid var(--border); background: var(--bg-alt);
+}
+td { padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 13px; color: var(--text); vertical-align: middle; }
+
+/* ── Premium Buttons ── */
+.tbl-btn {
+    display: inline-flex; align-items: center; padding: 8px 16px;
+    background: #111; border: 1px solid #111; color: #fff;
+    font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 700;
+    text-transform: uppercase; text-decoration: none; letter-spacing: 0.08em;
+    border-radius: 0px; white-space: nowrap; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+[data-theme="dark"] .tbl-btn { background: #faf9f6; border-color: #faf9f6; color: #111; }
+.tbl-btn:hover { background: #fe4c02; border-color: #fe4c02; color: #fff; transform: scale(1.05); }
+
+/* ── Secondary Button ── */
+.tbl-btn-amber { color: var(--amber) !important; border-color: var(--amber) !important; background: transparent !important; }
+.tbl-btn-amber:hover { background: var(--amber) !important; color: #fff !important; }
+
+/* ── Adaptive Headers ── */
+.chart-card .card-header,
+.chart-card .chart-card-header {
+    background: var(--bg-surface);
+}

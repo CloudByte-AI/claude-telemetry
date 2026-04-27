@@ -1,159 +1,138 @@
 {% extends "base/index.html" %}
-{% block title %}{{ obs.title | truncate(50) }} — CloudByte{% endblock %}
-{% block breadcrumb %}observations / detail{% endblock %}
+{% block title %}Audit: {{ obs.title | truncate(30) }} — CloudByte Intelligence{% endblock %}
+{% block breadcrumb %}intelligence / observations / audit / {{ obs.id[:8] }}{% endblock %}
 
-{% block head %}<link rel="stylesheet" href="/static/css/memory/observations.css">{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="/static/css/memory/observations.css">
+<style>
+    .audit-header { border-bottom: 1px solid var(--border); padding-bottom: 32px; margin-bottom: 40px; }
+    .audit-title { font-size: 32px; font-weight: 700; color: var(--text); letter-spacing: -0.04em; line-height: 1.1; margin: 12px 0; }
+    .audit-meta-bar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+    .audit-meta-pill { background: var(--bg-alt); border: 1px solid var(--border); padding: 4px 10px; font-family: 'IBM Plex Mono'; font-size: 10px; font-weight: 700; color: var(--text); text-transform: uppercase; }
+    [data-theme="dark"] .audit-meta-pill { background: #1a1a1a; border-color: #333; color: #bbb; }
+    
+    .audit-grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: 40px; }
+    .audit-section-label { font-family: 'IBM Plex Mono'; font-size: 10px; font-weight: 800; color: #fe4c02; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+    .audit-section-label::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+    
+    .narrative-box { font-size: 16px; line-height: 1.6; color: var(--text); margin-bottom: 32px; }
+    .fact-item { display: flex; gap: 12px; margin-bottom: 12px; font-size: 14px; color: var(--text); }
+    .fact-bullet { color: #fe4c02; font-weight: 900; }
+    
+    .concept-tag { display: inline-block; background: var(--bg-surface); border: 1px solid var(--border); padding: 6px 12px; font-family: 'IBM Plex Mono'; font-size: 11px; font-weight: 700; color: var(--text); margin: 0 4px 8px 0; text-transform: uppercase; }
+    
+    .file-row { font-family: 'IBM Plex Mono'; font-size: 11px; color: var(--text-dim); padding: 8px 12px; background: var(--bg-alt); border-left: 2px solid var(--border); margin-bottom: 4px; word-break: break-all; }
+    .file-row.modified { border-left-color: #fe4c02; color: var(--text); }
+</style>
+{% endblock %}
 
 {% block content %}
 
-<!-- Header card -->
-<div class="obs-detail-header section">
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
-        <div style="display:flex;align-items:center;gap:10px;">
-            <span class="obs-type-badge {{ obs.type_meta.color }}" style="font-size:11px;padding:4px 12px;">
-                {{ obs.type_meta.icon }} {{ obs.type_meta.label }}
-            </span>
-
+<div class="audit-header">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div style="flex: 1;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <span class="obs-type-badge {{ obs.type_meta.color }}" style="padding: 2px 8px; font-size: 9px;">
+                    {{ obs.type_meta.icon }} {{ obs.type_meta.label }}
+                </span>
+                <span class="mono" style="font-size: 11px; font-weight: 700; color: #fe4c02;">TURN #{{ obs.turn_number or '—' }}</span>
+            </div>
+            <h1 class="audit-title">{{ obs.title or 'Unnamed Discovery' }}</h1>
+            <div class="audit-meta-bar">
+                <div class="audit-meta-pill"><span style="opacity:0.5;">ID:</span> {{ obs.session_id }}</div>
+                <div class="audit-meta-pill"><span style="opacity:0.5;">P:</span> {{ obs.project_display }}</div>
+                <div class="audit-meta-pill"><span style="opacity:0.5;">LOG:</span> {{ obs.created_at[:19].replace('T',' ') }}</div>
+            </div>
         </div>
-        <div style="display:flex;gap:8px;">
-            <a href="/sessions/{{ obs.session_id }}" class="btn btn-ghost" style="font-size:11px;">session ↗</a>
-            <a href="/observations" class="btn btn-ghost" style="font-size:11px;">← observations</a>
+        <div style="display: flex; gap: 8px;">
+            <a href="/observations" class="tbl-btn secondary">BACK</a>
+            <a href="/sessions/{{ obs.session_id }}" class="tbl-btn">SESSION ↗</a>
         </div>
-    </div>
-
-    <div class="obs-detail-title">{{ obs.title or '—' }}</div>
-    {% if obs.subtitle %}
-    <div class="obs-detail-subtitle">{{ obs.subtitle }}</div>
-    {% endif %}
-
-    <!-- Meta strip -->
-    <div class="obs-meta" style="flex-wrap:wrap;gap:14px;">
-        {% if obs.project_name %}
-        <span class="obs-meta-item">
-            <span style="color:var(--accent);">◎</span>
-            <a href="/projects" style="color:var(--text2);text-decoration:none;">{{ obs.project_name }}</a>
-        </span>
-        {% endif %}
-        <span class="obs-meta-item">
-            session
-            <a href="/sessions/{{ obs.session_id }}" class="mono" style="color:var(--accent);text-decoration:none;font-size:11px;">
-                {{ obs.session_id[:8] }}…{{ obs.session_id[-4:] }}
-            </a>
-        </span>
-        {% if obs.turn_number %}
-        <span class="obs-meta-item">turn <span class="mono" style="color:var(--text);">{{ obs.turn_number }}</span></span>
-        {% endif %}
-        {% if obs.created_at %}
-        <span class="obs-meta-item">{{ obs.created_at[:16].replace('T',' ') }}</span>
-        {% endif %}
-        {% if obs.cwd %}
-        <span class="obs-meta-item mono" style="font-size:10px;color:var(--text2);">{{ obs.cwd[-40:] }}</span>
-        {% endif %}
     </div>
 </div>
 
-<!-- Narrative -->
-{% if obs.narrative %}
-<div class="obs-detail-narrative section">
-    <div class="obs-section-label" style="margin-bottom:12px;">◈ narrative</div>
-    <div class="obs-narrative-text">{{ obs.narrative }}</div>
-</div>
-{% endif %}
-
-<!-- Facts + Concepts row -->
-{% if obs.facts or obs.concepts %}
-<div class="obs-detail-grid section">
-
-    {% if obs.facts %}
-    <div class="obs-detail-card">
-        <div class="obs-detail-card-title">
-            <span style="color:var(--accent);">·</span> facts ({{ obs.facts|length }})
+<div class="audit-grid">
+    <!-- Left Column: Narrative & Facts -->
+    <div>
+        <div class="audit-section-label">◈ Discovery Narrative</div>
+        <div class="narrative-box">
+            {{ obs.subtitle or 'No narrative context provided for this insight.' }}
         </div>
-        <div class="facts-list">
+
+        {% if obs.facts %}
+        <div class="audit-section-label">◎ Extracted Facts</div>
+        <div style="margin-bottom: 40px;">
             {% for f in obs.facts %}
-            <div class="fact-item">{{ f }}</div>
+            <div class="fact-item">
+                <span class="fact-bullet">↳</span>
+                <span>{{ f }}</span>
+            </div>
             {% endfor %}
         </div>
-    </div>
-    {% endif %}
-
-    {% if obs.concepts %}
-    <div class="obs-detail-card">
-        <div class="obs-detail-card-title">
-            <span style="color:var(--purple);">◈</span> concepts ({{ obs.concepts|length }})
-        </div>
-        <div class="concepts-wrap">
-            {% for c in obs.concepts %}
-            <span class="concept-chip">{{ c }}</span>
-            {% endfor %}
-        </div>
-    </div>
-    {% endif %}
-
-</div>
-{% endif %}
-
-<!-- Files row -->
-{% if obs.files_read or obs.files_modified %}
-<div class="obs-detail-grid section">
-
-    {% if obs.files_read %}
-    <div class="obs-detail-card">
-        <div class="obs-detail-card-title">
-            <span style="color:var(--accent);">→</span> files read ({{ obs.files_read|length }})
-        </div>
-        <div class="files-list">
-            {% for f in obs.files_read %}
-            <div class="file-item read">{{ f }}</div>
-            {% endfor %}
-        </div>
-    </div>
-    {% endif %}
-
-    {% if obs.files_modified %}
-    <div class="obs-detail-card">
-        <div class="obs-detail-card-title">
-            <span style="color:var(--amber);">✎</span> files modified ({{ obs.files_modified|length }})
-        </div>
-        <div class="files-list">
-            {% for f in obs.files_modified %}
-            <div class="file-item modified">{{ f }}</div>
-            {% endfor %}
-        </div>
-    </div>
-    {% endif %}
-
-</div>
-{% endif %}
-
-<!-- Nearby observations from same session -->
-{% if nearby %}
-<div class="section">
-    <div class="section-divider">
-        <span class="section-divider-title">Other observations from this session</span>
-        <div class="section-divider-line"></div>
-        <span class="dimmer mono" style="font-size:11px;">{{ nearby|length }} more</span>
-    </div>
-    {% for n in nearby %}
-    <a href="/observations/{{ n.id }}" class="nearby-card">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:5px;">
-            <span class="obs-type-badge {{ n.type_meta.color }}" style="font-size:9px;padding:2px 7px;">
-                {{ n.type_meta.icon }} {{ n.type_meta.label }}
-            </span>
-            <span class="mono dimmer" style="font-size:10px;">{{ n.created_at[:16].replace('T',' ') if n.created_at else '' }}</span>
-        </div>
-        <div class="nearby-title">{{ n.title or '—' }}</div>
-        {% if n.subtitle %}
-        <div class="nearby-meta">{{ n.subtitle | truncate(80) }}</div>
         {% endif %}
-    </a>
-    {% endfor %}
-    <div style="margin-top:10px;">
-        <a href="/sessions/{{ obs.session_id }}" class="btn btn-ghost" style="font-size:11px;">
-            view full session ↗
-        </a>
+
+        {% if obs.files_read or obs.files_modified %}
+        <div class="audit-section-label">▤ Environment Context</div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+            {% if obs.files_read %}
+            <div>
+                <div style="font-family:'IBM Plex Mono'; font-size:9px; font-weight:800; color:var(--text-dim); text-transform:uppercase; margin-bottom:10px;">Accessed</div>
+                {% for f in obs.files_read %}
+                <div class="file-row">{{ f.split('/')[-1] if '/' in f else f.split('\\')[-1] }}</div>
+                {% endfor %}
+            </div>
+            {% endif %}
+            {% if obs.files_modified %}
+            <div>
+                <div style="font-family:'IBM Plex Mono'; font-size:9px; font-weight:800; color:#fe4c02; text-transform:uppercase; margin-bottom:10px;">Modified</div>
+                {% for f in obs.files_modified %}
+                <div class="file-row modified">{{ f.split('/')[-1] if '/' in f else f.split('\\')[-1] }}</div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Right Column: Concepts & Timeline -->
+    <div>
+        {% if obs.concepts %}
+        <div class="audit-section-label">◇ Abstract Concepts</div>
+        <div style="margin-bottom: 40px;">
+            {% for c in obs.concepts %}
+            <span class="concept-tag">{{ c }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if nearby %}
+        <div style="display:flex; flex-direction:column; gap:0;">
+        <div style="font-size:10px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.15em; border-bottom:1px solid var(--border); padding-bottom:12px; margin-bottom:12px;">Session Timeline</div>
+        
+        <div style="position:relative; padding-left:16px; border-left:1px solid var(--border); margin-left:8px; display:flex; flex-direction:column; gap:16px;">
+            {% for n in nearby %}
+            {% set is_curr = (n.id == obs.id) %}
+            <a href="/observations/{{ n.id }}" style="text-decoration:none; position:relative; display:block; transition:all 0.15s;">
+                <!-- Dot on line -->
+                <div style="position:absolute; left:-21px; top:12px; width:9px; height:9px; border-radius:50%; background:{% if is_curr %}#fe4c02{% else %}var(--border){% endif %}; border:2px solid var(--bg-surface);"></div>
+                
+                <div class="timeline-card" style="padding:12px 16px; background:{% if is_curr %}rgba(254,76,2,0.05){% else %}var(--bg-alt){% endif %}; border:1px solid {% if is_curr %}#fe4c02{% else %}var(--border){% endif %}; border-radius:0px;">
+                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+                        <span class="obs-type-badge {{ n.type_meta.color }}" style="font-size:7px; padding:1px 4px; border-radius:0px;">
+                            {{ n.type_meta.icon }} {{ n.type_meta.label }}
+                        </span>
+                        <span class="mono dimmer" style="font-size:9px;">{{ n.created_at[11:16] }}</span>
+                        {% if is_curr %}
+                        <span class="mono" style="font-size:8px; font-weight:800; color:#fe4c02; text-transform:uppercase; letter-spacing:0.05em; margin-left:auto;">Active</span>
+                        {% endif %}
+                    </div>
+                    <div style="font-size:12px; font-weight:{% if is_curr %}700{% else %}600{% endif %}; color:{% if is_curr %}var(--text){% else %}var(--text-dim){% endif %}; line-height:1.2;">{{ n.title | truncate(60) }}</div>
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+        {% endif %}
     </div>
 </div>
-{% endif %}
 
 {% endblock %}

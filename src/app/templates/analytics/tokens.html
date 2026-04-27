@@ -17,69 +17,76 @@
 </div>
 
 <!-- Page header -->
-<div class="section" style="display:flex;align-items:center;justify-content:space-between;">
-    <div>
-        <div style="font-size:20px;font-weight:500;margin-bottom:4px;">Token Usage</div>
-        <div class="dimmer mono" style="font-size:11px;">
-            {% if dr == 'all' %}all time{% elif d_from == d_to %}{{ d_from }}{% else %}{{ d_from }} → {{ d_to }}{% endif %}
+<div class="section" style="margin-bottom: 40px; padding-top: 10px;">
+    <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:32px;">
+        <div>
+            <h1 style="font-size: 54px; font-weight: 400; color: var(--text); line-height: 1.0; letter-spacing: -0.05em; margin:0;">Token Intelligence</h1>
+            <div class="dimmer" style="font-size: 16px; margin-top: 12px; font-weight: 400; letter-spacing: -0.02em;">
+                {% if dr == 'all' %}Complete History{% elif d_from == d_to %}{{ d_from }}{% else %}{{ d_from }} → {{ d_to }}{% endif %}
+            </div>
+        </div>
+        <div style="display:flex; gap:48px;">
+            <div class="stat-unit">
+                <div style="font-size:10px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:4px;">Total Volume</div>
+                <div style="font-size:48px; font-weight:400; color:var(--text); line-height:1; letter-spacing:-0.04em;" id="hero-total-tokens">—</div>
+            </div>
+            <div class="stat-unit">
+                <div style="font-size:10px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:4px;">Avg / Session</div>
+                <div style="font-size:48px; font-weight:400; color:#fe4c02; line-height:1; letter-spacing:-0.04em;" id="hero-avg-tokens">—</div>
+            </div>
         </div>
     </div>
 </div>
 
-<!-- Chart filter bar — date range only, affects charts only -->
-<form method="get" action="/tokens" id="filter-form" data-dr="{{ dr }}">
-    <input type="hidden" name="sess_search" value="{{ sess_search }}">
-    <input type="hidden" name="proj_search" value="{{ proj_search }}">
-    <input type="hidden" name="dr" id="dr-input" value="{{ dr }}">
-
-    <div class="filter-bar">
-        <span class="filter-label">chart range</span>
-        <div class="dr-pills">
-            <a href="#" class="dr-pill {% if dr=='all'    %}active{% endif %}" data-val="all"    onclick="setDr('all');    return false;">all</a>
-            <a href="#" class="dr-pill {% if dr=='today'  %}active{% endif %}" data-val="today"  onclick="setDr('today');  return false;">today</a>
-            <a href="#" class="dr-pill {% if dr=='7days'  %}active{% endif %}" data-val="7days"  onclick="setDr('7days');  return false;">7 days</a>
-            <a href="#" class="dr-pill {% if dr=='30days' %}active{% endif %}" data-val="30days" onclick="setDr('30days'); return false;">30 days</a>
-            <a href="#" class="dr-pill {% if dr=='custom' %}active{% endif %}" data-val="custom" onclick="setDr('custom'); return false;">custom</a>
-        </div>
-        <div id="custom-dates">
-            <input type="date" name="date_from" class="date-input"
-                   value="{{ date_from }}" style="color-scheme:light dark;">
-            <span class="dimmer mono" style="font-size:11px;">→</span>
-            <input type="date" name="date_to" class="date-input"
-                   value="{{ date_to }}" style="color-scheme:light dark;">
-        </div>
-        <button type="submit" id="apply-btn">apply →</button>
-        {% if dr == 'custom' and (date_from or date_to) %}
-        <a href="/tokens" id="clear-btn"
-           style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text2);text-decoration:none;background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:5px 10px;white-space:nowrap;transition:all 0.15s;"
-           onmouseover="this.style.color='var(--red)';this.style.borderColor='var(--red)'"
-           onmouseout="this.style.color='var(--text2)';this.style.borderColor='var(--border)'">clear ✕</a>
-        {% endif %}
-        <span class="filter-note">↑ charts only · tables show all data</span>
+<!-- Filter toolbar -->
+<div class="card section filter-panel">
+    <div class="card-body" style="padding: 16px; display: flex; align-items: center; justify-content: space-between;">
+        <form method="get" action="/tokens" id="filter-form" style="display: flex; align-items: center; gap: 16px;">
+            <input type="hidden" name="sess_search" value="{{ sess_search }}">
+            <input type="hidden" name="proj_search" value="{{ proj_search }}">
+            <input type="hidden" name="dr" id="dr-input" value="{{ dr }}">
+            
+            <span class="filter-label">Range</span>
+            <div class="dr-pills">
+                <button type="button" class="dr-pill {% if dr == 'all' %}active{% endif %}" onclick="setDr('all')">All</button>
+                <button type="button" class="dr-pill {% if dr == 'today' %}active{% endif %}" onclick="setDr('today')">Today</button>
+                <button type="button" class="dr-pill {% if dr == '7days' %}active{% endif %}" onclick="setDr('7days')">7D</button>
+                <button type="button" class="dr-pill {% if dr == '30days' %}active{% endif %}" onclick="setDr('30days')">30D</button>
+                <button type="button" class="dr-pill {% if dr == 'custom' %}active{% endif %}" onclick="setDr('custom')">Custom</button>
+            </div>
+            
+            <div id="custom-dates" style="display: {% if dr == 'custom' %}flex{% else %}none{% endif %}; gap: 8px;">
+                <input type="date" name="date_from" class="date-input" value="{{ date_from }}">
+                <span class="dimmer">→</span>
+                <input type="date" name="date_to" class="date-input" value="{{ date_to }}">
+            </div>
+            
+            <button type="submit" id="apply-btn" class="btn btn-primary" style="font-size: 11px; display: {% if dr == 'custom' %}inline-flex{% else %}none{% endif %};">Apply</button>
+        </form>
+        
+        <div class="dimmer mono" style="font-size: 10px;">Charts show filtered range · Tables show all records</div>
     </div>
-</form>
+</div>
 
-<!-- Charts -->
+<!-- Main Charts -->
 <div class="charts-row section">
-
-    <!-- Donut: token type distribution — click legend to toggle segments -->
-    <div class="chart-card">
-        <div class="chart-card-header">
-            <span class="chart-card-title">Token Distribution</span>
-            <span class="chart-card-sub">click legend to show/hide</span>
+    <!-- Donut: Distribution -->
+    <div class="chart-card card">
+        <div class="card-header">
+            <div class="card-title">Type Distribution</div>
         </div>
-        <div class="chart-body">
+        <div class="card-body">
             <div class="donut-wrap">
                 <div class="donut-canvas-wrap">
-                    <canvas id="donut-chart" width="140" height="140"></canvas>
+                    <canvas id="donut-chart"></canvas>
                     <div class="donut-center">
                         <div class="donut-center-val" id="donut-total">—</div>
-                        <div class="donut-center-label">total</div>
+                        <div class="donut-center-label">Total</div>
                     </div>
                 </div>
                 <div class="donut-legend">
                     {% for label in chart_labels %}
-                    <div class="legend-item" data-idx="{{ loop.index0 }}" onclick="toggleDonutSegment(this)" style="cursor:pointer;">
+                    <div class="legend-item" data-idx="{{ loop.index0 }}" onclick="toggleDonutSegment(this)">
                         <div class="legend-dot" data-index="{{ loop.index0 }}"></div>
                         <span class="legend-name">{{ label }}</span>
                         <span class="legend-val">
@@ -93,40 +100,40 @@
         </div>
     </div>
 
-    <!-- Grouped vertical bar: IO vs Tool per session -->
-    <div class="chart-card">
-        <div class="chart-card-header">
-            <span class="chart-card-title">Per Session Breakdown</span>
-            <span class="chart-card-sub">IO (blue) · tool (purple) · click to analyse</span>
+    <!-- Bar: Session Breakdown -->
+    <div class="chart-card card">
+        <div class="card-header">
+            <div class="card-title">Session IO Activity</div>
+            <div style="display:flex; gap:8px; align-items:center;">
+                <div style="display:flex; align-items:center; gap:6px; background:rgba(254, 76, 2, 0.05); border:1px solid rgba(254, 76, 2, 0.1); padding:4px 10px;">
+                    <div style="width:8px; height:8px; background:#fe4c02;"></div>
+                    <span style="font-size:10px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">IO Tokens</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:6px; background:rgba(255, 142, 95, 0.05); border:1px solid rgba(255, 142, 95, 0.1); padding:4px 10px;">
+                    <div style="width:8px; height:8px; background:#ff8e5f;"></div>
+                    <span style="font-size:10px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Tool Tokens</span>
+                </div>
+            </div>
         </div>
-        <div class="chart-body-bar">
+        <div class="card-body" style="height: 450px;">
             <canvas id="bar-chart"></canvas>
         </div>
     </div>
-
 </div>
 
-<!-- Session breakdown — IO tokens only, all sessions -->
+<!-- Session Tables -->
 <div class="section">
-    <div class="section-divider">
-        <span class="section-divider-title">Session Breakdown</span>
-        <div class="section-divider-line"></div>
-        <span class="dimmer mono" style="font-size:11px;">{{ sess_pg.total }} session{{ 's' if sess_pg.total != 1 }} · IO tokens</span>
-    </div>
     <div class="card">
-        <div class="tbl-toolbar">
-            <div class="tbl-search-wrap">
-                <span class="tbl-search-icon">⌕</span>
-                <input type="text" name="sess_search" class="tbl-search-input"
-                       value="{{ sess_search }}" placeholder="search session id or project…"
-                       hx-get="/tokens" hx-target="#sess-table-wrap"
-                       hx-trigger="keyup changed delay:400ms"
-                       hx-vals='{"dr":"{{ dr }}","date_from":"{{ date_from }}","date_to":"{{ date_to }}","proj_search":"{{ proj_search }}"}'
-                       autocomplete="off">
+        <div class="card-header">
+            <div class="card-title">Session Usage Records</div>
+            <div class="search-wrap" style="max-width: 260px;">
+                <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;">
+                    <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+                </svg>
+                <input type="text" name="sess_search" class="search-input" value="{{ sess_search }}" 
+                       placeholder="Filter sessions..." 
+                       hx-get="/tokens" hx-target="#sess-table-wrap" hx-trigger="keyup changed delay:400ms">
             </div>
-            {% if sess_search %}
-            <a href="/tokens?dr={{ dr }}&date_from={{ date_from }}&date_to={{ date_to }}&proj_search={{ proj_search }}" class="tbl-btn clear">clear ✕</a>
-            {% endif %}
         </div>
         <div id="sess-table-wrap">
             {% include "analytics/_tokens_sess.html" %}
@@ -134,27 +141,18 @@
     </div>
 </div>
 
-<!-- Project breakdown — IO tokens only, all projects -->
 <div class="section">
-    <div class="section-divider">
-        <span class="section-divider-title">Project Breakdown</span>
-        <div class="section-divider-line"></div>
-        <span class="dimmer mono" style="font-size:11px;">{{ proj_pg.total }} project{{ 's' if proj_pg.total != 1 }} · IO tokens</span>
-    </div>
     <div class="card">
-        <div class="tbl-toolbar">
-            <div class="tbl-search-wrap">
-                <span class="tbl-search-icon">⌕</span>
-                <input type="text" name="proj_search" class="tbl-search-input"
-                       value="{{ proj_search }}" placeholder="search project name…"
-                       hx-get="/tokens" hx-target="#proj-table-wrap"
-                       hx-trigger="keyup changed delay:400ms"
-                       hx-vals='{"dr":"{{ dr }}","date_from":"{{ date_from }}","date_to":"{{ date_to }}","sess_search":"{{ sess_search }}"}'
-                       autocomplete="off">
+        <div class="card-header">
+            <div class="card-title">Project Aggregates</div>
+            <div class="search-wrap" style="max-width: 260px;">
+                <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;">
+                    <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+                </svg>
+                <input type="text" name="proj_search" class="search-input" value="{{ proj_search }}" 
+                       placeholder="Filter projects..." 
+                       hx-get="/tokens" hx-target="#proj-table-wrap" hx-trigger="keyup changed delay:400ms">
             </div>
-            {% if proj_search %}
-            <a href="/tokens?dr={{ dr }}&date_from={{ date_from }}&date_to={{ date_to }}&sess_search={{ sess_search }}" class="tbl-btn clear">clear ✕</a>
-            {% endif %}
         </div>
         <div id="proj-table-wrap">
             {% include "analytics/_tokens_proj.html" %}

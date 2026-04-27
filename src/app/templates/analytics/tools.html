@@ -1,38 +1,12 @@
 {% extends "base/index.html" %}
-{% block title %}Tool Calls — CloudByte{% endblock %}
+{% block title %}Tool Intelligence — CloudByte{% endblock %}
 {% block breadcrumb %}tool calls{% endblock %}
 
 {% block head %}<link rel="stylesheet" href="/static/css/analytics/tools.css">{% endblock %}
 
-{# ── Pagination macro — reused for all 3 tables ─────────────────────────── #}
-{% macro pagination(pg, base_url) %}
-{% if pg.total > 0 %}
-<div class="pagination">
-    <span class="pg-info">
-        showing {{ ((pg.page-1)*10)+1 }}–{{ [pg.page*10, pg.total]|min }} of {{ pg.total }}
-    </span>
-    <div class="pg-btns">
-        <a href="{{ base_url }}&page={{ pg.page-1 }}" class="pg-btn {% if pg.page <= 1 %}disabled{% endif %}">← prev</a>
-        {% if pg.pg_start > 1 %}
-            <a href="{{ base_url }}&page=1" class="pg-btn">1</a>
-            {% if pg.pg_start > 2 %}<span class="pg-dots">…</span>{% endif %}
-        {% endif %}
-        {% for pn in pg.page_nums %}
-        <a href="{{ base_url }}&page={{ pn }}" class="pg-btn {% if pn == pg.page %}active{% endif %}">{{ pn }}</a>
-        {% endfor %}
-        {% if pg.pg_end < pg.pages %}
-            {% if pg.pg_end < pg.pages - 1 %}<span class="pg-dots">…</span>{% endif %}
-            <a href="{{ base_url }}&page={{ pg.pages }}" class="pg-btn">{{ pg.pages }}</a>
-        {% endif %}
-        <a href="{{ base_url }}&page={{ pg.page+1 }}" class="pg-btn {% if pg.page >= pg.pages %}disabled{% endif %}">next →</a>
-    </div>
-</div>
-{% endif %}
-{% endmacro %}
-
 {% block content %}
 
-<!-- Chart data: forceescape keeps double-quoted JSON safe inside double-quoted HTML attrs -->
+<!-- Chart data -->
 <div id="chart-data" style="display:none;"
      data-labels="{{ chart_labels | tojson | forceescape }}"
      data-calls="{{ chart_calls | tojson | forceescape }}"
@@ -42,59 +16,66 @@
      data-cache-cr="{{ chart_cache_cr | tojson | forceescape }}">
 </div>
 
-<!-- ── Page header ── -->
-<div class="section" style="display:flex;align-items:center;justify-content:space-between;">
-    <div>
-        <div style="font-size:20px;font-weight:500;margin-bottom:4px;">Tool Calls</div>
-        <div class="dimmer mono" style="font-size:11px;">
-            {{ summary.total_calls }} calls · {{ summary.unique_tools }} tool types ·
-            {{ summary.sessions_with_tools }} session{{ 's' if summary.sessions_with_tools != 1 }} ·
-            {{ summary.projects_with_tools }} project{{ 's' if summary.projects_with_tools != 1 }}
+<!-- Page header -->
+<div class="section" style="margin-bottom: 40px; padding-top: 10px;">
+    <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:32px;">
+        <div>
+            <h1 style="font-size: 54px; font-weight: 400; color: var(--text); line-height: 1.0; letter-spacing: -0.05em; margin:0;">Tool Intelligence</h1>
+            <div class="dimmer" style="font-size: 16px; margin-top: 12px; font-weight: 400; letter-spacing: -0.02em;">
+                {% if dr == 'all' %}Global History{% elif dr == 'today' %}Today's Activity{% else %}{{ dr }}{% endif %}
+            </div>
+        </div>
+        <div style="display:flex; gap:48px;">
+            <div class="stat-unit">
+                <div style="font-size:10px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:4px;">Total Activity</div>
+                <div style="font-size:48px; font-weight:400; color:var(--text); line-height:1; letter-spacing:-0.04em;">{{ summary.total_calls }}</div>
+            </div>
+            <div class="stat-unit">
+                <div style="font-size:10px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:4px;">Unique Tools</div>
+                <div style="font-size:48px; font-weight:400; color:#fe4c02; line-height:1; letter-spacing:-0.04em;">{{ summary.unique_tools }}</div>
+            </div>
         </div>
     </div>
 </div>
 
-<!-- ── Chart filter bar — clearly scoped to charts only ── -->
-<div class="chart-filter-bar">
-    <span class="chart-filter-label">chart range</span>
-    <div class="dr-pills">
-        <a href="/tools?dr=all&tool_search={{ tool_search }}&sess_search={{ sess_search }}&proj_search={{ proj_search }}"
-           class="dr-pill {% if dr == 'all' %}active{% endif %}">all time</a>
-        <a href="/tools?dr=today&tool_search={{ tool_search }}&sess_search={{ sess_search }}&proj_search={{ proj_search }}"
-           class="dr-pill {% if dr == 'today' %}active{% endif %}">today</a>
-        <a href="/tools?dr=7days&tool_search={{ tool_search }}&sess_search={{ sess_search }}&proj_search={{ proj_search }}"
-           class="dr-pill {% if dr == '7days' %}active{% endif %}">7 days</a>
-        <a href="/tools?dr=30days&tool_search={{ tool_search }}&sess_search={{ sess_search }}&proj_search={{ proj_search }}"
-           class="dr-pill {% if dr == '30days' %}active{% endif %}">30 days</a>
+<!-- Filter toolbar -->
+<div class="card section filter-panel">
+    <div class="card-body" style="padding: 16px; display: flex; align-items: center; justify-content: space-between;">
+        <div style="display: flex; align-items: center; gap: 16px;">
+            <span class="filter-label">Range</span>
+            <div class="dr-pills">
+                <a href="/tools?dr=all" class="dr-pill {% if dr == 'all' %}active{% endif %}">All</a>
+                <a href="/tools?dr=today" class="dr-pill {% if dr == 'today' %}active{% endif %}">Today</a>
+                <a href="/tools?dr=7days" class="dr-pill {% if dr == '7days' %}active{% endif %}">7D</a>
+                <a href="/tools?dr=30days" class="dr-pill {% if dr == '30days' %}active{% endif %}">30D</a>
+            </div>
+        </div>
+        <div class="dimmer mono" style="font-size: 10px;">Filters apply to charts above</div>
     </div>
-    <span class="chart-filter-note">↑ filters charts only · tables are independent</span>
 </div>
 
-<!-- ── Charts — equal width, fixed height ── -->
+<!-- Main Charts -->
 <div class="charts-row section">
-
-    <!-- Donut: call distribution — canvas centered, legend 2-col grid below -->
-    <div class="chart-card">
-        <div class="chart-card-header">
-            <span class="chart-card-title">Call Distribution</span>
-            <span class="chart-card-sub">top 5 + others · {{ d_from }}{% if d_from != d_to %} → {{ d_to }}{% endif %}</span>
+    <!-- Donut: Distribution -->
+    <div class="chart-card card">
+        <div class="card-header">
+            <div class="card-title">Call Distribution</div>
         </div>
-        <div class="chart-body">
+        <div class="card-body">
             <div class="donut-wrap">
                 <div class="donut-canvas-wrap">
-                    <canvas id="donut-chart" width="140" height="140"></canvas>
+                    <canvas id="donut-chart"></canvas>
                     <div class="donut-center">
-                        <div class="donut-center-val">{{ summary.total_calls }}</div>
-                        <div class="donut-center-label">calls</div>
+                        <div class="donut-center-val" id="donut-total">—</div>
+                        <div class="donut-center-label">Calls</div>
                     </div>
                 </div>
                 <div class="donut-legend">
                     {% for label in chart_labels %}
-                    <div class="legend-item">
+                    <div class="legend-item" data-idx="{{ loop.index0 }}" onclick="toggleDonutSegment(this)">
                         <div class="legend-dot" data-index="{{ loop.index0 }}"></div>
                         <span class="legend-name">{{ label }}</span>
-                        <span class="legend-count">{{ chart_calls[loop.index0] }}</span>
-                        <span class="legend-pct">{{ (chart_calls[loop.index0] / (summary.total_calls or 1) * 100) | round | int }}%</span>
+                        <span class="legend-val">{{ chart_calls[loop.index0] }}</span>
                     </div>
                     {% endfor %}
                 </div>
@@ -102,225 +83,146 @@
         </div>
     </div>
 
-    <!-- Stacked bar: token consumption per tool (top 5 + others) -->
-    <div class="chart-card">
-        <div class="chart-card-header">
-            <span class="chart-card-title">Token Consumption</span>
-            <span class="chart-card-sub">input · output · cache rd · cache cr</span>
+    <!-- Bar: Tool Breakdown -->
+    <div class="chart-card card">
+        <div class="card-header">
+            <div class="card-title">Token Load Per Tool</div>
+            <div style="display:flex; gap:8px; align-items:center;">
+                <div style="display:flex; align-items:center; gap:6px; background:var(--bg-alt); border:1px solid var(--border); padding:4px 10px;">
+                    <div class="theme-square" style="width:8px; height:8px; background:var(--text); border:1px solid rgba(255,255,255,0.1);"></div>
+                    <span style="font-size:10px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Input</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:6px; background:var(--bg-alt); border:1px solid var(--border); padding:4px 10px;">
+                    <div style="width:8px; height:8px; background:#fe4c02;"></div>
+                    <span style="font-size:10px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Output</span>
+                </div>
+            </div>
         </div>
-        <div class="chart-body-bar" id="bar-wrap">
+        <div class="card-body" style="height: 450px;">
             <canvas id="bar-chart"></canvas>
         </div>
     </div>
-
 </div>
 
-<!-- ── Per-Tool Breakdown ── -->
+<!-- Efficiency Table -->
 <div class="section">
-    <div class="section-divider">
-        <span class="section-divider-title">Per Tool Breakdown</span>
-        <div class="section-divider-line"></div>
-    </div>
     <div class="card">
-        <div class="tbl-toolbar">
-            <div class="tbl-search-wrap">
-                <span class="tbl-search-icon">⌕</span>
-                <input type="text" name="tool_search" id="tool-search"
-                       class="tbl-search-input" value="{{ tool_search }}"
-                       placeholder="search tool name…"
-                       hx-get="/tools"
-                       hx-target="#tool-table-wrap"
-                       hx-trigger="keyup changed delay:400ms"
-                       hx-vals='{"top_n": "{{ top_n }}", "sess_search": "{{ sess_search }}", "proj_search": "{{ proj_search }}", "tool_page": "1"}'
-                       autocomplete="off">
+        <div class="card-header">
+            <div class="card-title">Tool Type Efficiency</div>
+            <div class="search-wrap" style="max-width: 260px;">
+                <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;">
+                    <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+                </svg>
+                <input type="text" id="tool-search" class="search-input" value="{{ tool_search }}" 
+                       placeholder="Filter tools..." 
+                       hx-get="/tools" hx-target="#tool-table-wrap" hx-trigger="keyup changed delay:400ms">
             </div>
-            {% if tool_search %}
-            <a href="/tools?top_n={{ top_n }}&sess_search={{ sess_search }}&proj_search={{ proj_search }}"
-               class="tbl-btn clear">clear ✕</a>
-            {% endif %}
         </div>
         <div id="tool-table-wrap">
-        <div class="table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Tool</th>
-                        <th>Calls</th>
-                        <th>Share</th>
-                        <th>Input</th>
-                        <th>Output</th>
-                        <th>Cache Rd.</th>
-                        <th>Cache Cr.</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in tool_rows %}
-                    <tr>
-                        <td>
-                            <div class="tool-name-cell">
-                                <div class="tool-color-dot" data-index="{{ loop.index0 + (tool_pg.page - 1) * 10 }}"></div>
-                                <span class="mono" style="font-weight:600;color:var(--amber);">{{ row.tool_name }}</span>
-                            </div>
-                        </td>
-                        <td><span class="mono accent-text" style="font-weight:600;">{{ row.call_count }}</span></td>
-                        <td style="min-width:110px;">
-                            <div class="call-bar-wrap">
-                                <div class="call-bar-track">
-                                    <div class="call-bar-fill"
-                                         data-pct="{{ row.call_pct }}"
-                                         data-index="{{ loop.index0 + (tool_pg.page - 1) * 10 }}"></div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Tool Name</th>
+                            <th>Calls</th>
+                            <th style="width:200px;">Volume Share</th>
+                            <th>Input</th>
+                            <th>Output</th>
+                            <th style="text-align:right;">Cache Rd.</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in tool_rows %}
+                        <tr>
+                            <td><span class="mono" style="font-weight: 700; color:var(--text);">{{ row.tool_name }}</span></td>
+                            <td><span class="mono" style="font-weight: 600;">{{ row.call_count }}</span></td>
+                            <td>
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    <div style="flex: 1; height: 4px; background: var(--bg-alt); border-radius: 0px; overflow: hidden;">
+                                        <div style="width: {{ row.call_pct or 0 }}%; height: 100%; background: #fe4c02;"></div>
+                                    </div>
+                                    <span class="mono dimmer" style="font-size:10px;">{{ row.call_pct }}%</span>
                                 </div>
-                                <span class="mono dimmer" style="font-size:10px;">{{ row.call_pct }}%</span>
-                            </div>
-                        </td>
-                        <td class="mono accent-text">{{ "{:,}".format(row.input_tokens or 0) }}</td>
-                        <td class="mono green-text">{{ "{:,}".format(row.output_tokens or 0) }}</td>
-                        <td class="mono" style="color:var(--purple);">{{ "{:,}".format(row.cache_read_tokens or 0) }}</td>
-                        <td class="mono amber-text">{{ "{:,}".format(row.cache_creation_tokens or 0) }}</td>
-                    </tr>
-                    {% else %}
-                    <tr><td colspan="7"><div class="empty">{% if tool_search %}no tools matching "{{ tool_search }}"{% else %}no tool data{% endif %}</div></td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+                            </td>
+                            <td class="mono" style="color:var(--text); font-weight:700;">{{ "{:,}".format(row.input_tokens or 0) }}</td>
+                            <td class="mono" style="color:#fe4c02; font-weight:600;">{{ "{:,}".format(row.output_tokens or 0) }}</td>
+                            <td class="mono" style="color:#ff8e5f; font-weight:500; text-align:right;">{{ "{:,}".format(row.cache_read_tokens or 0) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% if tool_pg.total > 0 %}
+            <div class="pagination">
+                <span class="pg-info">showing {{ ((tool_pg.page-1)*10)+1 }}–{{ [tool_pg.page*10, tool_pg.total]|min }} of {{ tool_pg.total }}</span>
+                <div class="pg-btns">
+                    {% set base = '/tools?dr='~dr~'&tool_search='~tool_search %}
+                    <a href="{{ base }}&page={{ tool_pg.page - 1 }}" class="pg-btn {% if tool_pg.page <= 1 %}disabled{% endif %}">← prev</a>
+                    {% for pn in tool_pg.page_nums %}<a href="{{ base }}&page={{ pn }}" class="pg-btn {% if pn == tool_pg.page %}active{% endif %}">{{ pn }}</a>{% endfor %}
+                    <a href="{{ base }}&page={{ tool_pg.page + 1 }}" class="pg-btn {% if tool_pg.page >= tool_pg.pages %}disabled{% endif %}">next →</a>
+                </div>
+            </div>
+            {% endif %}
         </div>
-        {{ pagination(tool_pg, '/tools?top_n='~top_n~'&tool_search='~tool_search~'&sess_search='~sess_search~'&proj_search='~proj_search) }}
-        </div><!-- end #tool-table-wrap -->
     </div>
 </div>
 
-<!-- ── Per-Session Breakdown ── -->
+<!-- Session Activity -->
 <div class="section">
-    <div class="section-divider">
-        <span class="section-divider-title">Per Session Breakdown</span>
-        <div class="section-divider-line"></div>
-    </div>
     <div class="card">
-        <div class="tbl-toolbar">
-            <div class="tbl-search-wrap">
-                <span class="tbl-search-icon">⌕</span>
-                <input type="text" name="sess_search" id="sess-search"
-                       class="tbl-search-input" value="{{ sess_search }}"
-                       placeholder="search session id or project…"
-                       hx-get="/tools"
-                       hx-target="#sess-table-wrap"
-                       hx-trigger="keyup changed delay:400ms"
-                       hx-vals='{"top_n": "{{ top_n }}", "tool_search": "{{ tool_search }}", "proj_search": "{{ proj_search }}", "sess_page": "1"}'
-                       autocomplete="off">
-            </div>
-            {% if sess_search %}
-            <a href="/tools?top_n={{ top_n }}&tool_search={{ tool_search }}&proj_search={{ proj_search }}"
-               class="tbl-btn clear">clear ✕</a>
-            {% endif %}
+        <div class="card-header">
+            <div class="card-title">Top Activity Sessions</div>
         </div>
         <div id="sess-table-wrap">
-        <div class="table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Session</th>
-                        <th>Project</th>
-                        <th>Date</th>
-                        <th>Tool Calls</th>
-                        <th>Unique Tools</th>
-                        <th>Input</th>
-                        <th>Output</th>
-                        <th>Cache Rd.</th>
-                        <th style="width:80px;"></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in sess_rows %}
-                    <tr>
-                        <td style="white-space:nowrap;">
-                            <a href="/sessions/{{ row.session_id }}" class="mono accent-text" style="font-size:11px;text-decoration:none;">{{ row.session_id[:8] }}…</a>
-                        </td>
-                        <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;" title="{{ row.project_name or '' }}">{{ row.project_name or '—' }}</td>
-                        <td class="mono dimmer" style="font-size:11px;white-space:nowrap;">{{ row.session_date or '—' }}</td>
-                        <td><span class="tool-badge">{{ row.tool_calls }}</span></td>
-                        <td class="mono dimmer" style="text-align:center;">{{ row.unique_tools }}</td>
-                        <td class="mono accent-text">{{ "{:,}".format(row.input_tokens or 0) }}</td>
-                        <td class="mono green-text">{{ "{:,}".format(row.output_tokens or 0) }}</td>
-                        <td class="mono" style="color:var(--purple);">{{ "{:,}".format(row.cache_read_tokens or 0) }}</td>
-                        <td style="text-align:right;">
-                            <a href="/tools/session/{{ row.session_id }}" class="tbl-btn explore" style="font-size:10px;padding:3px 8px;">analyse ↗</a>
-                        </td>
-                    </tr>
-                    {% else %}
-                    <tr><td colspan="9"><div class="empty">{% if sess_search %}no sessions matching "{{ sess_search }}"{% else %}no session data{% endif %}</div></td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {{ pagination(sess_pg, '/tools?top_n='~top_n~'&tool_search='~tool_search~'&sess_search='~sess_search~'&proj_search='~proj_search) }}
-        </div><!-- end #sess-table-wrap -->
-    </div>
-</div>
-
-<!-- ── Per-Project Breakdown ── -->
-<div class="section">
-    <div class="section-divider">
-        <span class="section-divider-title">Per Project Breakdown</span>
-        <div class="section-divider-line"></div>
-    </div>
-    <div class="card">
-        <div class="tbl-toolbar">
-            <div class="tbl-search-wrap">
-                <span class="tbl-search-icon">⌕</span>
-                <input type="text" name="proj_search" id="proj-search"
-                       class="tbl-search-input" value="{{ proj_search }}"
-                       placeholder="search project name…"
-                       hx-get="/tools"
-                       hx-target="#proj-table-wrap"
-                       hx-trigger="keyup changed delay:400ms"
-                       hx-vals='{"top_n": "{{ top_n }}", "tool_search": "{{ tool_search }}", "sess_search": "{{ sess_search }}", "proj_page": "1"}'
-                       autocomplete="off">
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Session</th>
+                            <th>Project context</th>
+                            <th>Activity</th>
+                            <th>Token Impact</th>
+                            <th style="width:140px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in sess_rows %}
+                        <tr>
+                            <td><span class="mono" style="font-weight:600; color:var(--text);">{{ row.session_id[:8] }}…</span></td>
+                            <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                                <div style="font-weight:600; color:var(--text);">
+                                    {% set raw_p = row.project_name or row.path or '—' %}
+                                    {{ (raw_p|replace('--', '/')|replace('\\', '/') if raw_p else '').split('/')|last }}
+                                </div>
+                            </td>
+                            <td><span class="mono" style="color:#fe4c02; font-weight:700;">{{ row.tool_calls }} calls</span></td>
+                            <td><span class="mono dimmer" style="font-size: 11px;">{{ "{:,}".format((row.input_tokens or 0) + (row.output_tokens or 0)) }} tokens</span></td>
+                            <td style="text-align: right;">
+                                <a href="/tools/session/{{ row.session_id }}" class="tbl-btn">drill down ↗</a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
-            {% if proj_search %}
-            <a href="/tools?top_n={{ top_n }}&tool_search={{ tool_search }}&sess_search={{ sess_search }}"
-               class="tbl-btn clear">clear ✕</a>
+            {% if sess_pg.total > 0 %}
+            <div class="pagination">
+                <span class="pg-info">showing {{ ((sess_pg.page-1)*10)+1 }}–{{ [sess_pg.page*10, sess_pg.total]|min }} of {{ sess_pg.total }}</span>
+                <div class="pg-btns">
+                    {% set base = '/tools?dr='~dr %}
+                    <a href="{{ base }}&sess_page={{ sess_pg.page-1 }}" class="pg-btn {% if sess_pg.page<=1 %}disabled{% endif %}">← prev</a>
+                    {% for pn in sess_pg.page_nums %}<a href="{{ base }}&sess_page={{ pn }}" class="pg-btn {% if pn==sess_pg.page %}active{% endif %}">{{ pn }}</a>{% endfor %}
+                    <a href="{{ base }}&sess_page={{ sess_pg.page+1 }}" class="pg-btn {% if sess_pg.page>=sess_pg.pages %}disabled{% endif %}">next →</a>
+                </div>
+            </div>
             {% endif %}
         </div>
-        <div id="proj-table-wrap">
-        <div class="table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Project</th>
-                        <th>Sessions</th>
-                        <th>Tool Calls</th>
-                        <th>Unique Tools</th>
-                        <th>Input</th>
-                        <th>Output</th>
-                        <th>Cache Rd.</th>
-                        <th style="width:80px;"></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in proj_rows %}
-                    <tr>
-                        <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;" title="{{ row.project_name or '' }}">{{ row.project_name or '—' }}</td>
-                        <td class="mono accent-text">{{ row.session_count }}</td>
-                        <td><span class="tool-badge">{{ row.tool_calls }}</span></td>
-                        <td class="mono dimmer" style="text-align:center;">{{ row.unique_tools }}</td>
-                        <td class="mono accent-text">{{ "{:,}".format(row.input_tokens or 0) }}</td>
-                        <td class="mono green-text">{{ "{:,}".format(row.output_tokens or 0) }}</td>
-                        <td class="mono" style="color:var(--purple);">{{ "{:,}".format(row.cache_read_tokens or 0) }}</td>
-                        <td style="text-align:right;">
-                            <a href="/tools/project/{{ row.project_id }}" class="tbl-btn explore" style="font-size:10px;padding:3px 8px;">analyse ↗</a>
-                        </td>
-                    </tr>
-                    {% else %}
-                    <tr><td colspan="8"><div class="empty">{% if proj_search %}no projects matching "{{ proj_search }}"{% else %}no project data{% endif %}</div></td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {{ pagination(proj_pg, '/tools?top_n='~top_n~'&tool_search='~tool_search~'&sess_search='~sess_search~'&proj_search='~proj_search) }}
-        </div><!-- end #proj-table-wrap -->
     </div>
 </div>
 
 {% endblock %}
 
-{% block scripts %}<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script><script src="/static/js/analytics/tools.js"></script>{% endblock %}
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="/static/js/analytics/tools.js"></script>
+{% endblock %}

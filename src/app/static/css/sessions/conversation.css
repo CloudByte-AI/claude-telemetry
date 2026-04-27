@@ -48,17 +48,17 @@
         position: absolute;
         left: 19px; top: 0; bottom: 0;
         width: 1px;
-        background: var(--border);
+        background: repeating-linear-gradient(to bottom, var(--border) 0px, var(--border) 4px, transparent 4px, transparent 8px);
     }
 
     .tl-item { display: flex; gap: 16px; margin-bottom: 16px; position: relative; }
 
     .tl-icon {
         width: 40px; height: 40px; border-radius: 50%;
-        border: 1px solid var(--border); background: var(--bg2);
+        border: 1px solid var(--border); background: var(--bg-surface);
         display: flex; align-items: center; justify-content: center;
-        flex-shrink: 0; font-size: 14px; position: relative; z-index: 1;
-        transition: border-color 0.15s;
+        flex-shrink: 0; font-size: 14px; position: relative; z-index: 10;
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     }
     .tl-icon.user  { border-color: var(--text3); }
     .tl-icon.think { border-color: rgba(160,130,250,0.4); background: rgba(160,130,250,0.06); }
@@ -69,10 +69,13 @@
 
     .tl-label {
         font-family: 'IBM Plex Mono', monospace;
-        font-size: 11px; font-weight: 600;
-        letter-spacing: 0.1em; text-transform: uppercase;
-        margin-bottom: 6px;
+        font-size: 10px; font-weight: 700;
+        letter-spacing: 0.12em; text-transform: uppercase;
+        margin-bottom: 8px;
         display: flex; align-items: center; justify-content: space-between;
+        position: sticky; top: 0;
+        background: var(--bg);
+        z-index: 20; padding: 4px 0;
     }
     .tl-label.user  { color: var(--text2); }
     .tl-label.think { color: var(--purple); }
@@ -81,8 +84,9 @@
 
     /* ── Collapsible tl-card ── */
     .tl-card {
-        border-radius: 8px; border: 1px solid var(--border);
-        overflow: hidden; transition: border-color 0.15s;
+        border-radius: 0px; border: 1px solid var(--border);
+        overflow: hidden; transition: all 0.2s;
+        background: var(--bg-surface);
     }
     .tl-card:hover { border-color: var(--border2); }
 
@@ -122,8 +126,18 @@
     .prompt-card { background: var(--bg3); padding: 16px; font-size: 14px; color: var(--text); line-height: 1.7; }
 
     /* ── Thinking card ── */
-    .think-card { padding: 14px 16px; background: rgba(160,130,250,0.04); }
-    .think-text { font-size: 13px; color: var(--text2); line-height: 1.7; font-style: italic; }
+    .think-card { 
+        padding: 24px; 
+        background: rgba(160,130,250,0.02); 
+        border-left: 3px solid var(--purple);
+    }
+    .think-text { 
+        font-size: 14px; 
+        color: var(--text); 
+        line-height: 1.7; 
+        font-style: italic;
+        font-family: 'Inter', sans-serif;
+    }
 
     /* ── Tool card ── */
     .tool-card-header {
@@ -140,7 +154,19 @@
     .tc-section { padding: 12px 14px; }
     .tc-section + .tc-section { border-left: 1px solid var(--border); }
     .tc-label { font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 600; color: var(--text2); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px; }
-    .tc-code { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--text2); white-space: pre-wrap; word-break: break-all; max-height: 120px; overflow-y: auto; line-height: 1.6; }
+    .tc-code { 
+        font-family: 'IBM Plex Mono', monospace; 
+        font-size: 11px; 
+        color: var(--text); 
+        white-space: pre-wrap; 
+        word-break: break-all; 
+        max-height: 300px; 
+        overflow-y: auto; 
+        line-height: 1.6;
+        padding: 12px;
+        background: #111;
+        color: #eee;
+    }
 
     /* tool collapsed bar — shows name + tokens + status */
     .tool-summary-bar {
@@ -204,7 +230,7 @@
     .rtp.crd b { color: var(--purple); }
 
     /* ── Right sidebar collapsible cards ── */
-    .sc-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; flex-shrink: 0; }
+    .sc-card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 0px; flex-shrink: 0; }
 
     .sc-header {
         padding: 10px 14px;

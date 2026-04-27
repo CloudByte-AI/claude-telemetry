@@ -5,115 +5,106 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}CloudByte{% endblock %}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/base.css">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/base.css?v=2.0.0">
+    <link rel="stylesheet" href="/static/css/base.css?v=2.1.0">
     {% block head %}{% endblock %}
 </head>
 <body>
 <div class="layout">
-
     <aside class="sidebar">
-        <div class="sidebar-logo">
-            <div class="logo-mark">◈ CloudByte</div>
-            <div class="logo-sub">claude code analytics</div>
+        <div class="sidebar-header">
+            <a href="/" class="logo-wrap" style="text-decoration: none;">
+                <div class="logo-mark" style="font-weight: 700; font-size: 20px; letter-spacing: -0.05em; color: var(--text);">
+                    CLOUD<span style="color: var(--accent);">BYTE</span>
+                </div>
+            </a>
         </div>
 
         <nav class="sidebar-nav">
-            <div class="nav-section">
-                <div class="nav-label">Overview</div>
-                <a href="/" class="nav-link {% if active == 'dashboard' %}active{% endif %}">
-                    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/>
-                        <rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/>
-                    </svg>
+            <div class="nav-group">
+                <div class="nav-label">Core</div>
+                <a href="/" class="nav-link {% if request.path == '/' %}active{% endif %}">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
                     Dashboard
                 </a>
-                <a href="/projects" class="nav-link {% if active == 'projects' %}active{% endif %}">
-                    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <path d="M2 4h12v9a1 1 0 01-1 1H3a1 1 0 01-1-1V4z"/><path d="M2 4l2-2h4l2 2"/>
-                    </svg>
+                <a href="/projects" class="nav-link {% if '/projects' in request.path %}active{% endif %}">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
                     Projects
-                </a>
-                <a href="/sessions" class="nav-link {% if active == 'sessions' %}active{% endif %}">
-                    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <rect x="1" y="3" width="14" height="10" rx="1.5"/><path d="M5 7h6M5 10h4"/>
-                    </svg>
-                    Sessions
                 </a>
             </div>
 
-            <div class="nav-section">
+            <div class="nav-group">
                 <div class="nav-label">Analytics</div>
-                <a href="/tokens" class="nav-link {% if active == 'tokens' %}active{% endif %}">
-                    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <path d="M1 12l4-4 3 3 4-5 3 3"/><path d="M1 14h14"/>
-                    </svg>
+                <a href="/sessions" class="nav-link {% if '/sessions' in request.path %}active{% endif %}">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20v-6M6 20V10M18 20V4"/></svg>
+                    Sessions
+                </a>
+                <a href="/tokens" class="nav-link {% if '/tokens' in request.path %}active{% endif %}">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M16 8l-8 8M8 8l8 8"/></svg>
                     Token Usage
                 </a>
-                <a href="/tools" class="nav-link {% if active == 'tools' %}active{% endif %}">
-                    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <path d="M10 2l4 4-7 7H3v-4l7-7z"/>
-                    </svg>
+                <a href="/tools" class="nav-link {% if '/tools' in request.path %}active{% endif %}">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
                     Tool Calls
                 </a>
             </div>
 
-            <div class="nav-section">
+            <div class="nav-group">
                 <div class="nav-label">Memory</div>
-                <a href="/observations" class="nav-link {% if active == 'observations' %}active{% endif %}">
-                    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <circle cx="8" cy="8" r="6"/><path d="M8 5v3l2 2"/>
-                    </svg>
+                <a href="/observations" class="nav-link {% if '/observations' in request.path %}active{% endif %}">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
                     Observations
                 </a>
-
             </div>
 
-            <div class="nav-section">
-                <div class="nav-label">System</div>
-                <a href="/config" class="nav-link {% if active == 'config' %}active{% endif %}">
-                    <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <circle cx="8" cy="8" r="2.5"/>
-                        <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.42 1.42M11.53 11.53l1.42 1.42M3.05 12.95l1.42-1.42M11.53 4.47l1.42-1.42"/>
-                    </svg>
-                    Configuration
+            <div class="nav-group" style="margin-top: auto; border-top: 1px solid var(--border); padding-top: 20px;">
+                <a href="/config" class="nav-link {% if request.path == '/config' %}active{% endif %}">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    Settings
                 </a>
             </div>
         </nav>
 
-        <div class="sidebar-footer">
-            <div class="status-dot">
-                <span class="dot"></span>
-                db connected
+        <div class="sidebar-footer" style="padding: 20px; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between;">
+            <div class="mono" style="font-size: 10px; font-weight: 700; color: var(--accent);">v0.1.1</div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+                <div style="width: 6px; height: 6px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 8px var(--accent);"></div>
             </div>
         </div>
     </aside>
 
     <div class="main">
-        <div class="topbar">
-            <div class="page-title">
-                <span>/</span>{% block breadcrumb %}home{% endblock %}
+        <header class="topbar">
+            <div class="page-info">
+                <div class="breadcrumb">/ <span>{% block breadcrumb %}home{% endblock %}</span></div>
             </div>
-            <div class="topbar-right">
-                <div class="theme-switcher">
-                    <button class="theme-btn" data-theme="dark"  onclick="setTheme('dark')">dark</button>
-                    <button class="theme-btn" data-theme="dim"   onclick="setTheme('dim')">dim</button>
-                    <button class="theme-btn" data-theme="light" onclick="setTheme('light')">light</button>
+            
+            <div class="topbar-actions">
+                <div class="theme-slider" id="theme-slider" onclick="toggleTheme()" title="Switch View Mode">
+                    <div class="theme-thumb"></div>
+                    <svg class="moon-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                    <svg class="sun-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
                 </div>
-                <span class="topbar-version">v0.1.0</span>
             </div>
-        </div>
+        </header>
 
-        <div class="content">
+        <main class="content">
             {% block content %}{% endblock %}
-        </div>
+        </main>
     </div>
-
 </div>
 
 <script src="https://unpkg.com/htmx.org@1.9.10/dist/htmx.min.js"></script>
 <script src="/static/js/theme.js"></script>
 <script src="/static/js/sse.js"></script>
+<script>
+    function toggleTheme() {
+        const curr = document.documentElement.getAttribute('data-theme');
+        const next = curr === 'dark' ? 'light' : 'dark';
+        setTheme(next);
+    }
+</script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

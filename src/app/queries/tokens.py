@@ -62,7 +62,7 @@ def get_sessions_io_breakdown(search: str = ""):
         like = f"%{search.strip()}%"
         params = (like, like)
     return q(f"""
-        SELECT s.session_id, p.name AS project_name,
+        SELECT s.session_id, p.name AS project_name, s.cwd,
                substr(s.created_at, 1, 10) AS session_date,
                COUNT(DISTINCT i.prompt_id)  AS turn_count,
                COALESCE(SUM(i.input_tokens),0)          AS io_input,
@@ -86,7 +86,7 @@ def get_projects_io_breakdown(search: str = ""):
         search_filter = "AND p.name LIKE ?"
         params = (f"%{search.strip()}%",)
     return q(f"""
-        SELECT p.project_id, p.name AS project_name,
+        SELECT p.project_id, p.name AS project_name, p.path,
                COALESCE(sc.session_count, 0) AS session_count,
                COALESCE(io.inp, 0) AS io_input,
                COALESCE(io.out, 0) AS io_output,

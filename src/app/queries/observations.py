@@ -138,14 +138,14 @@ def get_session_observations_full(session_id: str):
     """, (session_id,))
 
 
-def get_nearby_observations(obs_id: str, session_id: str, limit: int = 3):
+def get_nearby_observations(session_id: str, limit: int = 10):
     return q("""
         SELECT id, type, title, subtitle, created_at
         FROM HOOK_OBSERVATION
-        WHERE session_id = ? AND id != ?
+        WHERE session_id = ?
         ORDER BY created_at ASC
         LIMIT ?
-    """, (session_id, obs_id, limit))
+    """, (session_id, limit))
 
 
 def get_session_task_counts():

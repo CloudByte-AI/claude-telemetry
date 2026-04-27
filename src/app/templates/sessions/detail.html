@@ -11,192 +11,124 @@
 {% endblock %}
 
 {% block content %}
-
-
-<div class="section" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-    <div style="display:flex;align-items:center;gap:12px;">
-        <a href="/sessions" class="btn btn-ghost" style="font-size:11px;">← back</a>
-        <div>
-            <div style="font-size:18px;font-weight:500;font-family:'IBM Plex Mono',monospace;color:var(--accent);">
-                {{ session.session_id[:8] }}<span style="color:var(--text3);">…{{ session.session_id[-4:] }}</span>
-            </div>
-            <div class="dimmer" style="font-size:12px;">{{ session.project_name or 'Unknown project' }}</div>
+<div class="section" style="margin-bottom: 40px; padding-top: 10px; display: flex; align-items: flex-end; justify-content: space-between;">
+    <div>
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">
+            <a href="/sessions" class="btn btn-ghost" style="padding: 0 12px; font-size: 11px;">← Sessions</a>
+            <span class="dimmer">/</span>
+            <span class="mono" style="font-weight: 500; font-size: 11px;">{{ session.session_id[:12] }}</span>
         </div>
+        <h1 style="font-size: 54px; font-weight: 400; color: var(--text); line-height: 1.0; letter-spacing: -0.05em;" title="Full ID: {{ session.session_id }}">Session Detail</h1>
     </div>
-    <div style="display:flex;gap:8px;flex-shrink:0;flex-wrap:wrap;">
-<a href="/tokens/session/{{ session.session_id }}"
-           class="btn btn-ghost"
-           style="font-size:11px;color:var(--accent);border-color:rgba(0,212,255,0.3);background:rgba(0,212,255,0.04);">
-            token analysis ↗
-        </a>
-        <a href="/tools/session/{{ session.session_id }}"
-           class="btn btn-ghost"
-           style="font-size:11px;color:var(--amber);border-color:rgba(255,179,71,0.3);background:rgba(255,179,71,0.04);">
-            tool analysis ↗
-        </a>
+    
+    <div style="display: flex; gap: 12px;">
+        <a href="/tokens/session/{{ session.session_id }}" class="btn btn-primary" style="font-size: 11px;">Token Breakdown</a>
+        <a href="/tools/session/{{ session.session_id }}" class="btn btn-ghost" style="font-size: 11px;">Tool Analysis</a>
     </div>
 </div>
 
-<div class="session-layout">
+<div class="session-layout grid-sidebar section">
 
     <!-- Conversation turns -->
-    <div style="min-width:0;">
+    <div class="turns-container">
         {% for turn in turns %}
-        <div class="turn">
-
-            <!-- Turn header — click to expand/collapse conversation -->
-            <div class="turn-header">
-                <div class="turn-meta">
-                    <span class="turn-num">#{{ loop.index }}</span>
-                    <span class="turn-prompt">{{ turn.prompt }}</span>
+        <div class="turn-card card">
+            <div class="turn-header" style="display:flex; align-items:center; justify-content:space-between; padding:12px 20px; border-bottom:1px solid var(--border); background:var(--bg-alt);">
+                <div style="display:flex; align-items:center; gap:16px;">
+                    <div class="mono" style="font-size:10px; font-weight:800; color:var(--text-dim); letter-spacing:0.1em;">TURN {{ loop.index }}</div>
+                    <div style="width:1px; height:12px; background:var(--border);"></div>
+                    <div class="mono" style="font-size:11px; color:var(--text-muted); max-width:400px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ turn.prompt | truncate(80) }}</div>
                 </div>
-                <div class="turn-right">
-                    <!-- Plain text indicators — no badges -->
-                    <div class="turn-badges">
-                        {% if turn.tool_list and turn.tool_list | selectattr('thinking') | list %}
-                            <span class="turn-indicator has-think">thinking</span>
-                            <span class="turn-indicator" style="color:var(--border2);">·</span>
-                        {% endif %}
+
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <div style="display:flex; gap:6px;">
                         {% if turn.tool_list %}
-                            <span class="turn-indicator has-tools">{{ turn.tool_list|length }} tool{{ 's' if turn.tool_list|length != 1 }}</span>
+                        <div style="display:flex; align-items:center; background:rgba(254, 76, 2, 0.05); border:1px solid rgba(254, 76, 2, 0.1); padding:2px 8px; gap:6px;">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="#fe4c02" stroke-width="2.5" style="width:10px; height:10px;"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                            <span style="font-size:10px; font-weight:800; color:#fe4c02;">{{ turn.tool_list|length }}</span>
+                        </div>
+                        {% endif %}
+
+                        {% if obs_by_prompt and turn.prompt_id in obs_by_prompt %}
+                        {% set obs = obs_by_prompt[turn.prompt_id] %}
+                        <a href="/observations/{{ obs.id }}" style="text-decoration:none; display:flex; align-items:center; background:rgba(11, 223, 80, 0.05); border:1px solid rgba(11, 223, 80, 0.1); padding:2px 8px; gap:4px;">
+                            <span style="color:#0bdf50; font-size:11px;">✦</span>
+                            <span style="font-size:8px; font-weight:800; color:#0bdf50; letter-spacing:0.05em;">OBS</span>
+                        </a>
                         {% endif %}
                     </div>
-                    <!-- Observation button — only if this turn has an observation -->
-                    {% if obs_by_prompt and turn.prompt_id in obs_by_prompt %}
-                    {% set obs = obs_by_prompt[turn.prompt_id] %}
-                    <a href="/observations/{{ obs.id }}"
-                       style="display:inline-flex;align-items:center;gap:4px;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:500;color:var(--amber);text-decoration:none;padding:3px 8px;border:1px solid rgba(255,179,71,0.3);border-radius:4px;background:rgba(255,179,71,0.06);white-space:nowrap;flex-shrink:0;transition:all 0.15s;"
-                       onmouseover="this.style.background='rgba(255,179,71,0.12)';this.style.borderColor='var(--amber)'"
-                       onmouseout="this.style.background='rgba(255,179,71,0.06)';this.style.borderColor='rgba(255,179,71,0.3)'"
-                       title="{{ obs.title or 'View observation' }}">
-                        ✦ observation
-                    </a>
-                    {% endif %}
-                    <!-- Token button -->
-                    <span class="tok-btn" onclick="toggleTokenPanel(this)" title="View token breakdown">
-                        tokens ▼
-                    </span>
-                    <!-- Detail link -->
-                    <a href="/conversation/{{ turn.prompt_id }}" class="conv-link">conversation detail ↗</a>
+
+                    <div style="display:flex; gap:1px; background:var(--border); border:1px solid var(--border);">
+                        <button class="btn btn-ghost tok-trigger" onclick="toggleTokenPanel(this)" style="background:var(--bg-surface); height:28px; font-size:9px; font-weight:800; border:none; padding:0 10px; letter-spacing:0.05em;">TOKENS</button>
+                        <a href="/conversation/{{ turn.prompt_id }}" class="btn btn-primary" style="height:28px; font-size:9px; font-weight:800; border:none; padding:0 10px; background:#111; color:#fff; letter-spacing:0.05em;">LOGS</a>
+                    </div>
                 </div>
             </div>
 
-            <!-- Token panel — inline, independent of conversation expand -->
-            <div class="token-panel">
-                <div class="tp-title">◈ conversation #{{ loop.index }} — token breakdown</div>
-
-                <!-- Response tokens -->
-                {% if turn.tokens %}
-                <div class="tp-section">
-                    <div class="tp-section-label">response tokens</div>
-                    <div class="tp-grid">
-                        <div class="tp-cell inp">
-                            <div class="tp-cell-label">input</div>
-                            <div class="tp-cell-val">{{ "{:,}".format(turn.tokens.input_tokens or 0) }}</div>
-                        </div>
-                        <div class="tp-cell out">
-                            <div class="tp-cell-label">output</div>
-                            <div class="tp-cell-val">{{ "{:,}".format(turn.tokens.output_tokens or 0) }}</div>
-                        </div>
-                        <div class="tp-cell ccr">
-                            <div class="tp-cell-label">cache create</div>
-                            <div class="tp-cell-val">{{ "{:,}".format(turn.tokens.cache_creation_tokens or 0) }}</div>
-                        </div>
-                        <div class="tp-cell crd">
-                            <div class="tp-cell-label">cache read</div>
-                            <div class="tp-cell-val">{{ "{:,}".format(turn.tokens.cache_read_tokens or 0) }}</div>
-                        </div>
-                    </div>
-                </div>
-                {% endif %}
-
-                <!-- Tool token totals -->
-                {% if turn.tool_tokens_agg and turn.tool_list %}
-                <div class="tp-divider"></div>
-                <div class="tp-section">
-                    <div class="tp-section-label">tool tokens total ({{ turn.tool_list|length }} tool{{ 's' if turn.tool_list|length != 1 }})</div>
-                    <div class="tp-grid">
-                        <div class="tp-cell inp">
-                            <div class="tp-cell-label">input</div>
-                            <div class="tp-cell-val">{{ "{:,}".format(turn.tool_tokens_agg.input_tokens or 0) }}</div>
-                        </div>
-                        <div class="tp-cell out">
-                            <div class="tp-cell-label">output</div>
-                            <div class="tp-cell-val">{{ "{:,}".format(turn.tool_tokens_agg.output_tokens or 0) }}</div>
-                        </div>
-                        <div class="tp-cell ccr">
-                            <div class="tp-cell-label">cache create</div>
-                            <div class="tp-cell-val">{{ "{:,}".format(turn.tool_tokens_agg.cache_creation_tokens or 0) }}</div>
-                        </div>
-                        <div class="tp-cell crd">
-                            <div class="tp-cell-label">cache read</div>
-                            <div class="tp-cell-val">{{ "{:,}".format(turn.tool_tokens_agg.cache_read_tokens or 0) }}</div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Combined total row -->
-                <div class="tp-divider"></div>
-                <div class="tp-section">
-                    <div class="tp-section-label">combined total</div>
-                    <div class="tp-grid">
-                        <div class="tp-cell inp">
-                            <div class="tp-cell-label">input</div>
-                            <div class="tp-cell-val">{{ "{:,}".format((turn.tokens.input_tokens or 0) + (turn.tool_tokens_agg.input_tokens or 0) if turn.tokens else (turn.tool_tokens_agg.input_tokens or 0)) }}</div>
-                        </div>
-                        <div class="tp-cell out">
-                            <div class="tp-cell-label">output</div>
-                            <div class="tp-cell-val">{{ "{:,}".format((turn.tokens.output_tokens or 0) + (turn.tool_tokens_agg.output_tokens or 0) if turn.tokens else (turn.tool_tokens_agg.output_tokens or 0)) }}</div>
-                        </div>
-                        <div class="tp-cell ccr">
-                            <div class="tp-cell-label">cache create</div>
-                            <div class="tp-cell-val">{{ "{:,}".format((turn.tokens.cache_creation_tokens or 0) + (turn.tool_tokens_agg.cache_creation_tokens or 0) if turn.tokens else (turn.tool_tokens_agg.cache_creation_tokens or 0)) }}</div>
-                        </div>
-                        <div class="tp-cell crd">
-                            <div class="tp-cell-label">cache read</div>
-                            <div class="tp-cell-val">{{ "{:,}".format((turn.tokens.cache_read_tokens or 0) + (turn.tool_tokens_agg.cache_read_tokens or 0) if turn.tokens else (turn.tool_tokens_agg.cache_read_tokens or 0)) }}</div>
-                        </div>
-                    </div>
-                </div>
-                {% endif %}
+            <div class="card-body" style="padding:24px;">
+                <div class="mono" style="font-size:14px; line-height:1.6; color:var(--text); white-space:pre-wrap;">{{ turn.prompt }}</div>
             </div>
 
+            <!-- Token panel -->
+            <div class="token-panel-inline">
+                <div class="tp-grid">
+                    <div class="tp-cell">
+                        <div class="tp-label">Input</div>
+                        <div class="tp-val">{{ "{:,}".format(turn.tokens.input_tokens or 0) }}</div>
+                    </div>
+                    <div class="tp-cell">
+                        <div class="tp-label">Output</div>
+                        <div class="tp-val accent-text">{{ "{:,}".format(turn.tokens.output_tokens or 0) }}</div>
+                    </div>
+                    <div class="tp-cell">
+                        <div class="tp-label">Cache Create</div>
+                        <div class="tp-val amber-text">{{ "{:,}".format(turn.tokens.cache_creation_tokens or 0) }}</div>
+                    </div>
+                    <div class="tp-cell">
+                        <div class="tp-label">Cache Read</div>
+                        <div class="tp-val purple-text">{{ "{:,}".format(turn.tokens.cache_read_tokens or 0) }}</div>
+                    </div>
+                </div>
+            </div>
         </div>
         {% else %}
-        <div class="card"><div class="empty">no turns recorded for this session</div></div>
+        <div class="empty-card card">
+            <div class="empty">No conversation turns recorded.</div>
+        </div>
         {% endfor %}
     </div>
 
+    {% set proj_display = (session.cwd|replace('--', '/')|replace('\\', '/') if session.cwd else '').split('/')|last or 'Default' %}
     <!-- Sidebar -->
-    <div class="sticky-sidebar">
-
-        <div class="card section">
-            <div class="card-header"><span class="card-title">Session Info</span></div>
-            <div style="padding:4px 16px;">
-                <div class="info-row">
-                    <span class="info-key">project</span>
-                    <span class="info-val" style="color:var(--accent);">{{ session.project_name or '—' }}</span>
+    <aside class="sidebar-info">
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">Session Context</div>
+            </div>
+            <div class="card-body">
+                <div class="detail-row">
+                    <span class="detail-label">Project</span>
+                    <span class="detail-val accent-text" style="color:#fe4c02;">{{ proj_display }}</span>
                 </div>
-                <div class="info-row">
-                    <span class="info-key">cwd</span>
-                    <span class="info-val mono" style="color:var(--text2);">{{ session.cwd or '—' }}</span>
+                <div class="detail-row">
+                    <span class="detail-label">Started</span>
+                    <span class="detail-val mono dimmer">{{ session.created_at[:16].replace('T',' ') }}</span>
                 </div>
-                <div class="info-row">
-                    <span class="info-key">started</span>
-                    <span class="info-val mono">{{ session.created_at[:16].replace('T',' ') if session.created_at else '—' }}</span>
+                <div class="detail-row">
+                    <span class="detail-label">Directory</span>
+                    <span class="detail-val mono dimmer" style="font-size: 10px;">{{ session.cwd }}</span>
                 </div>
-                <div class="info-row">
-                    <span class="info-key">turns</span>
-                    <span class="info-val accent-text mono">{{ turns|length }}</span>
+                <div class="divider"></div>
+                <div class="detail-row">
+                    <span class="detail-label">Total Turns</span>
+                    <span class="detail-val mono">{{ turns|length }}</span>
                 </div>
-                <div class="info-row">
-                    <span class="info-key">tools</span>
-                    <span class="info-val amber-text mono">{{ total_tool_count }}</span>
+                <div class="detail-row">
+                    <span class="detail-label">Total Tools</span>
+                    <span class="detail-val mono amber-text">{{ total_tool_count }}</span>
                 </div>
             </div>
         </div>
-
-    </div>
+    </aside>
 </div>
-
 {% endblock %}

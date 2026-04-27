@@ -17,50 +17,51 @@
 </div>
 
 <!-- Header -->
-<div class="analysis-header-card section">
-    <div class="analysis-header-left">
-        <div style="display:flex;align-items:center;gap:10px;">
-            <span class="analysis-id-val">{{ session.session_id[:8] }}…{{ session.session_id[-4:] }}</span>
-            <span class="badge badge-blue" style="font-size:10px;">token analysis</span>
+<div class="section" style="margin-bottom: 40px; padding-top: 10px;">
+    <div style="display:flex; justify-content:space-between; align-items:flex-end;">
+        <div>
+            <div style="font-size:10px; font-weight:800; color:var(--amber); text-transform:uppercase; letter-spacing:0.12em; margin-bottom:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:600px;">
+                {% set raw_p = session.project_name or session.cwd or '—' %}
+                {{ (raw_p|replace('--', '/')|replace('\\', '/') if raw_p else '').split('/')|last }}
+            </div>
+            <h1 style="font-size: 54px; font-weight: 400; color: var(--text); line-height: 1.0; letter-spacing: -0.05em; margin:0;">Session Intelligence</h1>
+            <div class="dimmer" style="font-size: 13px; margin-top: 12px; font-weight: 400; letter-spacing: -0.02em;">
+                <span class="mono">{{ session.session_id }}</span>
+            </div>
         </div>
-        <div class="analysis-meta-row">
-            <div class="analysis-meta-item">project <span>{{ session.project_name or '—' }}</span></div>
-            <div class="analysis-meta-item">started <span>{{ session.created_at[:16].replace('T',' ') if session.created_at else '—' }}</span></div>
-            <div class="analysis-meta-item">turns <span>{{ turn_data|length }}</span></div>
+        <div class="analysis-header-right" style="display:flex; gap:8px;">
+            <a href="/tokens" class="tbl-btn">← all tokens</a>
+            <a href="/tools/session/{{ session.session_id }}" class="tbl-btn tbl-btn-amber">tool analysis ↗</a>
+            <a href="/sessions/{{ session.session_id }}" class="tbl-btn">session detail ↗</a>
         </div>
-    </div>
-    <div class="analysis-header-right">
-        <a href="/tools/session/{{ session.session_id }}" class="btn btn-ghost" style="font-size:11px;color:var(--amber);border-color:rgba(255,179,71,0.3);background:rgba(255,179,71,0.04);">tool analysis ↗</a>
-        <a href="/sessions/{{ session.session_id }}" class="btn btn-ghost" style="font-size:11px;">session detail ↗</a>
-        <a href="/tokens" class="btn btn-ghost" style="font-size:11px;">← token usage</a>
     </div>
 </div>
 
 <!-- Stat tiles: IO total, Tool total, Tool turns, Unique tools -->
-<div class="stats-grid section">
-    <div class="stat-tile accent">
-        <div class="stat-label">IO Tokens</div>
-        <div class="stat-value">
+<div class="stats-grid section" style="display:grid; grid-template-columns: repeat(4, 1fr); gap:1px; background:var(--border); border:1px solid var(--border);">
+    <div class="stat-unit" style="background:var(--bg-surface); padding:24px;">
+        <div style="font-size:10px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:12px;">IO Volume</div>
+        <div style="font-size:48px; font-weight:400; color:var(--text); line-height:1; letter-spacing:-0.04em;">
             {% set v = io_total %}{% if v >= 1000000 %}{{ "%.1f"|format(v/1000000) }}M{% elif v >= 1000 %}{{ "%.1f"|format(v/1000) }}K{% else %}{{ v }}{% endif %}
         </div>
-        <div class="stat-sub">{{ "{:,}".format(io_total) }} total</div>
+        <div style="font-family:'IBM Plex Mono'; font-size:10px; color:var(--text-dim); margin-top:8px;">{{ "{:,}".format(io_total) }} tokens</div>
     </div>
-    <div class="stat-tile purple">
-        <div class="stat-label">Tool Tokens</div>
-        <div class="stat-value">
+    <div class="stat-unit" style="background:var(--bg-surface); padding:24px;">
+        <div style="font-size:10px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:12px;">Tool Cost</div>
+        <div style="font-size:48px; font-weight:400; color:#fe4c02; line-height:1; letter-spacing:-0.04em;">
             {% set v = tool_total %}{% if v >= 1000000 %}{{ "%.1f"|format(v/1000000) }}M{% elif v >= 1000 %}{{ "%.1f"|format(v/1000) }}K{% else %}{{ v }}{% endif %}
         </div>
-        <div class="stat-sub">{{ "{:,}".format(tool_total) }} total</div>
+        <div style="font-family:'IBM Plex Mono'; font-size:10px; color:var(--text-dim); margin-top:8px;">{{ "{:,}".format(tool_total) }} tokens</div>
     </div>
-    <div class="stat-tile green">
-        <div class="stat-label">Tool-Active Turns</div>
-        <div class="stat-value">{{ turns_with_tools }}</div>
-        <div class="stat-sub">turns that produced tool tokens</div>
+    <div class="stat-unit" style="background:var(--bg-surface); padding:24px;">
+        <div style="font-size:10px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:12px;">Active Turns</div>
+        <div style="font-size:48px; font-weight:400; color:var(--text); line-height:1; letter-spacing:-0.04em;">{{ turns_with_tools }}</div>
+        <div style="font-family:'IBM Plex Mono'; font-size:10px; color:var(--text-dim); margin-top:8px;">tool-active phases</div>
     </div>
-    <div class="stat-tile amber">
-        <div class="stat-label">Tool Types Used</div>
-        <div class="stat-value">{{ unique_tools }}</div>
-        <div class="stat-sub">distinct tool types</div>
+    <div class="stat-unit" style="background:var(--bg-surface); padding:24px;">
+        <div style="font-size:10px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:12px;">Tool Variance</div>
+        <div style="font-size:48px; font-weight:400; color:var(--text); line-height:1; letter-spacing:-0.04em;">{{ unique_tools }}</div>
+        <div style="font-family:'IBM Plex Mono'; font-size:10px; color:var(--text-dim); margin-top:8px;">distinct tool types</div>
     </div>
 </div>
 
@@ -138,17 +139,17 @@
                     <tr>
                         <td><span class="turn-num-cell">#{{ row.turn_num }}</span></td>
                         <td>
-                            <div style="font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px;" title="{{ row.prompt or '' }}">
-                                {{ row.prompt | truncate(60) if row.prompt else '—' }}
+                            <div style="font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:340px;" title="{{ row.prompt or '' }}">
+                                {{ row.prompt | truncate(80) if row.prompt else '—' }}
                             </div>
                         </td>
-                        <td class="mono accent-text">{{ "{:,}".format(row.input_tokens or 0) }}</td>
-                        <td class="mono green-text">{{ "{:,}".format(row.output_tokens or 0) }}</td>
-                        <td class="mono" style="color:var(--purple);">{{ "{:,}".format(row.cache_read_tokens or 0) }}</td>
-                        <td class="mono amber-text">{{ "{:,}".format(row.cache_creation_tokens or 0) }}</td>
+                        <td class="mono" style="color:var(--text); font-weight:700;">{{ "{:,}".format(row.input_tokens or 0) }}</td>
+                        <td class="mono" style="color:#fe4c02; font-weight:600;">{{ "{:,}".format(row.output_tokens or 0) }}</td>
+                        <td class="mono" style="color:#ff6d31; font-weight:500;">{{ "{:,}".format(row.cache_read_tokens or 0) }}</td>
+                        <td class="mono" style="color:#ff8e5f; font-weight:400;">{{ "{:,}".format(row.cache_creation_tokens or 0) }}</td>
                         <td class="mono" style="text-align:right;font-weight:600;color:var(--text);">{{ "{:,}".format(row.total or 0) }}</td>
                         <td style="text-align:right;">
-                            <a href="/conversation/{{ row.prompt_id }}" class="btn btn-ghost" style="font-size:10px;padding:3px 9px;white-space:nowrap;">view ↗</a>
+                            <a href="/conversation/{{ row.prompt_id }}" class="tbl-btn">view turn ↗</a>
                         </td>
                     </tr>
                     {% else %}

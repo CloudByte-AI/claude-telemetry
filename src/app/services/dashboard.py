@@ -5,16 +5,13 @@ from ..queries import dashboard as dq
 ALL_OBS_TYPES = ["bugfix", "feature", "refactor", "change", "discovery", "decision"]
 OBS_LABELS    = ["Bug Fix", "Feature", "Refactor", "Change", "Discovery", "Decision"]
 
-# Distinct colour per project (up to 8)
+# Intercom Monochromatic Orange Ramp
 PROJ_COLORS = [
-    ("rgba(0,212,255,0.15)",  "rgba(0,212,255,0.9)",  "rgba(0,212,255,1)"),
-    ("rgba(0,229,160,0.15)",  "rgba(0,229,160,0.9)",  "rgba(0,229,160,1)"),
-    ("rgba(167,139,250,0.15)","rgba(167,139,250,0.9)","rgba(167,139,250,1)"),
-    ("rgba(255,179,71,0.15)", "rgba(255,179,71,0.9)", "rgba(255,179,71,1)"),
-    ("rgba(220,80,80,0.15)",  "rgba(220,80,80,0.9)",  "rgba(220,80,80,1)"),
-    ("rgba(0,180,255,0.15)",  "rgba(0,180,255,0.9)",  "rgba(0,180,255,1)"),
-    ("rgba(255,99,132,0.15)", "rgba(255,99,132,0.9)", "rgba(255,99,132,1)"),
-    ("rgba(255,205,86,0.15)", "rgba(255,205,86,0.9)", "rgba(255,205,86,1)"),
+    ("rgba(254, 76, 2, 0.08)",  "rgba(254, 76, 2, 0.6)",  "#fe4c02"), # Fin Orange (Base)
+    ("rgba(200, 50, 0, 0.08)",  "rgba(200, 50, 0, 0.6)",  "#c83200"), # Darker Orange
+    ("rgba(255, 120, 40, 0.08)", "rgba(255, 120, 40, 0.6)", "#ff7828"), # Lighter Orange
+    ("rgba(150, 30, 0, 0.08)",  "rgba(150, 30, 0, 0.6)",  "#961e00"), # Deep Burnt Orange
+    ("rgba(255, 160, 80, 0.08)", "rgba(255, 160, 80, 0.6)", "#ffa050"), # Soft Orange
 ]
 
 
@@ -67,7 +64,8 @@ def get_dashboard_context() -> dict:
             "backgroundColor":    col[0],
             "borderColor":        col[1],
             "pointBackgroundColor": col[2],
-            "pointRadius":        4,
+            "pointRadius":        3,
+            "borderWidth":        1.5,
         })
 
     # ── Observation Types Radar: edges = obs types, one dataset per project ───
@@ -90,7 +88,8 @@ def get_dashboard_context() -> dict:
             "backgroundColor":    col[0],
             "borderColor":        col[1],
             "pointBackgroundColor": col[2],
-            "pointRadius":        4,
+            "pointRadius":        3,
+            "borderWidth":        1.5,
         })
 
     has_obs_data = any(sum(d["raw"]) > 0 for d in obs_radar_datasets) if obs_radar_datasets else False
@@ -112,5 +111,5 @@ def get_dashboard_context() -> dict:
         "has_obs_data":         has_obs_data,
         # Lists
         "recent_sessions":      list(dq.get_recent_sessions(5)),
-        "latest_obs":           list(dq.get_latest_observations(2)),
+        "latest_obs":           list(dq.get_latest_observations(5)),
     }

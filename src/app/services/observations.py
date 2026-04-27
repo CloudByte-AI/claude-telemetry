@@ -1,6 +1,7 @@
 """Business logic for observations and session summaries."""
 
 import json
+from datetime import datetime, timedelta
 from ..queries import observations as oq
 from .utils import paginate
 
@@ -33,7 +34,26 @@ def _enrich_observation(row) -> dict:
     d["concepts"]       = _parse_json_field(d.get("concepts"))
     d["files_read"]     = _parse_json_field(d.get("files_read"))
     d["files_modified"] = _parse_json_field(d.get("files_modified"))
-    d["type_meta"]      = TYPE_META.get(d.get("type", ""), {"label": d.get("type", ""), "color": "accent", "icon": "◎"})
+    
+    # Clean Project Path (Robust)
+    raw_p = d.get("project_name", "")
+    if raw_p:
+        cleaned = raw_p.replace('\\', '/').replace('--', '/')
+        if '/' in cleaned:
+            d["project_display"] = cleaned.split('/')[-1]
+        elif '-' in cleaned:
+            # Aggressive dash cleaning: CloudByte-plugin-claude-telemetry -> claude-telemetry
+            parts = cleaned.split('-')
+            if len(parts) > 2:
+                d["project_display"] = "-".join(parts[-2:])
+            else:
+                d["project_display"] = cleaned
+        else:
+            d["project_display"] = cleaned
+    else:
+        d["project_display"] = "—"
+
+    d["type_meta"] = TYPE_META.get(d.get("type", ""), {"label": d.get("type", ""), "color": "accent", "icon": "◎"})
     return d
 
 
@@ -49,7 +69,36 @@ def get_observations_context(
     paged, pg   = paginate(all_rows, page, per_page)
     type_counts = {r["type"]: r["count"] for r in oq.get_observation_type_counts()}
 
-    # Get session task counts (pending/failed/completed)
+    # Timeline Data
+    end_dt = datetime.now()
+    if date_to:
+        try: end_dt = datetime.strptime(date_to, '%Y-%m-%d')
+        except: pass
+    
+    start_dt = end_dt - timedelta(days=13)
+    if date_from:
+        try: start_dt = datetime.strptime(date_from, '%Y-%m-%d')
+        except: pass
+
+    timeline_labels = []
+    curr = start_dt
+    while curr <= end_dt:
+        timeline_labels.append(curr.strftime('%Y-%m-%d'))
+        curr += timedelta(days=1)
+    
+    timeline_data = [0] * len(timeline_labels)
+    for obs in all_rows:
+        if obs.get("created_at"):
+            d_str = obs["created_at"][:10]
+            if d_str in timeline_labels:
+                idx = timeline_labels.index(d_str)
+                timeline_data[idx] += 1
+
+    # Donut Data
+    donut_labels = [TYPE_META[t]["label"] for t in ALL_TYPES if type_counts.get(t,0) > 0]
+    donut_values = [type_counts.get(t,0) for t in ALL_TYPES if type_counts.get(t,0) > 0]
+
+    # Task counts
     session_task_counts = {}
     for row in oq.get_session_task_counts():
         session_id = row["session_id"]
@@ -60,55 +109,9 @@ def get_observations_context(
             "completed": row["completed"] or 0,
         }
 
-    # Bubble chart data — session × type matrix
-    bubble_raw  = list(oq.get_bubble_chart_data(date_from, date_to))
-    # Build unique session labels (short ids)
-    sessions_seen = []
-    session_labels = {}
-    for row in bubble_raw:
-        sid = row["session_id"]
-        if sid not in session_labels:
-            session_labels[sid] = len(sessions_seen)
-            sessions_seen.append(sid[:8] + "…")
-
-    # One dataset per type
-    type_colors = {
-        "bugfix":    "rgba(220,80,80,0.75)",
-        "feature":   "rgba(0,229,160,0.75)",
-        "refactor":  "rgba(167,139,250,0.75)",
-        "change":    "rgba(0,212,255,0.75)",
-        "discovery": "rgba(255,179,71,0.75)",
-        "decision":  "rgba(0,180,255,0.75)",
-    }
-    bubble_datasets = []
-    for t in ALL_TYPES:
-        points = []
-        for row in bubble_raw:
-            if row["type"] == t:
-                points.append({
-                    "x": session_labels[row["session_id"]],
-                    "y": ALL_TYPES.index(t),
-                    "r": min(6 + row["count"] * 4, 32),
-                    "count": row["count"],
-                    "session": row["session_id"][:8] + "…",
-                    "project": row["project_name"] or "—",
-                })
-        if points:
-            bubble_datasets.append({
-                "label":           TYPE_META[t]["label"],
-                "data":            points,
-                "backgroundColor": type_colors.get(t, "rgba(122,154,184,0.75)"),
-            })
-
-    total = sum(len(r) for r in [all_rows])
-
-    # Add task counts to each observation
     for obs in paged:
         session_id = obs.get("session_id")
-        if session_id in session_task_counts:
-            obs["task_counts"] = session_task_counts[session_id]
-        else:
-            obs["task_counts"] = {"pending": 0, "running": 0, "failed": 0, "completed": 0}
+        obs["task_counts"] = session_task_counts.get(session_id, {"pending":0, "running":0, "failed":0, "completed":0})
 
     return {
         "active":          "observations",
@@ -122,9 +125,11 @@ def get_observations_context(
         "type_meta":       TYPE_META,
         "all_types":       ALL_TYPES,
         "total":           len(all_rows),
-        "bubble_datasets": bubble_datasets,
-        "bubble_x_labels": sessions_seen,
-        "bubble_y_labels": [TYPE_META[t]["label"] for t in ALL_TYPES],
+        
+        "timeline_labels": timeline_labels,
+        "timeline_values": timeline_data,
+        "donut_labels":    donut_labels,
+        "donut_values":    donut_values,
         "session_task_counts": session_task_counts,
     }
 
@@ -135,9 +140,9 @@ def get_observation_detail_context(obs_id: str) -> dict | None:
         return None
 
     obs     = _enrich_observation(row)
-    nearby  = [dict(r) for r in oq.get_nearby_observations(obs_id, obs["session_id"])]
+    nearby  = [dict(r) for r in oq.get_nearby_observations(obs["session_id"])]
     for n in nearby:
-        n["type_meta"] = TYPE_META.get(n.get("type", ""), {"label": "", "color": "accent", "icon": "◎"})
+        n["type_meta"] = TYPE_META.get(n.get("type", ""), {"label": n.get("type", "").capitalize(), "color": "accent", "icon": "◎"})
 
     return {
         "active":      "observations",

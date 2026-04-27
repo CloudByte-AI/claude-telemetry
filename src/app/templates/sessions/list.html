@@ -13,14 +13,12 @@
 {% block content %}
 
 <!-- Page header -->
-<div class="section" style="display:flex;align-items:center;justify-content:space-between;">
-    <div>
-        <div style="font-size:20px;font-weight:500;margin-bottom:4px;">Sessions</div>
-        <div class="dimmer mono" style="font-size:11px;">
-            {{ total_records }} session{{ 's' if total_records != 1 }}
-            {% if search %} · matching "{{ search }}"{% endif %}
-            · page {{ page }}/{{ total_pages }}
-        </div>
+<div class="section" style="margin-bottom: 40px; padding-top: 10px;">
+    <h1 style="font-size: 54px; font-weight: 400; color: var(--text); line-height: 1.0; letter-spacing: -0.05em;">Sessions</h1>
+    <div class="dimmer" style="font-size: 16px; margin-top: 12px; font-weight: 400; letter-spacing: -0.02em;">
+        {{ total_records }} session{{ 's' if total_records != 1 }} 
+        {% if search %} · matching "{{ search }}"{% endif %}
+        · Page {{ page }} of {{ total_pages }}
     </div>
 </div>
 
@@ -30,11 +28,13 @@
     <!-- Toolbar -->
     <div class="table-toolbar">
         <div class="search-wrap">
-            <span class="search-icon">⌕</span>
+            <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;">
+                <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+            </svg>
             <input type="text" name="search" id="search-input"
                    class="search-input"
                    value="{{ search }}"
-                   placeholder="search by session id or project name…"
+                   placeholder="Search sessions or projects..."
                    hx-get="/sessions"
                    hx-target="#sessions-table"
                    hx-trigger="keyup changed delay:400ms"
@@ -42,109 +42,96 @@
                    autocomplete="off">
         </div>
         {% if search %}
-        <a href="/sessions" class="clear-btn">clear ✕</a>
+        <a href="/sessions" class="clear-btn">Clear Filter</a>
         {% endif %}
-        <a href="/tokens" class="tok-nav-btn">◈ token usage ↗</a>
+        <a href="/tokens" class="btn btn-primary" style="margin-left: auto; font-size: 11px;">Token Usage →</a>
     </div>
 
     <div id="sessions-table">
-    <!-- Table -->
-    <div class="table-wrap">
-        <table>
-            <thead>
-                <tr>
-                    <th>Session ID</th>
-                    <th>Project</th>
-                    <th>Working Dir</th>
-                    <th>Prompts</th>
-                    <th>Tools</th>
-                    <th>Started</th>
-                    <th style="width:70px;"></th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for s in sessions %}
-                <tr>
-                    <td style="white-space:nowrap;">
-                        <span class="mono accent-text" style="font-size:11px;">
-                            {{ s.session_id[:12] }}…
-                        </span>
-                    </td>
-                    <td style="max-width:160px;">
-                        <div style="font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:155px;"
-                             title="{{ s.project_name or '' }}">
-                            {{ s.project_name or '—' }}
-                        </div>
-                    </td>
-                    <td style="max-width:200px;">
-                        <span class="mono dimmer"
-                              style="font-size:11px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:195px;"
-                              title="{{ s.cwd or '' }}">
-                            {{ s.cwd[-35:] if s.cwd else '—' }}
-                        </span>
-                    </td>
-                    <td style="white-space:nowrap;">
-                        <span class="mono accent-text">{{ s.prompt_count }}</span>
-                    </td>
-                    <td style="white-space:nowrap;">
-                        <span class="mono amber-text">{{ s.tool_count }}</span>
-                    </td>
-                    <td class="mono dimmer" style="white-space:nowrap;font-size:11px;">
-                        {{ s.created_at[:16].replace('T',' ') if s.created_at else '—' }}
-                    </td>
-                    <td style="white-space:nowrap;width:70px;text-align:right;">
-                        <a href="/sessions/{{ s.session_id }}"
-                           class="btn btn-primary"
-                           style="font-size:10px;padding:4px 10px;white-space:nowrap;display:inline-flex;">
-                            view →
-                        </a>
-                    </td>
-                </tr>
-                {% else %}
-                <tr>
-                    <td colspan="7">
-                        <div class="empty">
-                            {% if search %}no sessions matching "{{ search }}"{% else %}no sessions found{% endif %}
-                        </div>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-
-    <!-- Pagination -->
-    {% if total_records > 0 %}
-    <div class="pagination">
-        <span class="pg-info">
-            showing {{ ((page-1)*per_page)+1 }}–{{ [page*per_page, total_records]|min }} of {{ total_records }}
-        </span>
-        <div class="pg-btns">
-            <a href="/sessions?search={{ search }}&page={{ page-1 }}&per_page={{ per_page }}"
-               class="pg-btn {% if page <= 1 %}disabled{% endif %}">← prev</a>
-
-            {% if pg_start > 1 %}
-                <a href="/sessions?search={{ search }}&page=1&per_page={{ per_page }}"
-                   class="pg-btn">1</a>
-                {% if pg_start > 2 %}<span class="pg-dots">…</span>{% endif %}
-            {% endif %}
-
-            {% for pn in page_nums %}
-            <a href="/sessions?search={{ search }}&page={{ pn }}&per_page={{ per_page }}"
-               class="pg-btn {% if pn == page %}active{% endif %}">{{ pn }}</a>
-            {% endfor %}
-
-            {% if pg_end < total_pages %}
-                {% if pg_end < total_pages - 1 %}<span class="pg-dots">…</span>{% endif %}
-                <a href="/sessions?search={{ search }}&page={{ total_pages }}&per_page={{ per_page }}"
-                   class="pg-btn">{{ total_pages }}</a>
-            {% endif %}
-
-            <a href="/sessions?search={{ search }}&page={{ page+1 }}&per_page={{ per_page }}"
-               class="pg-btn {% if page >= total_pages %}disabled{% endif %}">next →</a>
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Session ID</th>
+                        <th>Project</th>
+                        <th>Working Dir</th>
+                        <th>Prompts</th>
+                        <th>Tools</th>
+                        <th>Started</th>
+                        <th style="width:80px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in sessions %}
+                    {% set proj_display = (s.cwd|replace('--', '/')|replace('\\', '/') if s.cwd else '').split('/')|last or 'Default' %}
+                    <tr onclick="window.location='/sessions/{{ s.session_id }}'" style="cursor:pointer;" title="Full ID: {{ s.session_id }}">
+                        <td>
+                            <div class="accent-text mono" style="font-size:13px; font-weight:600;">{{ s.session_id[:8] }}…</div>
+                        </td>
+                        <td>
+                            <div style="font-weight:600; color:var(--text);">{{ proj_display }}</div>
+                        </td>
+                        <td>
+                            <div class="mono dimmer" style="font-size:10px; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{{ s.cwd or '' }}">
+                                {{ s.cwd or '—' }}
+                            </div>
+                        </td>
+                        <td>
+                            <div style="display:inline-flex; background:rgba(254, 76, 2, 0.05); padding:2px 8px; border-radius:4px; border:1px solid rgba(254, 76, 2, 0.1);">
+                                <span style="font-size:13px; font-weight:700; color:#fe4c02;">{{ s.prompt_count }}</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div style="display:inline-flex; background:var(--bg-alt); padding:2px 8px; border-radius:4px; border:1px solid var(--border);">
+                                <span style="font-size:13px; font-weight:700; color:var(--text-muted);">{{ s.tool_count }}</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="mono dimmer" style="font-size:10px;">
+                                {{ s.created_at[:10] }}<br>
+                                <span style="opacity:0.5;">{{ s.created_at[11:16] }}</span>
+                            </div>
+                        </td>
+                        <td style="text-align: right;">
+                            <a href="/sessions/{{ s.session_id }}" class="btn" style="padding: 6px 16px; font-size: 11px; font-weight:700; background:var(--bg-alt);">VIEW</a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7"><div class="empty">No sessions found.</div></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
-    </div>
-    {% endif %}
+
+        {% if total_records > 0 %}
+        <div class="pagination">
+            <span class="pg-info">Showing {{ ((page-1)*per_page)+1 }}–{{ [page*per_page, total_records]|min }} of {{ total_records }}</span>
+            <div class="pg-btns">
+                <a href="/sessions?search={{ search }}&page={{ page-1 }}&per_page={{ per_page }}"
+                   class="pg-btn {% if page <= 1 %}disabled{% endif %}">Previous</a>
+
+                {% if pg_start > 1 %}
+                    <a href="/sessions?search={{ search }}&page=1&per_page={{ per_page }}" class="pg-btn">1</a>
+                    {% if pg_start > 2 %}<span class="pg-dots">…</span>{% endif %}
+                {% endif %}
+
+                {% for pn in page_nums %}
+                <a href="/sessions?search={{ search }}&page={{ pn }}&per_page={{ per_page }}"
+                   class="pg-btn {% if pn == page %}active{% endif %}">{{ pn }}</a>
+                {% endfor %}
+
+                {% if pg_end < total_pages %}
+                    {% if pg_end < total_pages - 1 %}<span class="pg-dots">…</span>{% endif %}
+                    <a href="/sessions?search={{ search }}&page={{ total_pages }}&per_page={{ per_page }}" class="pg-btn">{{ total_pages }}</a>
+                {% endif %}
+
+                <a href="/sessions?search={{ search }}&page={{ page+1 }}&per_page={{ per_page }}"
+                   class="pg-btn {% if page >= total_pages %}disabled{% endif %}">Next</a>
+            </div>
+        </div>
+        {% endif %}
     </div><!-- end #sessions-table -->
 
 </div>
