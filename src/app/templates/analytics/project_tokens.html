@@ -1,8 +1,10 @@
 {% extends "base/index.html" %}
 {% block title %}Token Analysis · {{ project.name }} — CloudByte{% endblock %}
-{% block breadcrumb %}token usage / {{ project.name | truncate(28) }}{% endblock %}
+{% block breadcrumb %}token intelligence / {{ project.name | truncate(28) }}{% endblock %}
 
-{% block head %}<link rel="stylesheet" href="/static/css/analytics/project_tokens.css">{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="/static/css/analytics/project_tokens.css">
+{% endblock %}
 
 {% block content %}
 
@@ -15,75 +17,68 @@
      data-bar-sess-ids="{{ bar_sess_ids | tojson | forceescape }}">
 </div>
 
-<!-- Header -->
-<div class="analysis-header-card section">
-    <div class="analysis-header-left">
-        <div style="display:flex;align-items:center;gap:10px;">
-            <span class="analysis-name-val" title="{{ project.name }}">{{ project.name }}</span>
-            <span class="badge badge-green" style="font-size:10px;">token analysis</span>
+<!-- Page header -->
+<div class="section" style="margin-bottom: 40px; padding-top: 10px;">
+    <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:32px;">
+        <div>
+            <div style="font-family:'IBM Plex Mono'; font-size:10px; font-weight:800; color:#fe4c02; text-transform:uppercase; letter-spacing:0.15em; margin-bottom:12px;">Project Analytics</div>
+            <h1 style="font-size: 54px; font-weight: 400; color: var(--text); line-height: 1.0; letter-spacing: -0.05em; margin:0;" title="{{ project.name }}">
+                {% set raw_p = project.name or '—' %}
+                {{ (raw_p|replace('--', '/')|replace('\\', '/') if raw_p else '').split('/')|last }}
+            </h1>
+            <div class="dimmer mono" style="font-size: 11px; margin-top: 16px; display: flex; gap: 24px;">
+                <span>PATH: <span style="color:var(--text);">{{ project.path[-60:] if project.path else '—' }}</span></span>
+                <span>SESSIONS: <span style="color:var(--text);">{{ session_rows|length }}</span></span>
+            </div>
         </div>
-        <div class="analysis-meta-row">
-            <div class="analysis-meta-item">path <span class="mono" style="font-size:10px;">{{ project.path[-45:] if project.path else '—' }}</span></div>
-            <div class="analysis-meta-item">created <span>{{ project.created_at[:10] if project.created_at else '—' }}</span></div>
-            <div class="analysis-meta-item">sessions <span>{{ session_rows|length }}</span></div>
+        <div style="display:flex; gap:48px;">
+            <div class="stat-unit">
+                <div style="font-size:10px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:4px;">Total Volume</div>
+                <div style="font-size:48px; font-weight:400; color:var(--text); line-height:1; letter-spacing:-0.04em;">
+                    {% set v = io_total + tool_total %}{% if v >= 1000000 %}{{ "%.1f"|format(v/1000000) }}M{% elif v >= 1000 %}{{ "%.1f"|format(v/1000) }}K{% else %}{{ v }}{% endif %}
+                </div>
+            </div>
+            <div class="stat-unit">
+                <div style="font-size:10px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:4px;">Tool Payload</div>
+                <div style="font-size:48px; font-weight:400; color:#fe4c02; line-height:1; letter-spacing:-0.04em;">
+                    {% set v = tool_total %}{% if v >= 1000000 %}{{ "%.1f"|format(v/1000000) }}M{% elif v >= 1000 %}{{ "%.1f"|format(v/1000) }}K{% else %}{{ v }}{% endif %}
+                </div>
+            </div>
         </div>
-    </div>
-    <div class="analysis-header-right">
-        <a href="/tools/project/{{ project.project_id }}" class="btn btn-ghost" style="font-size:11px;color:var(--amber);border-color:rgba(255,179,71,0.3);background:rgba(255,179,71,0.04);">tool analysis ↗</a>
-        <a href="/projects" class="btn btn-ghost" style="font-size:11px;">projects ↗</a>
-        <a href="/tokens" class="btn btn-ghost" style="font-size:11px;">← token usage</a>
     </div>
 </div>
 
-<!-- Stat tiles -->
-<div class="stats-grid section">
-    <div class="stat-tile accent">
-        <div class="stat-label">IO Tokens</div>
-        <div class="stat-value">
-            {% set v = io_total %}{% if v >= 1000000 %}{{ "%.1f"|format(v/1000000) }}M{% elif v >= 1000 %}{{ "%.1f"|format(v/1000) }}K{% else %}{{ v }}{% endif %}
-        </div>
-        <div class="stat-sub">{{ "{:,}".format(io_total) }} total</div>
+<!-- Secondary Control Strip -->
+<div class="card section" style="padding: 16px 24px; background: var(--bg-alt); display: flex; align-items: center; justify-content: space-between; margin-bottom: 40px;">
+    <div style="display: flex; gap: 12px;">
+        <a href="/tools/project/{{ project.project_id }}" class="tbl-btn" style="color:var(--amber); border-color:rgba(254,76,2,0.3);">TOOL INTELLIGENCE ↗</a>
     </div>
-    <div class="stat-tile purple">
-        <div class="stat-label">Tool Tokens</div>
-        <div class="stat-value">
-            {% set v = tool_total %}{% if v >= 1000000 %}{{ "%.1f"|format(v/1000000) }}M{% elif v >= 1000 %}{{ "%.1f"|format(v/1000) }}K{% else %}{{ v }}{% endif %}
-        </div>
-        <div class="stat-sub">{{ "{:,}".format(tool_total) }} total</div>
-    </div>
-    <div class="stat-tile green">
-        <div class="stat-label">Tool-Active Turns</div>
-        <div class="stat-value">{{ turns_with_tools }}</div>
-        <div class="stat-sub">turns that produced tool tokens</div>
-    </div>
-    <div class="stat-tile amber">
-        <div class="stat-label">Tool Types Used</div>
-        <div class="stat-value">{{ unique_tools }}</div>
-        <div class="stat-sub">distinct tool types</div>
+    <div style="display: flex; gap: 12px;">
+        <a href="/projects" class="tbl-btn">PROJECTS ↗</a>
+        <a href="/tokens" class="tbl-btn">BACK</a>
     </div>
 </div>
 
-<!-- Charts -->
+<!-- Advanced Visualisation -->
 <div class="charts-row section">
-
-    <!-- Donut: toggleable segments -->
+    <!-- Donut: Categorical Load -->
     <div class="chart-card">
         <div class="chart-card-header">
-            <span class="chart-card-title">Token Distribution</span>
-            <span class="chart-card-sub">click legend to show/hide</span>
+            <span class="chart-card-title">Categorical Load</span>
+            <span class="chart-card-sub">click legend to filter</span>
         </div>
         <div class="chart-body">
             <div class="donut-wrap">
                 <div class="donut-canvas-wrap">
-                    <canvas id="donut-chart" width="140" height="140"></canvas>
+                    <canvas id="donut-chart" width="160" height="160"></canvas>
                     <div class="donut-center">
                         <div class="donut-center-val" id="donut-total">—</div>
-                        <div class="donut-center-label">total</div>
+                        <div class="donut-center-label">TOTAL</div>
                     </div>
                 </div>
                 <div class="donut-legend">
                     {% for label in donut_labels %}
-                    <div class="legend-item" data-idx="{{ loop.index0 }}" onclick="toggleDonutSegment(this)" style="cursor:pointer;">
+                    <div class="legend-item" data-idx="{{ loop.index0 }}" onclick="toggleDonutSegment(this)">
                         <div class="legend-dot" data-index="{{ loop.index0 }}"></div>
                         <span class="legend-name">{{ label }}</span>
                         <span class="legend-val">
@@ -97,61 +92,56 @@
         </div>
     </div>
 
-    <!-- Vertical grouped bar: IO vs Tool per session, clickable -->
+    <!-- Bar: Volumetric Comparison -->
     <div class="chart-card">
         <div class="chart-card-header">
-            <span class="chart-card-title">IO vs Tool Per Session</span>
-            <span class="chart-card-sub">IO (blue) · tool (purple) · click to analyse</span>
+            <span class="chart-card-title">Volumetric Comparison</span>
+            <span class="chart-card-sub">IO vs Tool per session</span>
         </div>
         <div class="chart-body-bar">
             <canvas id="bar-chart"></canvas>
         </div>
     </div>
-
 </div>
 
-<!-- Per-session table -->
+<!-- Detailed Audit Table -->
 <div class="section">
-    <div class="section-divider">
-        <span class="section-divider-title">Per Session Breakdown</span>
-        <div class="section-divider-line"></div>
-        <span class="dimmer mono" style="font-size:11px;">{{ session_rows|length }} session{{ 's' if session_rows|length != 1 }}</span>
-    </div>
-    <div class="card">
+    <div class="section-label">◈ Chronological Session Audit</div>
+    <div class="card" style="border-radius: 0px;">
         <div class="table-wrap">
-            <table>
+            <table style="border-collapse: collapse; width: 100%;">
                 <thead>
                     <tr>
-                        <th>Session</th>
-                        <th>Date</th>
-                        <th>IO Input</th>
-                        <th>IO Output</th>
-                        <th>IO Cache Rd.</th>
-                        <th>Tool Input</th>
-                        <th>Tool Output</th>
-                        <th style="text-align:right;">Grand Total</th>
-                        <th style="width:90px;"></th>
+                        <th>SESSION</th>
+                        <th>DATE</th>
+                        <th>IO INPUT</th>
+                        <th>IO OUTPUT</th>
+                        <th>CACHE RD.</th>
+                        <th>TOOL IN</th>
+                        <th>TOOL OUT</th>
+                        <th style="text-align:right;">TOTAL</th>
+                        <th style="width:120px;"></th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for row in session_rows %}
                     <tr>
                         <td style="white-space:nowrap;">
-                            <a href="/sessions/{{ row.session_id }}" class="mono accent-text" style="font-size:11px;text-decoration:none;">{{ row.session_id[:8] }}…</a>
+                            <a href="/sessions/{{ row.session_id }}" class="mono" style="font-weight:700; color:#fe4c02; text-decoration:none;">{{ row.session_id[:8] }}…</a>
                         </td>
-                        <td class="mono dimmer" style="font-size:11px;white-space:nowrap;">{{ row.session_date or '—' }}</td>
-                        <td class="mono accent-text">{{ "{:,}".format(row.io_input or 0) }}</td>
-                        <td class="mono green-text">{{ "{:,}".format(row.io_output or 0) }}</td>
-                        <td class="mono" style="color:var(--purple);">{{ "{:,}".format(row.io_cr or 0) }}</td>
-                        <td class="mono accent-text" style="opacity:0.75;">{{ "{:,}".format(row.tool_input or 0) }}</td>
-                        <td class="mono green-text" style="opacity:0.75;">{{ "{:,}".format(row.tool_output or 0) }}</td>
-                        <td class="mono" style="text-align:right;font-weight:600;color:var(--text);">{{ "{:,}".format(row.grand_total or 0) }}</td>
+                        <td class="mono dimmer" style="font-size:11px;">{{ row.session_date or '—' }}</td>
+                        <td class="mono" style="font-weight:700;">{{ "{:,}".format(row.io_input or 0) }}</td>
+                        <td class="mono" style="color:#fe4c02;">{{ "{:,}".format(row.io_output or 0) }}</td>
+                        <td class="mono dimmer">{{ "{:,}".format(row.io_cr or 0) }}</td>
+                        <td class="mono dimmer">{{ "{:,}".format(row.tool_input or 0) }}</td>
+                        <td class="mono dimmer">{{ "{:,}".format(row.tool_output or 0) }}</td>
+                        <td class="mono" style="text-align:right; font-weight:700; color:var(--text);">{{ "{:,}".format(row.grand_total or 0) }}</td>
                         <td style="text-align:right;">
-                            <a href="/tokens/session/{{ row.session_id }}" class="tbl-btn analyse">analyse ↗</a>
+                            <a href="/tokens/session/{{ row.session_id }}" class="tbl-btn analyse">AUDIT ↗</a>
                         </td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="9"><div class="no-data">no session data</div></td></tr>
+                    <tr><td colspan="9"><div class="no-data">NO SESSION DATA RECORDED</div></td></tr>
                     {% endfor %}
                 </tbody>
             </table>
