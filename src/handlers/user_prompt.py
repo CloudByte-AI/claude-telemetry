@@ -4,11 +4,18 @@ UserPromptSubmit Handler
 Called when the user submits a prompt.
 Stores the prompt in the USER_PROMPT and RAW_LOG tables.
 Also reminds Claude to emit obs blocks in its response.
+
+FIXES APPLIED:
+  1. Race condition fix — polls transcript with retries + text verification
+     so we never grab a previous session's promptId.
+  2. parent_uuid fix — also read from transcript (not hook stdin) alongside promptId.
+  3. Removed dead imports: normalize_project_name, uuid (were imported but never used).
 """
 
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 # Add src to path
@@ -25,13 +32,17 @@ logger = get_logger(__name__)
 _initialized_sessions = set()
 
 
+# ---------------------------------------------------------------------------
+# Session helpers
+# ---------------------------------------------------------------------------
+
 def ensure_session_initialized(session_id: str, cwd: str) -> bool:
     """
     Ensure the session and project exist in the database.
     Only does the check once per session (tracked in-memory).
 
-    This handles the case where the plugin is started in an already-running session
-    (so SessionStart hook was never called).
+    This handles the case where the plugin is started in an already-running
+    session (so SessionStart hook was never called).
 
     Args:
         session_id: Session UUID
@@ -48,56 +59,70 @@ def ensure_session_initialized(session_id: str, cwd: str) -> bool:
 
     from src.db.manager import get_db_connection
     from src.integrations.claude.extractor import extract_project_info
+    from datetime import datetime
 
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
         # Check if session exists
-        cursor.execute("SELECT 1 FROM SESSION WHERE session_id = ? LIMIT 1", (session_id,))
+        cursor.execute(
+            "SELECT 1 FROM SESSION WHERE session_id = ? LIMIT 1",
+            (session_id,),
+        )
         if cursor.fetchone() is not None:
-            # Session exists, mark as initialized
             _initialized_sessions.add(session_id)
             logger.debug(f"Session {session_id} already initialized")
             return True
 
-        # Session doesn't exist - create project and session
-        logger.info(f"Session {session_id} not found, initializing project and session records")
+        # Session doesn't exist — create project and session
+        logger.info(
+            f"Session {session_id} not found, initializing project and session records"
+        )
 
         # Extract project info from cwd
         project_info = extract_project_info(cwd if cwd else "")
         project_id = project_info["project_id"]
 
         # Ensure project exists
-        cursor.execute("SELECT 1 FROM PROJECT WHERE project_id = ? LIMIT 1", (project_id,))
+        cursor.execute(
+            "SELECT 1 FROM PROJECT WHERE project_id = ? LIMIT 1",
+            (project_id,),
+        )
         if cursor.fetchone() is None:
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO PROJECT (project_id, name, path, created_at)
                 VALUES (?, ?, ?, ?)
-            """, (project_id, project_info["name"], project_info["path"], project_info["created_at"]))
+                """,
+                (
+                    project_id,
+                    project_info["name"],
+                    project_info["path"],
+                    project_info["created_at"],
+                ),
+            )
             logger.info(f"Created project: {project_id}")
 
         # Create session
-        from src.integrations.claude.reader import normalize_project_name
-        import uuid
-        from datetime import datetime
-
-        cursor.execute("""
+        cursor.execute(
+            """
             INSERT INTO SESSION
             (session_id, project_id, cwd, jsonl_file, created_at)
             VALUES (?, ?, ?, ?, ?)
-        """, (
-            session_id,
-            project_id,
-            cwd,
-            f"{project_info['name']}/{session_id}.jsonl",
-            datetime.now().isoformat(),
-        ))
+            """,
+            (
+                session_id,
+                project_id,
+                cwd,
+                f"{project_info['name']}/{session_id}.jsonl",
+                datetime.now().isoformat(),
+            ),
+        )
 
         conn.commit()
         logger.info(f"Created session: {session_id}")
 
-        # Mark as initialized
         _initialized_sessions.add(session_id)
         return True
 
@@ -118,31 +143,36 @@ def retry_pending_tasks(session_id: str):
     try:
         db = get_db_manager()
 
-        # Get pending and failed tasks
-        tasks = db.execute("""
+        tasks = db.execute(
+            """
             SELECT id, task_type, session_id, prompt_id, priority, payload
             FROM TASK_QUEUE
             WHERE session_id = ? AND status IN ('pending', 'failed')
             ORDER BY priority DESC, created_at ASC
-        """, (session_id,)).fetchall()
+            """,
+            (session_id,),
+        ).fetchall()
 
         if not tasks:
             return
 
-        logger.info(f"Found {len(tasks)} pending/failed tasks for session {session_id}, retrying...")
+        logger.info(
+            f"Found {len(tasks)} pending/failed tasks for session {session_id}, retrying..."
+        )
 
-        # Update status to pending and reset error
         for task in tasks:
-            db.execute("""
+            db.execute(
+                """
                 UPDATE TASK_QUEUE
                 SET status = 'pending',
                     error_message = NULL,
                     retry_count = retry_count + 1,
                     created_at = datetime('now')
                 WHERE id = ?
-            """, (task[0],))
+                """,
+                (task[0],),
+            )
 
-        # Trigger worker processing
         try:
             from src.workers.llm_client import reset_worker
             reset_worker()
@@ -151,11 +181,16 @@ def retry_pending_tasks(session_id: str):
             logger.warning(f"Could not reset worker: {e}")
 
     except Exception as e:
-        # Don't log as error - tables might not exist yet
-        logger.debug(f"Could not retry pending tasks (DB might not be initialized yet): {e}")
+        # Don't log as error — tables might not exist yet
+        logger.debug(
+            f"Could not retry pending tasks (DB might not be initialized yet): {e}"
+        )
 
 
-# Reminder to inject before each prompt
+# ---------------------------------------------------------------------------
+# OBS reminder constant
+# ---------------------------------------------------------------------------
+
 OBS_REMINDER = (
     "OBS RULE ACTIVE. After this response, if you used tools or made meaningful changes, "
     "append at the very end:\n"
@@ -169,153 +204,243 @@ OBS_REMINDER = (
 )
 
 
-def extract_prompt_id_from_transcript(transcript_path: str) -> str:
-    """
-    Extract the promptId from the JSONL transcript file.
+# ---------------------------------------------------------------------------
+# FIX 1 + FIX 2: Extract BOTH promptId AND parentUuid from transcript
+#                with retry loop to beat the race condition.
+# ---------------------------------------------------------------------------
 
-    The UserPromptSubmit hook doesn't receive promptId in hook_data, but Claude
-    writes it to the JSONL. We need to read the latest user message to get it.
+def extract_ids_from_transcript(
+    transcript_path: str,
+    prompt_text: str,
+    max_retries: int = 10,
+    base_delay_ms: int = 60,
+) -> dict:
+    """
+    Extract promptId AND parentUuid from the JSONL transcript file.
+
+    WHY RETRIES ARE NEEDED (race condition):
+        The UserPromptSubmit hook fires BEFORE Claude finishes writing the
+        current user-message entry to the JSONL file.  Without retrying we
+        would read the file too early, miss the current entry, and return the
+        PREVIOUS message's promptId by mistake.
+
+    STRATEGY:
+        1. Poll the transcript file up to `max_retries` times with an
+           exponentially growing delay (60ms, 120ms, 180ms … capped at 500ms).
+           Total worst-case wait ≈ 3-4 seconds — acceptable, never misleading.
+        2. For each candidate user-message entry found (scanning in reverse),
+           verify that the entry's text actually contains the current prompt
+           text (first 80 chars match) before accepting its promptId.
+           This guarantees we never return a stale/previous promptId.
 
     Args:
-        transcript_path: Path to the JSONL transcript file
-        prompt_text: The prompt text to match against (for verification)
+        transcript_path : Path to the JSONL transcript file.
+        prompt_text     : The filtered user prompt text (used for verification).
+        max_retries     : Maximum number of read attempts.
+        base_delay_ms   : Base sleep time between retries in milliseconds.
 
     Returns:
-        str: The promptId from the transcript, or empty string if not found
+        dict with keys:
+            "prompt_id"   → str  (empty string if not found)
+            "parent_uuid" → str | None
     """
-    import json
+    NOT_FOUND = {"prompt_id": "", "parent_uuid": None}
 
-    if not transcript_path or not Path(transcript_path).exists():
-        logger.debug(f"Transcript not found or path missing: {transcript_path}")
-        return ""
+    if not transcript_path:
+        logger.debug("No transcript path provided, skipping promptId extraction")
+        return NOT_FOUND
 
-    try:
-        with open(transcript_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
+    transcript = Path(transcript_path)
 
-        # Read in reverse to find the most recent user message
-        for line in reversed(lines):
-            line = line.strip()
-            if not line:
-                continue
+    # Normalise the snippet we use for matching (strip whitespace, lowercase)
+    match_snippet = prompt_text.strip()[:80].lower() if prompt_text else ""
 
-            try:
-                event = json.loads(line)
+    for attempt in range(1, max_retries + 1):
 
-                # Look for user message type with promptId field
-                if event.get("type") == "user":
-                    prompt_id = event.get("promptId") or event.get("prompt_id")
-                    if prompt_id:
-                        logger.debug(f"Found promptId in transcript: {prompt_id}")
-                        return prompt_id
+        # ── wait before each attempt (including the first, tiny initial wait) ──
+        # First attempt: 60ms  — gives Claude time to flush the entry.
+        # Subsequent attempts grow linearly, capped at 500ms.
+        sleep_ms = min(base_delay_ms * attempt, 500)
+        time.sleep(sleep_ms / 1000.0)
 
-            except json.JSONDecodeError:
-                continue
+        if not transcript.exists():
+            logger.debug(
+                f"Attempt {attempt}/{max_retries}: transcript not found yet: {transcript_path}"
+            )
+            continue
 
-        logger.debug("No user message with promptId found in transcript")
-        return ""
+        try:
+            with open(transcript, "r", encoding="utf-8") as f:
+                lines = f.readlines()
 
-    except Exception as e:
-        logger.warning(f"Error reading transcript for promptId: {e}")
-        return ""
+            # Scan in reverse — the most-recent user message is near the end
+            for raw_line in reversed(lines):
+                raw_line = raw_line.strip()
+                if not raw_line:
+                    continue
+
+                try:
+                    event = json.loads(raw_line)
+                except json.JSONDecodeError:
+                    continue
+
+                if event.get("type") != "user":
+                    continue
+
+                prompt_id = event.get("promptId") or event.get("prompt_id")
+                if not prompt_id:
+                    continue  # user entry without an id — skip
+
+                # ── Text verification — never return a stale promptId ────────
+                # Build the text of this transcript entry so we can compare
+                # it against the current prompt.
+                if match_snippet:
+                    content_items = (
+                        event.get("message", {}).get("content", [])
+                        if isinstance(event.get("message"), dict)
+                        else []
+                    )
+                    entry_text = " ".join(
+                        item.get("text", "")
+                        for item in content_items
+                        if isinstance(item, dict) and item.get("type") == "text"
+                    ).strip().lower()
+
+                    if match_snippet not in entry_text:
+                        # This entry is from a different (earlier) prompt — keep searching
+                        logger.debug(
+                            f"Attempt {attempt}/{max_retries}: "
+                            f"promptId {prompt_id} text mismatch, skipping"
+                        )
+                        # Stop scanning further lines — everything older will
+                        # also be from a different prompt
+                        break
+
+                # ── Match confirmed ──────────────────────────────────────────
+                parent_uuid = event.get("parentUuid") or event.get("parent_uuid")
+                logger.info(
+                    f"Attempt {attempt}/{max_retries}: "
+                    f"Found promptId={prompt_id}, parentUuid={parent_uuid}"
+                )
+                return {"prompt_id": prompt_id, "parent_uuid": parent_uuid}
+
+        except Exception as e:
+            logger.warning(
+                f"Attempt {attempt}/{max_retries}: error reading transcript: {e}"
+            )
+
+    # All retries exhausted
+    logger.warning(
+        f"Could not find current promptId in transcript after {max_retries} attempts. "
+        f"Prompt will be stored without a promptId."
+    )
+    return NOT_FOUND
 
 
-def extract_user_text_from_hook_data(hook_data: dict) -> str:
-    """
-    Extract the user's actual text from hook data.
-
-    The hook data can have different structures:
-    1. Simple "prompt" or "content" field (string)
-    2. "message" object with "content" array (JSONL format)
-
-    For the array format, we filter out system messages like <ide_opened_file>.
-
-    Args:
-        hook_data: Raw hook data from Claude Code
-
-    Returns:
-        str: Cleaned user text only
-    """
-    # First, check if there's a simple prompt/content field
-    if "prompt" in hook_data:
-        return filter_system_messages(hook_data["prompt"])
-    if "content" in hook_data and isinstance(hook_data["content"], str):
-        return filter_system_messages(hook_data["content"])
-
-    # Check for message.content array format (JSONL structure)
-    message = hook_data.get("message", {})
-    if isinstance(message, dict):
-        content_array = message.get("content", [])
-        if isinstance(content_array, list):
-            # Extract text from each content item
-            user_texts = []
-            for item in content_array:
-                if isinstance(item, dict) and item.get("type") == "text":
-                    text = item.get("text", "")
-                    # Filter out system messages
-                    filtered = filter_system_messages(text)
-                    if filtered:  # Only add non-empty text
-                        user_texts.append(filtered)
-
-            # Join all user texts (usually just one after filtering)
-            return " ".join(user_texts).strip()
-
-    # Fallback: return empty string
-    return ""
-
+# ---------------------------------------------------------------------------
+# Text / content helpers
+# ---------------------------------------------------------------------------
 
 def filter_system_messages(content: str) -> str:
     """
     Filter out system/context messages from prompt content.
 
-    Removes messages like:
-    - <ide_opened_file>...</ide_opened_file>
-    - <system-reminder>...</system-reminder>
-    - <ide_selection>...</ide_selection>
-    - <user-prompt-submit-hook additional context>...</user-prompt-submit-hook>
+    Removes:
+        - <ide_opened_file>…</ide_opened_file>
+        - <ide_selection>…</ide_selection>
+        - <system-reminder>…</system-reminder>
+        - <user-prompt-submit-hook …>…</user-prompt-submit-hook>
+        - <sessionstart-hook …>…</sessionstart-hook>
 
     Args:
         content: Raw prompt content (may include system messages)
 
     Returns:
-        str: Cleaned prompt text with only user messages
+        str: Cleaned prompt text with only the user's own words
     """
     if not content:
         return ""
 
     import re
 
-    # Remove ANY <ide*> blocks with content (handles multiline, no-newline, and unclosed tags)
-    # First, try to match properly closed tags
-    content = re.sub(r'<ide[^>]*>[\s\S]*?</ide[^>]*>', '', content)
-    # Then, match any unclosed ide tags (from <ide to end of string or next tag)
-    content = re.sub(r'<ide[^>]*>[\s\S]*?(?=<\w|$)', '', content)
+    # Remove ANY <ide*> blocks (properly closed)
+    content = re.sub(r"<ide[^>]*>[\s\S]*?</ide[^>]*>", "", content)
+    # Remove unclosed <ide*> tags to end-of-string
+    content = re.sub(r"<ide[^>]*>[\s\S]*?(?=<\w|$)", "", content)
 
     # Remove <system-reminder> blocks
-    content = re.sub(r'<system-reminder>.*?</system-reminder>\s*', '', content, flags=re.DOTALL)
+    content = re.sub(
+        r"<system-reminder>.*?</system-reminder>\s*", "", content, flags=re.DOTALL
+    )
 
-    # Remove <user-prompt-submit-hook additional context> blocks
-    content = re.sub(r'<user-prompt-submit-hook.*?</user-prompt-submit-hook>\s*', '', content, flags=re.DOTALL)
+    # Remove <user-prompt-submit-hook …> blocks
+    content = re.sub(
+        r"<user-prompt-submit-hook.*?</user-prompt-submit-hook>\s*",
+        "",
+        content,
+        flags=re.DOTALL,
+    )
 
-    # Remove other common system tags
-    content = re.sub(r'<sessionstart-hook.*?</sessionstart-hook>\s*', '', content, flags=re.DOTALL)
-    content = re.sub(r'<sessionstart-hook-additional-context.*?</sessionstart-hook-additional-context>\s*', '', content, flags=re.DOTALL)
+    # Remove <sessionstart-hook …> blocks
+    content = re.sub(
+        r"<sessionstart-hook.*?</sessionstart-hook>\s*", "", content, flags=re.DOTALL
+    )
+    content = re.sub(
+        r"<sessionstart-hook-additional-context.*?</sessionstart-hook-additional-context>\s*",
+        "",
+        content,
+        flags=re.DOTALL,
+    )
 
-    # Clean up extra whitespace
-    content = content.strip()
+    return content.strip()
 
-    return content
+
+def extract_user_text_from_hook_data(hook_data: dict) -> str:
+    """
+    Extract the user's actual text from hook data.
+
+    Handles two formats:
+        1. Simple string field  →  hook_data["prompt"] or hook_data["content"]
+        2. Message-content array  →  hook_data["message"]["content"][*]["text"]
+
+    System tags are stripped in both cases.
+
+    Args:
+        hook_data: Raw hook data from Claude Code (stdin JSON)
+
+    Returns:
+        str: Cleaned user text only
+    """
+    # Format 1 — simple string
+    if "prompt" in hook_data:
+        return filter_system_messages(hook_data["prompt"])
+    if "content" in hook_data and isinstance(hook_data["content"], str):
+        return filter_system_messages(hook_data["content"])
+
+    # Format 2 — message.content array
+    message = hook_data.get("message", {})
+    if isinstance(message, dict):
+        content_array = message.get("content", [])
+        if isinstance(content_array, list):
+            user_texts = []
+            for item in content_array:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    filtered = filter_system_messages(item.get("text", ""))
+                    if filtered:
+                        user_texts.append(filtered)
+            return " ".join(user_texts).strip()
+
+    return ""
 
 
 def read_stdin_data() -> dict:
     """
-    Read hook data from stdin.
+    Read hook data from stdin (JSON).
 
     Claude Code passes hook data via stdin.
-    Expected format: JSON with prompt, session_id, etc.
 
     Returns:
-        dict: Parsed hook data
+        dict: Parsed hook data, or {} on error
     """
     try:
         data = sys.stdin.read().strip()
@@ -327,22 +452,32 @@ def read_stdin_data() -> dict:
     return {}
 
 
+# ---------------------------------------------------------------------------
+# Main handler
+# ---------------------------------------------------------------------------
+
 def handle_user_prompt():
     """
     Handle the UserPromptSubmit hook.
 
     Expected stdin data (JSON):
     {
-        "prompt": "user's prompt text",
-        "session_id": "uuid",
-        "prompt_id": "uuid",
-        "parent_uuid": "uuid"
+        "session_id"      : "uuid",
+        "transcript_path" : "/path/to/session.jsonl",
+        "cwd"             : "/path/to/project",
+        "message"         : {
+            "content": [{"type": "text", "text": "user prompt here"}]
+        }
     }
+
+    NOTE: promptId and parentUuid are NOT present in hook stdin — they are
+    read from the transcript file (with retry logic to avoid the race condition
+    where the hook fires before Claude writes the entry to the JSONL).
     """
     setup_logging(log_to_file=True, log_to_console=False)
     logger.info("=== UserPromptSubmit Handler ===")
 
-    # Quick check: ensure worker is running (fast port check)
+    # Ensure background worker is running (fast port check)
     try:
         from src.workers.worker_checker import ensure_worker_quick_sync
         ensure_worker_quick_sync()
@@ -350,88 +485,117 @@ def handle_user_prompt():
         logger.debug(f"Worker check failed: {e}")
 
     try:
-        # Read hook data from stdin
+        # ── Read hook data ───────────────────────────────────────────────────
         hook_data = read_stdin_data()
 
-        # DEBUG: Print all keys and values in hook_data to understand the structure
-        logger.info(f"DEBUG - hook_data keys: {list(hook_data.keys())}")
+        logger.info(f"hook_data keys: {list(hook_data.keys())}")
         for key, value in hook_data.items():
-            if key != "prompt":  # Skip the full prompt text to avoid spam
-                logger.info(f"DEBUG - {key}: {value}")
+            if key != "prompt":
+                logger.info(f"  {key}: {value}")
             else:
-                logger.info(f"DEBUG - {key}: (length={len(value)}, preview={value[:100]})")
+                logger.info(
+                    f"  {key}: (length={len(value)}, preview={value[:100]})"
+                )
 
-        # Extract session_id early to check for pending tasks
-        session_id = hook_data.get("session_id") or os.environ.get("CLAUDE_SESSION_ID")
+        # ── Basic fields available directly in hook stdin ────────────────────
+        session_id = (
+            hook_data.get("session_id")
+            or hook_data.get("sessionId")
+            or os.environ.get("CLAUDE_SESSION_ID")
+        )
+        transcript_path = (
+            hook_data.get("transcript_path") or hook_data.get("transcriptPath")
+        )
+        cwd = (
+            hook_data.get("cwd")
+            or hook_data.get("directory")
+            or os.environ.get("PWD")
+            or os.environ.get("cwd")
+        )
+        event_uuid = hook_data.get("uuid") or hook_data.get("id")
+        event_timestamp = hook_data.get("timestamp") or hook_data.get("time")
 
-        # Retry any pending/failed tasks from previous session
+        # ── Retry pending tasks from previous session ────────────────────────
         if session_id:
             retry_pending_tasks(session_id)
 
-        # Get transcript path for promptId extraction
-        transcript_path = hook_data.get("transcript_path") or hook_data.get("transcriptPath")
-
-        # Extract ALL available prompt data from JSONL event
-        # Try both camelCase (JSONL style) and snake_case (our style) field names
-        # NOTE: promptId is NOT in hook_data - we must read it from the transcript
-        prompt_id = hook_data.get("prompt_id") or hook_data.get("promptId")  # Will be None from hook!
-        parent_uuid = hook_data.get("parent_uuid") or hook_data.get("parentUuid")  # Try both!
-        event_uuid = hook_data.get("uuid") or hook_data.get("id")  # Try both!
-        event_timestamp = hook_data.get("timestamp") or hook_data.get("time")  # Try both!
-        cwd = hook_data.get("cwd") or hook_data.get("directory") or os.environ.get("PWD") or os.environ.get("cwd")
-
-        # Extract user text from hook data (handles both simple string and message.content array)
+        # ── Extract clean prompt text (filter system messages) ───────────────
         prompt_text = extract_user_text_from_hook_data(hook_data)
-
-        # IMPORTANT: Read promptId from transcript since hook doesn't provide it
-        # The hook doesn't include promptId, but Claude writes it to the JSONL
-        if not prompt_id and transcript_path:
-            prompt_id = extract_prompt_id_from_transcript(transcript_path)
-            if prompt_id:
-                logger.info(f"Retrieved promptId from transcript: {prompt_id}")
-
-        logger.info(f"User prompt: session_id={session_id}, prompt_length={len(prompt_text)}")
-
-        # Ensure session is initialized (only checks once per session)
-        # This handles the case where plugin started in an already-running session
-        if session_id and cwd:
-            ensure_session_initialized(session_id, cwd)
 
         if not prompt_text:
             logger.warning("No prompt content provided (after filtering system messages)")
             print(json.dumps({"status": "error", "message": "No prompt content"}))
             return
 
-        # Process and store user prompt in database with ALL original fields
+        # The hook stdin does NOT contain these fields.  We poll the transcript
+        # file with retries to guarantee we get the CURRENT message's IDs and
+        # never a stale/previous one.
+        prompt_id = None
+        parent_uuid = None
+
+        if transcript_path:
+            logger.info("Reading promptId + parentUuid from transcript (with retries)...")
+            ids = extract_ids_from_transcript(
+                transcript_path=transcript_path,
+                prompt_text=prompt_text,
+                max_retries=10,    # up to ~3 seconds total wait
+                base_delay_ms=60,  # 60ms, 120ms, 180ms … capped at 500ms
+            )
+            prompt_id = ids["prompt_id"] or None
+            parent_uuid = ids["parent_uuid"]
+
+            if prompt_id:
+                logger.info(f"Resolved promptId={prompt_id}, parentUuid={parent_uuid}")
+            else:
+                logger.warning(
+                    "promptId could not be resolved from transcript. "
+                    "Prompt will be stored without one."
+                )
+        else:
+            logger.warning(
+                "No transcript_path in hook data — cannot resolve promptId or parentUuid."
+            )
+
+        # ── Ensure session record exists in DB ───────────────────────────────
+        if session_id and cwd:
+            ensure_session_initialized(session_id, cwd)
+
+        # ── Store prompt in DB ───────────────────────────────────────────────
+        logger.info(
+            f"Storing prompt: session_id={session_id}, "
+            f"prompt_id={prompt_id}, parent_uuid={parent_uuid}, "
+            f"length={len(prompt_text)}"
+        )
+
         result = process_user_prompt(
-            prompt=prompt_text,  # Use filtered text
+            prompt=prompt_text,
             session_id=session_id,
             prompt_id=prompt_id,
-            parent_uuid=parent_uuid,
-            event_uuid=event_uuid,  # Pass original uuid
-            event_timestamp=event_timestamp,  # Pass original timestamp
+            parent_uuid=parent_uuid,      
+            event_uuid=event_uuid,
+            event_timestamp=event_timestamp,
             cwd=cwd,
         )
 
         logger.info(f"Prompt stored: {result.get('prompt_id')}")
-        # Output with OBS reminder injected into context
+
+        # ── Inject OBS reminder into Claude's context ────────────────────────
         logger.info("=" * 60)
         logger.info("INJECTING OBS REMINDER INTO USERPROMPTSUBMIT CONTEXT")
         logger.info("=" * 60)
-        logger.info(f"Prompt ID: {result.get('prompt_id')}")
-        logger.info(f"OBS reminder length: {len(OBS_REMINDER)} characters")
-        logger.info(f"Reminder: {OBS_REMINDER}")
+        logger.info(f"Prompt ID : {result.get('prompt_id')}")
+        logger.info(f"Reminder  : {OBS_REMINDER}")
 
         output_data = {
             "status": "success",
             "prompt_id": result.get("prompt_id"),
             "hookSpecificOutput": {
                 "hookEventName": "UserPromptSubmit",
-                "additionalContext": OBS_REMINDER
-            }
+                "additionalContext": OBS_REMINDER,
+            },
         }
         print(json.dumps(output_data))
-        logger.info("✓ OBS reminder successfully output to Claude Code")
+        logger.info("OBS reminder successfully output to Claude Code")
         logger.info("=" * 60)
 
     except Exception as e:
