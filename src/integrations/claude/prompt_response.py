@@ -32,6 +32,33 @@ from typing import Any, Dict, List, Optional
 
 from src.common.logging import get_logger
 
+
+# Import filter function for cleaning system messages from prompts
+def _filter_system_messages_from_prompt(text: str) -> str:
+    """
+    Filter out system/context messages from prompt text.
+    Imported from user_prompt.py to avoid circular imports.
+    """
+    if not text:
+        return ""
+
+    import re
+
+    # Remove ANY <ide*> blocks with content (handles multiline and no-newline cases)
+    text = re.sub(r'<ide[^>]*>[\s\S]*?</ide[^>]*>', '', text)
+    # Then, match any unclosed ide tags (from <ide to end of string or next tag)
+    text = re.sub(r'<ide[^>]*>[\s\S]*?(?=<\w|$)', '', text)
+    # Remove <system-reminder> blocks
+    text = re.sub(r'<system-reminder>.*?</system-reminder>\s*', '', text, flags=re.DOTALL)
+    # Remove <user-prompt-submit-hook additional context> blocks
+    text = re.sub(r'<user-prompt-submit-hook.*?</user-prompt-submit-hook>\s*', '', text, flags=re.DOTALL)
+    # Remove other common system tags
+    text = re.sub(r'<sessionstart-hook.*?</sessionstart-hook>\s*', '', text, flags=re.DOTALL)
+    text = re.sub(r'<sessionstart-hook-additional-context.*?</sessionstart-hook-additional-context>\s*', '', text, flags=re.DOTALL)
+    text = re.sub(r'<obs>.*?</obs>\s*', '', text, flags=re.DOTALL)
+
+    return text.strip()
+
 logger = get_logger(__name__)
 
 
@@ -360,12 +387,15 @@ def extract_prompt_response_pairs(events: List[Dict[str, Any]]) -> List[Dict[str
         # Extract prompt text from content using helper function
         prompt_text = get_text_content(prompt_rec["message"]["content"]) or ""
 
+        # Filter out system messages (ide_*, system-reminder, etc.) for matching
+        prompt_text_filtered = _filter_system_messages_from_prompt(prompt_text)
+
         pairs.append({
             "prompt_id": pid,
             "message_id": response_mid,
             "session_id": prompt_rec.get("sessionId", ""),
             "timestamp": prompt_rec.get("timestamp", ""),
-            "prompt": prompt_text,
+            "prompt": prompt_text_filtered,  # Use filtered version for matching
             "response": response_merged["text"] or "",
             "model": response_merged["model"],
             "input_tokens": usage.get("input_tokens", 0) or 0,
@@ -411,6 +441,8 @@ def convert_pairs_to_db_format(pairs: List[Dict[str, Any]]) -> Dict[str, List[Di
         raw_content = prompt_rec.get("message", {}).get("content", "")
 
         prompt_text = get_text_content(raw_content) or ""
+        # Filter system messages for database storage
+        prompt_text = _filter_system_messages_from_prompt(prompt_text)
         response_text = pair.get("response", "").strip()
 
         if not prompt_text or not response_text:
