@@ -527,6 +527,7 @@ def handle_user_prompt():
             print(json.dumps({"status": "error", "message": "No prompt content"}))
             return
 
+        # ── FIX 1 + FIX 2: Read promptId AND parentUuid from transcript ──────
         # The hook stdin does NOT contain these fields.  We poll the transcript
         # file with retries to guarantee we get the CURRENT message's IDs and
         # never a stale/previous one.
@@ -571,7 +572,7 @@ def handle_user_prompt():
             prompt=prompt_text,
             session_id=session_id,
             prompt_id=prompt_id,
-            parent_uuid=parent_uuid,      
+            parent_uuid=parent_uuid,      # FIX 2: now actually populated
             event_uuid=event_uuid,
             event_timestamp=event_timestamp,
             cwd=cwd,
@@ -595,7 +596,7 @@ def handle_user_prompt():
             },
         }
         print(json.dumps(output_data))
-        logger.info("OBS reminder successfully output to Claude Code")
+        logger.info("✓ OBS reminder successfully output to Claude Code")
         logger.info("=" * 60)
 
     except Exception as e:
