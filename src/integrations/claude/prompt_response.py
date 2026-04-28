@@ -278,7 +278,11 @@ def extract_prompt_response_pairs(events: List[Dict[str, Any]]) -> List[Dict[str
                 elif t == "text":
                     tx = item.get("text", "").strip()
                     if tx:
-                        merged["text"] = tx
+                        # Append text chunks instead of overwriting (preserves obs blocks at end)
+                        if merged["text"] is None:
+                            merged["text"] = tx
+                        else:
+                            merged["text"] += "\n\n" + tx
 
         merged_msgs[mid] = merged
 

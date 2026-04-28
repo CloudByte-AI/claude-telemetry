@@ -285,8 +285,11 @@ def filter_system_messages(content: str) -> str:
 
     import re
 
-    # Remove entire lines that start with <ide
-    content = re.sub(r'^<ide.*\n?', '', content, flags=re.MULTILINE)
+    # Remove ANY <ide*> blocks with content (handles multiline, no-newline, and unclosed tags)
+    # First, try to match properly closed tags
+    content = re.sub(r'<ide[^>]*>[\s\S]*?</ide[^>]*>', '', content)
+    # Then, match any unclosed ide tags (from <ide to end of string or next tag)
+    content = re.sub(r'<ide[^>]*>[\s\S]*?(?=<\w|$)', '', content)
 
     # Remove <system-reminder> blocks
     content = re.sub(r'<system-reminder>.*?</system-reminder>\s*', '', content, flags=re.DOTALL)
@@ -297,7 +300,6 @@ def filter_system_messages(content: str) -> str:
     # Remove other common system tags
     content = re.sub(r'<sessionstart-hook.*?</sessionstart-hook>\s*', '', content, flags=re.DOTALL)
     content = re.sub(r'<sessionstart-hook-additional-context.*?</sessionstart-hook-additional-context>\s*', '', content, flags=re.DOTALL)
-    content = re.sub(r'<obs>.*?</obs>\s*', '', content, flags=re.DOTALL)
 
     # Clean up extra whitespace
     content = content.strip()
