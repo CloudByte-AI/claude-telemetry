@@ -169,6 +169,57 @@ OBS_REMINDER = (
 )
 
 
+def extract_prompt_id_from_transcript(transcript_path: str) -> str:
+    """
+    Extract the promptId from the JSONL transcript file.
+
+    The UserPromptSubmit hook doesn't receive promptId in hook_data, but Claude
+    writes it to the JSONL. We need to read the latest user message to get it.
+
+    Args:
+        transcript_path: Path to the JSONL transcript file
+        prompt_text: The prompt text to match against (for verification)
+
+    Returns:
+        str: The promptId from the transcript, or empty string if not found
+    """
+    import json
+
+    if not transcript_path or not Path(transcript_path).exists():
+        logger.debug(f"Transcript not found or path missing: {transcript_path}")
+        return ""
+
+    try:
+        with open(transcript_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+
+        # Read in reverse to find the most recent user message
+        for line in reversed(lines):
+            line = line.strip()
+            if not line:
+                continue
+
+            try:
+                event = json.loads(line)
+
+                # Look for user message type with promptId field
+                if event.get("type") == "user":
+                    prompt_id = event.get("promptId") or event.get("prompt_id")
+                    if prompt_id:
+                        logger.debug(f"Found promptId in transcript: {prompt_id}")
+                        return prompt_id
+
+            except json.JSONDecodeError:
+                continue
+
+        logger.debug("No user message with promptId found in transcript")
+        return ""
+
+    except Exception as e:
+        logger.warning(f"Error reading transcript for promptId: {e}")
+        return ""
+
+
 def extract_user_text_from_hook_data(hook_data: dict) -> str:
     """
     Extract the user's actual text from hook data.
@@ -314,9 +365,13 @@ def handle_user_prompt():
         if session_id:
             retry_pending_tasks(session_id)
 
+        # Get transcript path for promptId extraction
+        transcript_path = hook_data.get("transcript_path") or hook_data.get("transcriptPath")
+
         # Extract ALL available prompt data from JSONL event
         # Try both camelCase (JSONL style) and snake_case (our style) field names
-        prompt_id = hook_data.get("prompt_id") or hook_data.get("promptId")  # Try both!
+        # NOTE: promptId is NOT in hook_data - we must read it from the transcript
+        prompt_id = hook_data.get("prompt_id") or hook_data.get("promptId")  # Will be None from hook!
         parent_uuid = hook_data.get("parent_uuid") or hook_data.get("parentUuid")  # Try both!
         event_uuid = hook_data.get("uuid") or hook_data.get("id")  # Try both!
         event_timestamp = hook_data.get("timestamp") or hook_data.get("time")  # Try both!
@@ -324,6 +379,13 @@ def handle_user_prompt():
 
         # Extract user text from hook data (handles both simple string and message.content array)
         prompt_text = extract_user_text_from_hook_data(hook_data)
+
+        # IMPORTANT: Read promptId from transcript since hook doesn't provide it
+        # The hook doesn't include promptId, but Claude writes it to the JSONL
+        if not prompt_id and transcript_path:
+            prompt_id = extract_prompt_id_from_transcript(transcript_path)
+            if prompt_id:
+                logger.info(f"Retrieved promptId from transcript: {prompt_id}")
 
         logger.info(f"User prompt: session_id={session_id}, prompt_length={len(prompt_text)}")
 
