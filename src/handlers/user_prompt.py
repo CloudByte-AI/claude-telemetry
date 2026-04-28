@@ -271,6 +271,7 @@ def filter_system_messages(content: str) -> str:
     Removes messages like:
     - <ide_opened_file>...</ide_opened_file>
     - <system-reminder>...</system-reminder>
+    - <ide_selection>...</ide_selection>
     - <user-prompt-submit-hook additional context>...</user-prompt-submit-hook>
 
     Args:
@@ -286,6 +287,7 @@ def filter_system_messages(content: str) -> str:
 
     # Remove <ide_opened_file> blocks
     content = re.sub(r'<ide_opened_file>.*?</ide_opened_file>\s*', '', content, flags=re.DOTALL)
+    content = re.sub(r'<ide_selection>.*?</ide_selection>\s*', '', content, flags=re.DOTALL)
 
     # Remove <system-reminder> blocks
     content = re.sub(r'<system-reminder>.*?</system-reminder>\s*', '', content, flags=re.DOTALL)
