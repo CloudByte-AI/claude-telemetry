@@ -334,66 +334,18 @@ def stop() -> None:
                     prompt_created = True
                     logger.info(f"Created new prompt record: {db_prompt_id}")
 
-        # UPDATE the existing prompt with JSONL's prompt_id, uuid, and parent_uuid
-        # Skip if we just created the prompt (it already has the correct values)
+        # DON'T update prompt_id - use the one from UserPromptSubmit
+        # UserPromptSubmit now uses the original event uuid/timestamp from JSONL
+        # So we don't need to update anything
         if not prompt_created:
-            import time
-            max_retries = 10
-            retry_delay = 0.3
-
-            for attempt in range(max_retries):
-                try:
-                    prompt_rec = most_recent_pair.get("prompt_rec", {})
-                    jsonl_uuid = prompt_rec.get("uuid")
-                    jsonl_parent_uuid = prompt_rec.get("parentUuid")
-
-                    # Get fresh connection for each attempt
-                    conn = get_db_connection()
-                    cursor = conn.cursor()
-
-                    # Build update SQL
-                    update_fields = []
-                    update_values = []
-
-                    # Update prompt_id to match JSONL
-                    update_fields.append("prompt_id = ?")
-                    update_values.append(jsonl_prompt_id)
-
-                    # Update uuid
-                    if jsonl_uuid:
-                        update_fields.append("uuid = ?")
-                        update_values.append(jsonl_uuid)
-
-                    # Update parent_uuid
-                    if jsonl_parent_uuid is not None:
-                        update_fields.append("parent_uuid = ?")
-                        update_values.append(jsonl_parent_uuid)
-
-                    update_values.append(db_prompt_id)  # WHERE clause
-                    update_sql = f"UPDATE USER_PROMPT SET {', '.join(update_fields)} WHERE prompt_id = ?"
-                    cursor.execute(update_sql, update_values)
-                    conn.commit()
-
-                    logger.info(f"Updated prompt: prompt_id {db_prompt_id[:20]}... → {jsonl_prompt_id[:20]}...")
-                    logger.info(f"  uuid: {jsonl_uuid[:20] if jsonl_uuid else 'None'}...")
-                    logger.info(f"  parent_uuid: {jsonl_parent_uuid[:20] if jsonl_parent_uuid else 'None'}...")
-                    break  # Success, exit retry loop
-
-                except Exception as e:
-                    if "database is locked" in str(e) and attempt < max_retries - 1:
-                        if attempt == 0:
-                            logger.warning(f"Database locked on prompt update, retrying (up to {max_retries} attempts)")
-                        time.sleep(retry_delay)
-                        continue
-                    else:
-                        logger.error(f"Failed to update prompt after {max_retries} attempts: {e}")
-                        # Don't fail the entire stop hook - continue with obs extraction
-                        break
+            logger.info(f"Using existing prompt from UserPromptSubmit: {db_prompt_id[:20]}...")
+            logger.info(f"  JSONL prompt_id: {jsonl_prompt_id[:20]}... (keeping DB prompt_id)")
+            # Use the DB prompt_id for foreign key relationships
+            effective_prompt_id = db_prompt_id
         else:
-            logger.info(f"Skipping prompt update (newly created prompt already has correct values)")
-
-        # Now use the JSONL's prompt_id for all foreign key relationships
-        effective_prompt_id = jsonl_prompt_id
+            logger.info(f"Using newly created prompt with JSONL values: {db_prompt_id[:20]}...")
+            # Use the newly created prompt_id (which equals jsonl_prompt_id)
+            effective_prompt_id = db_prompt_id
 
         # Convert pairs to DB format
         db_data = convert_pairs_to_db_format(pairs)
@@ -411,34 +363,34 @@ def stop() -> None:
             "tool_tokens": 0,
         }
 
-        # Helper to remap prompt_id to JSONL prompt_id
+        # Helper to remap prompt_id to effective_prompt_id (from DB, not JSONL)
         def remap_to_jsonl_id(data_item, prompt_id_field="prompt_id"):
             item = data_item.copy()
             item[prompt_id_field] = effective_prompt_id
             return item
 
-        # Write responses (remap prompt_id to JSONL prompt_id)
+        # Write responses (remap prompt_id to DB prompt_id)
         for response in db_data.get("responses", []):
             if response["prompt_id"] == jsonl_prompt_id:
                 remapped = remap_to_jsonl_id(response)
                 if writer.write_response(remapped):
                     counts["responses"] += 1
 
-        # Write tools (remap prompt_id to JSONL prompt_id)
+        # Write tools (remap prompt_id to DB prompt_id)
         for tool in db_data.get("tools", []):
             if tool["prompt_id"] == jsonl_prompt_id:
                 remapped = remap_to_jsonl_id(tool)
                 if writer.write_tool(remapped):
                     counts["tools"] += 1
 
-        # Write thinking (remap prompt_id to JSONL prompt_id)
+        # Write thinking (remap prompt_id to DB prompt_id)
         for thinking in db_data.get("thinking", []):
             if thinking["prompt_id"] == jsonl_prompt_id:
                 remapped = remap_to_jsonl_id(thinking)
                 if writer.write_thinking(remapped):
                     counts["thinking"] += 1
 
-        # Write IO tokens (remap prompt_id to JSONL prompt_id)
+        # Write IO tokens (remap prompt_id to DB prompt_id)
         for io_tokens in db_data.get("io_tokens", []):
             if io_tokens["prompt_id"] == jsonl_prompt_id:
                 remapped = remap_to_jsonl_id(io_tokens)

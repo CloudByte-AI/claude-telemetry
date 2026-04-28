@@ -169,6 +169,90 @@ OBS_REMINDER = (
 )
 
 
+def extract_user_text_from_hook_data(hook_data: dict) -> str:
+    """
+    Extract the user's actual text from hook data.
+
+    The hook data can have different structures:
+    1. Simple "prompt" or "content" field (string)
+    2. "message" object with "content" array (JSONL format)
+
+    For the array format, we filter out system messages like <ide_opened_file>.
+
+    Args:
+        hook_data: Raw hook data from Claude Code
+
+    Returns:
+        str: Cleaned user text only
+    """
+    # First, check if there's a simple prompt/content field
+    if "prompt" in hook_data:
+        return filter_system_messages(hook_data["prompt"])
+    if "content" in hook_data and isinstance(hook_data["content"], str):
+        return filter_system_messages(hook_data["content"])
+
+    # Check for message.content array format (JSONL structure)
+    message = hook_data.get("message", {})
+    if isinstance(message, dict):
+        content_array = message.get("content", [])
+        if isinstance(content_array, list):
+            # Extract text from each content item
+            user_texts = []
+            for item in content_array:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    text = item.get("text", "")
+                    # Filter out system messages
+                    filtered = filter_system_messages(text)
+                    if filtered:  # Only add non-empty text
+                        user_texts.append(filtered)
+
+            # Join all user texts (usually just one after filtering)
+            return " ".join(user_texts).strip()
+
+    # Fallback: return empty string
+    return ""
+
+
+def filter_system_messages(content: str) -> str:
+    """
+    Filter out system/context messages from prompt content.
+
+    Removes messages like:
+    - <ide_opened_file>...</ide_opened_file>
+    - <system-reminder>...</system-reminder>
+    - <user-prompt-submit-hook additional context>...</user-prompt-submit-hook>
+
+    Args:
+        content: Raw prompt content (may include system messages)
+
+    Returns:
+        str: Cleaned prompt text with only user messages
+    """
+    if not content:
+        return ""
+
+    import re
+
+    # Remove <ide_opened_file> blocks
+    content = re.sub(r'<ide_opened_file>.*?</ide_opened_file>\s*', '', content, flags=re.DOTALL)
+
+    # Remove <system-reminder> blocks
+    content = re.sub(r'<system-reminder>.*?</system-reminder>\s*', '', content, flags=re.DOTALL)
+
+    # Remove <user-prompt-submit-hook additional context> blocks
+    content = re.sub(r'<user-prompt-submit-hook.*?</user-prompt-submit-hook>\s*', '', content, flags=re.DOTALL)
+
+    # Remove other common system tags
+    content = re.sub(r'<sessionstart-hook.*?</sessionstart-hook>\s*', '', content, flags=re.DOTALL)
+    content = re.sub(r'<sessionstart-hook-additional-context.*?</sessionstart-hook-additional-context>\s*', '', content, flags=re.DOTALL)
+    content = re.sub(r'<obs>.*?</obs>\s*', '', content, flags=re.DOTALL)
+
+    # Clean up extra whitespace
+    content = content.strip()
+
+    return content
+
+
 def read_stdin_data() -> dict:
     """
     Read hook data from stdin.
@@ -215,6 +299,14 @@ def handle_user_prompt():
         # Read hook data from stdin
         hook_data = read_stdin_data()
 
+        # DEBUG: Print all keys and values in hook_data to understand the structure
+        logger.info(f"DEBUG - hook_data keys: {list(hook_data.keys())}")
+        for key, value in hook_data.items():
+            if key != "prompt":  # Skip the full prompt text to avoid spam
+                logger.info(f"DEBUG - {key}: {value}")
+            else:
+                logger.info(f"DEBUG - {key}: (length={len(value)}, preview={value[:100]})")
+
         # Extract session_id early to check for pending tasks
         session_id = hook_data.get("session_id") or os.environ.get("CLAUDE_SESSION_ID")
 
@@ -222,30 +314,37 @@ def handle_user_prompt():
         if session_id:
             retry_pending_tasks(session_id)
 
-        # Extract prompt data
-        prompt = hook_data.get("prompt") or hook_data.get("content", "")
-        prompt_id = hook_data.get("prompt_id")
-        parent_uuid = hook_data.get("parent_uuid")
-        cwd = hook_data.get("cwd") or os.environ.get("PWD") or os.environ.get("cwd")
+        # Extract ALL available prompt data from JSONL event
+        # Try both camelCase (JSONL style) and snake_case (our style) field names
+        prompt_id = hook_data.get("prompt_id") or hook_data.get("promptId")  # Try both!
+        parent_uuid = hook_data.get("parent_uuid") or hook_data.get("parentUuid")  # Try both!
+        event_uuid = hook_data.get("uuid") or hook_data.get("id")  # Try both!
+        event_timestamp = hook_data.get("timestamp") or hook_data.get("time")  # Try both!
+        cwd = hook_data.get("cwd") or hook_data.get("directory") or os.environ.get("PWD") or os.environ.get("cwd")
 
-        logger.info(f"User prompt: session_id={session_id}, prompt_length={len(prompt)}")
+        # Extract user text from hook data (handles both simple string and message.content array)
+        prompt_text = extract_user_text_from_hook_data(hook_data)
+
+        logger.info(f"User prompt: session_id={session_id}, prompt_length={len(prompt_text)}")
 
         # Ensure session is initialized (only checks once per session)
         # This handles the case where plugin started in an already-running session
         if session_id and cwd:
             ensure_session_initialized(session_id, cwd)
 
-        if not prompt:
-            logger.warning("No prompt content provided")
+        if not prompt_text:
+            logger.warning("No prompt content provided (after filtering system messages)")
             print(json.dumps({"status": "error", "message": "No prompt content"}))
             return
 
-        # Process and store user prompt in database
+        # Process and store user prompt in database with ALL original fields
         result = process_user_prompt(
-            prompt=prompt,
+            prompt=prompt_text,  # Use filtered text
             session_id=session_id,
             prompt_id=prompt_id,
             parent_uuid=parent_uuid,
+            event_uuid=event_uuid,  # Pass original uuid
+            event_timestamp=event_timestamp,  # Pass original timestamp
             cwd=cwd,
         )
 

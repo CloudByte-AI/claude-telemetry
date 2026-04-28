@@ -132,16 +132,20 @@ class EventProcessor:
         session_id: str,
         prompt_id: Optional[str] = None,
         parent_uuid: Optional[str] = None,
+        event_uuid: Optional[str] = None,
+        event_timestamp: Optional[str] = None,
         cwd: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Process a user prompt event.
 
         Args:
-            prompt: The user's prompt text
+            prompt: The user's prompt text (already filtered)
             session_id: Session UUID
             prompt_id: Optional prompt ID
             parent_uuid: Optional parent UUID
+            event_uuid: Original event UUID from JSONL (if available)
+            event_timestamp: Original event timestamp from JSONL (if available)
             cwd: Optional current working directory
 
         Returns:
@@ -155,11 +159,11 @@ class EventProcessor:
         prompt_data = {
             "prompt_id": prompt_id or str(uuid.uuid4()),
             "session_id": session_id,
-            "uuid": str(uuid.uuid4()),
+            "uuid": event_uuid or str(uuid.uuid4()),  # Use original if available
             "parent_uuid": parent_uuid,
             "prompt": prompt,
             "cwd": cwd,  # Pass cwd for project/session creation if needed
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": event_timestamp or datetime.now().isoformat(),  # Use original if available
         }
 
         success = self.db_writer.write_user_prompt(prompt_data)
@@ -233,11 +237,11 @@ class EventProcessor:
             db_data = convert_pairs_to_db_format(pairs)
 
             # Write to database
-            # Write user prompts from JSONL with the correct promptId
-            # UserPromptSubmit hook no longer writes to DB to avoid duplicates
-            for prompt in db_data.get("user_prompts", []):
-                if self.db_writer.write_user_prompt(prompt):
-                    counts["user_prompts"] += 1
+            # SKIP: User prompts are already written by UserPromptSubmit hook
+            # The hook now uses original event uuid/timestamp from JSONL
+            # So we don't need to write user prompts from JSONL
+            logger.debug("Skipping user prompts from JSONL (already written by UserPromptSubmit hook)")
+            counts["user_prompts"] = 0
 
             for response in db_data.get("responses", []):
                 if self.db_writer.write_response(response):
@@ -405,11 +409,13 @@ def process_user_prompt(
     session_id: str,
     prompt_id: Optional[str] = None,
     parent_uuid: Optional[str] = None,
+    event_uuid: Optional[str] = None,
+    event_timestamp: Optional[str] = None,
     cwd: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Process user prompt event."""
     processor = EventProcessor()
-    return processor.process_user_prompt(prompt, session_id, prompt_id, parent_uuid, cwd)
+    return processor.process_user_prompt(prompt, session_id, prompt_id, parent_uuid, event_uuid, event_timestamp, cwd)
 
 
 def generate_observation(
