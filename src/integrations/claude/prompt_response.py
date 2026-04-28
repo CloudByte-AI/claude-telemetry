@@ -55,7 +55,6 @@ def _filter_system_messages_from_prompt(text: str) -> str:
     # Remove other common system tags
     text = re.sub(r'<sessionstart-hook.*?</sessionstart-hook>\s*', '', text, flags=re.DOTALL)
     text = re.sub(r'<sessionstart-hook-additional-context.*?</sessionstart-hook-additional-context>\s*', '', text, flags=re.DOTALL)
-    text = re.sub(r'<obs>.*?</obs>\s*', '', text, flags=re.DOTALL)
 
     return text.strip()
 
