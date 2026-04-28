@@ -285,9 +285,8 @@ def filter_system_messages(content: str) -> str:
 
     import re
 
-    # Remove <ide_opened_file> blocks
-    content = re.sub(r'<ide_opened_file>.*?</ide_opened_file>\s*', '', content, flags=re.DOTALL)
-    content = re.sub(r'<ide_selection>.*?</ide_selection>\s*', '', content, flags=re.DOTALL)
+    # Remove entire lines that start with <ide
+    content = re.sub(r'^<ide.*\n?', '', content, flags=re.MULTILINE)
 
     # Remove <system-reminder> blocks
     content = re.sub(r'<system-reminder>.*?</system-reminder>\s*', '', content, flags=re.DOTALL)
