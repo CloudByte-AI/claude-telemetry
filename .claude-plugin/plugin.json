@@ -1,7 +1,7 @@
 {
   "name": "claude-telemetry",
   "description": "Claude Telemetry - Observablity stack for claude - Prompt, Observablity, Tokens.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "author": {
     "name": "CloudByte-AI"
   },
