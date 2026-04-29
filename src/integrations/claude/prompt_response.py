@@ -323,7 +323,8 @@ def extract_prompt_response_pairs(events: List[Dict[str, Any]]) -> List[Dict[str
     for mid, merged in merged_msgs.items():
         if not merged["text"]:
             continue
-        if merged.get("stop_reason") != "end_turn":
+        stop_reason = merged.get("stop_reason", "")
+        if stop_reason not in ("end_turn", "tool_use"):
             continue
         sample_rec = msg_id_to_records[mid][0]
         pid = find_prompt_id(sample_rec, by_uuid)
