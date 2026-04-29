@@ -4,5 +4,19 @@
   "version": "0.1.1",
   "author": {
     "name": "CloudByte-AI"
+  },
+    "mcpServers": {
+    "cloudbyte": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "${CLAUDE_PLUGIN_ROOT}",
+        "python",
+        "-m",
+        "src.mcp.server"
+      ],
+      "alwaysLoad": true
+    }
   }
 }

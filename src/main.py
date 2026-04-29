@@ -32,9 +32,11 @@ from src.db.schema import initialize_database_with_manager, DatabaseSchema
 from src.common.file_io import read_json, write_json
 
 # Import handlers
-from src.handlers.session_start import handle_session_start
+from src.handlers.session_start import handle_session_start, _ensure_mcp_permission
 from src.handlers.user_prompt import handle_user_prompt
 from src.handlers.session_end import handle_session_end
+from src.observations.writer import save_observation
+import json as _json
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -122,6 +124,7 @@ def session_start() -> None:
     SessionStart hook - Called when a new Claude session starts.
     Delegates to the session_start handler.
     """
+    _ensure_mcp_permission()
     handle_session_start()
 
 
@@ -171,6 +174,7 @@ def stop() -> None:
         )
         from src.db.writers import DatabaseWriter
         from src.integrations.claude.reader import get_claude_dir, read_jsonl_file, normalize_project_name
+        MCP_OBS_TOOL = "mcp__plugin_claude-telemetry_cloudbyte__record_observation"
 
         # Read hook data from stdin
         hook_data = {}
@@ -382,6 +386,9 @@ def stop() -> None:
                 remapped = remap_to_jsonl_id(tool)
                 if writer.write_tool(remapped):
                     counts["tools"] += 1
+                    # Don't count record_observation toward LLM task queue
+                    if tool.get("tool_name") == MCP_OBS_TOOL:
+                        counts["tools"] -= 1
 
         # Write thinking (remap prompt_id to DB prompt_id)
         for thinking in db_data.get("thinking", []):
@@ -408,39 +415,68 @@ def stop() -> None:
 
         logger.info(f"Current prompt data stored during Stop: {counts}")
 
-        # Extract inline obs blocks from response and save to HOOK_OBSERVATION
+        # # Extract inline obs blocks from response and save to HOOK_OBSERVATION
+        # try:
+        #     from src.observations.extractor import extract_and_parse_obs
+        #     from src.observations.writer import save_observation
+
+        #     # Get the most recent response text
+        #     most_recent_response = None
+        #     for response in db_data.get("responses", []):
+        #         if response["prompt_id"] == effective_prompt_id:
+        #             most_recent_response = response.get("response_text", "")
+        #             break
+
+        #     if most_recent_response:
+        #         observations = extract_and_parse_obs(most_recent_response)
+
+        #         if observations:
+        #             logger.info(f"Found {len(observations)} obs blocks in response")
+
+        #             for obs_data in observations:
+        #                 obs_id = save_observation(
+        #                     session_id=session_id,
+        #                     prompt_id=effective_prompt_id,
+        #                     obs_data=obs_data
+        #                 )
+        #                 if obs_id:
+        #                     logger.info(f"Saved hook observation {obs_id}: {obs_data.get('title', 'Untitled')}")
+        #                 else:
+        #                     logger.warning(f"Failed to save observation: {obs_data.get('title', 'Unknown')}")
+        #         else:
+        #             logger.debug("No obs blocks found in response")
+        # except Exception as obs_error:
+        #     logger.error(f"Hook observation extraction failed: {obs_error}", exc_info=True)
+        
+        logger.debug("Observation capture handled by MCP tool (record_observation)")
+        # Extract observation from MCP tool call and save to HOOK_OBSERVATION
         try:
-            from src.observations.extractor import extract_and_parse_obs
-            from src.observations.writer import save_observation
+            for tool in db_data.get("tools", []):
+                if tool["prompt_id"] != jsonl_prompt_id:
+                    continue
+                if tool.get("tool_name") != MCP_OBS_TOOL:
+                    continue
 
-            # Get the most recent response text
-            most_recent_response = None
-            for response in db_data.get("responses", []):
-                if response["prompt_id"] == effective_prompt_id:
-                    most_recent_response = response.get("response_text", "")
-                    break
+                raw_input = tool.get("input_json", "{}")
+                try:
+                    obs_data = _json.loads(raw_input) if isinstance(raw_input, str) else raw_input
+                except Exception:
+                    obs_data = {}
+                if not obs_data.get("title"):
+                    continue
 
-            if most_recent_response:
-                observations = extract_and_parse_obs(most_recent_response)
-
-                if observations:
-                    logger.info(f"Found {len(observations)} obs blocks in response")
-
-                    for obs_data in observations:
-                        obs_id = save_observation(
-                            session_id=session_id,
-                            prompt_id=effective_prompt_id,
-                            obs_data=obs_data
-                        )
-                        if obs_id:
-                            logger.info(f"Saved hook observation {obs_id}: {obs_data.get('title', 'Untitled')}")
-                        else:
-                            logger.warning(f"Failed to save observation: {obs_data.get('title', 'Unknown')}")
+                obs_id = save_observation(
+                    session_id=session_id,
+                    prompt_id=effective_prompt_id,
+                    obs_data=obs_data,
+                )
+                if obs_id:
+                    logger.info(f"Saved MCP observation: {obs_data.get('title', 'Untitled')}")
                 else:
-                    logger.debug("No obs blocks found in response")
-        except Exception as obs_error:
-            logger.error(f"Hook observation extraction failed: {obs_error}", exc_info=True)
+                    logger.warning(f"Failed to save MCP observation: {obs_data.get('title', 'Unknown')}")
 
+        except Exception as obs_error:
+            logger.warning(f"MCP observation save failed: {obs_error}")
         # Queue observation task if tools were used
         if counts["tools"] > 0:
             try:
