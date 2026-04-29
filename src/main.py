@@ -338,18 +338,26 @@ def stop() -> None:
                     prompt_created = True
                     logger.info(f"Created new prompt record: {db_prompt_id}")
 
-        # DON'T update prompt_id - use the one from UserPromptSubmit
-        # UserPromptSubmit now uses the original event uuid/timestamp from JSONL
-        # So we don't need to update anything
         if not prompt_created:
-            logger.info(f"Using existing prompt from UserPromptSubmit: {db_prompt_id[:20]}...")
-            logger.info(f"  JSONL prompt_id: {jsonl_prompt_id[:20]}... (keeping DB prompt_id)")
-            # Use the DB prompt_id for foreign key relationships
-            effective_prompt_id = db_prompt_id
+            # Always update to real JSONL prompt_id.
+            # user_prompt.py may have stored an auto-generated ID due to
+            # transcript timing race — JSONL ID is always the source of truth.
+            if db_prompt_id != jsonl_prompt_id:
+                try:
+                    conn = get_db_connection()
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "UPDATE USER_PROMPT SET prompt_id = ? WHERE prompt_id = ?",
+                        (jsonl_prompt_id, db_prompt_id)
+                    )
+                    conn.commit()
+                    logger.info(f"Updated prompt_id: {db_prompt_id[:20]}... → {jsonl_prompt_id[:20]}...")
+                except Exception as e:
+                    logger.warning(f"Could not update prompt_id: {e}")
+
+            effective_prompt_id = jsonl_prompt_id
         else:
-            logger.info(f"Using newly created prompt with JSONL values: {db_prompt_id[:20]}...")
-            # Use the newly created prompt_id (which equals jsonl_prompt_id)
-            effective_prompt_id = db_prompt_id
+            effective_prompt_id = db_prompt_id  # newly created, already has jsonl_prompt_id
 
         # Convert pairs to DB format
         db_data = convert_pairs_to_db_format(pairs)

@@ -207,8 +207,8 @@ OBS_REMINDER = (
 def extract_ids_from_transcript(
     transcript_path: str,
     prompt_text: str,
-    max_retries: int = 10,
-    base_delay_ms: int = 60,
+    max_retries: int = 30,
+    base_delay_ms: int = 150,
 ) -> dict:
     """
     Extract promptId AND parentUuid from the JSONL transcript file.
@@ -534,8 +534,8 @@ def handle_user_prompt():
             ids = extract_ids_from_transcript(
                 transcript_path=transcript_path,
                 prompt_text=prompt_text,
-                max_retries=10,    # up to ~3 seconds total wait
-                base_delay_ms=60,  # 60ms, 120ms, 180ms … capped at 500ms
+                max_retries=30,     # up to ~13 seconds total wait
+                base_delay_ms=150,  # 150ms, 300ms, 450ms, 500ms… capped at 500ms
             )
             prompt_id = ids["prompt_id"] or None
             parent_uuid = ids["parent_uuid"]
