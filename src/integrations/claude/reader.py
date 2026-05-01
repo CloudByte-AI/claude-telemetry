@@ -133,10 +133,6 @@ def normalize_project_name(cwd: str) -> str:
     # Replace forward slashes with dashes
     normalized = normalized.replace("/", "-")
 
-    # Handle edge case where path starts with dash (absolute Unix paths)
-    if normalized.startswith("-") and not normalized.startswith("--"):
-        normalized = "-" + normalized
-
     return normalized
 
 
