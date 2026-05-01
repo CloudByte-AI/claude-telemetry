@@ -282,6 +282,9 @@ def extract_ids_from_transcript(
                 if event.get("type") != "user":
                     continue
 
+                if event.get("isMeta"):
+                    continue  # skip synthetic resume messages — never return their ID
+
                 prompt_id = event.get("promptId") or event.get("prompt_id")
                 if not prompt_id:
                     continue  # user entry without an id — skip
@@ -302,14 +305,14 @@ def extract_ids_from_transcript(
                     ).strip().lower()
 
                     if match_snippet not in entry_text:
-                        # This entry is from a different (earlier) prompt — keep searching
+                        # Text mismatch — skip this entry and keep scanning older ones.
+                        # Do NOT break — on session resume the current entry may not
+                        # be written yet, so older entries with matching text exist.
                         logger.debug(
                             f"Attempt {attempt}/{max_retries}: "
                             f"promptId {prompt_id} text mismatch, skipping"
                         )
-                        # Stop scanning further lines — everything older will
-                        # also be from a different prompt
-                        break
+                        continue
 
                 # ── Match confirmed ──────────────────────────────────────────
                 parent_uuid = event.get("parentUuid") or event.get("parent_uuid")

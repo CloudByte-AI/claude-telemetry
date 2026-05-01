@@ -248,11 +248,15 @@ def stop() -> None:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Try exact match first
+        # Try exact match first — only unresponded rows.
+        # Rows already linked to a response belong to a previous turn
+        # (same text submitted again) — never touch those.
         cursor.execute("""
-            SELECT prompt_id FROM USER_PROMPT
-            WHERE session_id = ? AND LOWER(TRIM(prompt)) = LOWER(TRIM(?))
-            ORDER BY timestamp DESC LIMIT 1
+            SELECT p.prompt_id FROM USER_PROMPT p
+            LEFT JOIN RESPONSE r ON r.prompt_id = p.prompt_id
+            WHERE p.session_id = ? AND LOWER(TRIM(p.prompt)) = LOWER(TRIM(?))
+            AND r.message_id IS NULL
+            ORDER BY p.timestamp DESC LIMIT 1
         """, (session_id, prompt_text))
 
         result = cursor.fetchone()
@@ -266,11 +270,13 @@ def stop() -> None:
             # Try fuzzy match - search for prompts that contain the text or are contained within it
             logger.info(f"Exact match not found for: \"{prompt_text[:50]}\", trying fuzzy match...")
 
-            # Try: prompt_text is a substring of DB prompt
+            # Try: prompt_text is a substring of DB prompt (unresponded only)
             cursor.execute("""
-                SELECT prompt_id FROM USER_PROMPT
-                WHERE session_id = ? AND INSTR(LOWER(prompt), LOWER(?)) > 0
-                ORDER BY timestamp DESC LIMIT 1
+                SELECT p.prompt_id FROM USER_PROMPT p
+                LEFT JOIN RESPONSE r ON r.prompt_id = p.prompt_id
+                WHERE p.session_id = ? AND INSTR(LOWER(p.prompt), LOWER(?)) > 0
+                AND r.message_id IS NULL
+                ORDER BY p.timestamp DESC LIMIT 1
             """, (session_id, prompt_text))
             result = cursor.fetchone()
 
@@ -278,11 +284,13 @@ def stop() -> None:
                 db_prompt_id = result[0]
                 logger.info(f"Fuzzy match found (substring): {db_prompt_id}")
             else:
-                # Try: DB prompt is a substring of prompt_text
+                # Try: DB prompt is a substring of prompt_text (unresponded only)
                 cursor.execute("""
-                    SELECT prompt_id, prompt FROM USER_PROMPT
-                    WHERE session_id = ? AND INSTR(LOWER(?), LOWER(prompt)) > 0
-                    ORDER BY timestamp DESC LIMIT 1
+                    SELECT p.prompt_id, p.prompt FROM USER_PROMPT p
+                    LEFT JOIN RESPONSE r ON r.prompt_id = p.prompt_id
+                    WHERE p.session_id = ? AND INSTR(LOWER(?), LOWER(p.prompt)) > 0
+                    AND r.message_id IS NULL
+                    ORDER BY p.timestamp DESC LIMIT 1
                 """, (session_id, prompt_text))
                 result = cursor.fetchone()
 
