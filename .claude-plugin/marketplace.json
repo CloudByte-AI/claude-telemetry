@@ -11,7 +11,7 @@
         "repo": "CloudByte-AI/claude-telemetry"
       },
       "description": "Claude Telemetry - Observability stack for Claude — captures prompts, responses, tool usage, tokens, and observations across sessions.",
-      "version": "0.1.8",
+      "version": "0.1.9",
       "author": {
         "name": "CloudByte-AI"
       },
