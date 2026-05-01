@@ -71,7 +71,7 @@ def setup() -> None:
         config_file = get_config_file()
         if not config_file.exists():
             default_config = {
-                "version": "0.1.1",
+                "version": "0.1.7",
                 "created_at": datetime.now().isoformat(),
                 "settings": {
                     "log_level": "INFO",
@@ -355,8 +355,17 @@ def stop() -> None:
                     conn = get_db_connection()
                     cursor = conn.cursor()
                     cursor.execute(
-                        "UPDATE USER_PROMPT SET prompt_id = ? WHERE prompt_id = ?",
-                        (jsonl_prompt_id, db_prompt_id)
+                        """UPDATE USER_PROMPT 
+                           SET prompt_id = ?,
+                               timestamp = ?,
+                               parent_uuid = COALESCE(parent_uuid, ?)
+                           WHERE prompt_id = ?""",
+                        (
+                            jsonl_prompt_id,
+                            most_recent_pair.get("prompt_rec", {}).get("timestamp") or datetime.now().isoformat(),
+                            most_recent_pair.get("prompt_rec", {}).get("parentUuid"),
+                            db_prompt_id,
+                        )
                     )
                     conn.commit()
                     logger.info(f"Updated prompt_id: {db_prompt_id[:20]}... → {jsonl_prompt_id[:20]}...")

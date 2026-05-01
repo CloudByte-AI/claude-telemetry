@@ -537,8 +537,8 @@ def handle_user_prompt():
             ids = extract_ids_from_transcript(
                 transcript_path=transcript_path,
                 prompt_text=prompt_text,
-                max_retries=30,     # up to ~13 seconds total wait
-                base_delay_ms=150,  # 150ms, 300ms, 450ms, 500ms… capped at 500ms
+                max_retries=10,     # up to ~1 second total wait
+                base_delay_ms=100,  # 100ms, 200ms, 300ms… capped at 500ms
             )
             prompt_id = ids["prompt_id"] or None
             parent_uuid = ids["parent_uuid"]

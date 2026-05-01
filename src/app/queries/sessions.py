@@ -74,7 +74,7 @@ def get_prompt_tool_tokens_agg(prompt_id: str):
 
 def get_session_observations(session_id: str):
     return q(
-        "SELECT * FROM HOOK_OBSERVATION WHERE session_id = ? ORDER BY created_at ASC",
+        "SELECT * FROM HOOK_OBSERVATION WHERE session_id = ? ORDER BY created_at DESC",
         (session_id,)
     )
 

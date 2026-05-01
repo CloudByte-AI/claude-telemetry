@@ -140,9 +140,7 @@ def get_observation_detail_context(obs_id: str) -> dict | None:
         return None
 
     obs     = _enrich_observation(row)
-    nearby  = [dict(r) for r in oq.get_nearby_observations(obs["session_id"])]
-    for n in nearby:
-        n["type_meta"] = TYPE_META.get(n.get("type", ""), {"label": n.get("type", "").capitalize(), "color": "accent", "icon": "◎"})
+    nearby  = [_enrich_observation(r) for r in oq.get_nearby_observations(obs["session_id"])]
 
     return {
         "active":      "observations",

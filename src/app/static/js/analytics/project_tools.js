@@ -146,4 +146,9 @@
         }
     });
 
+    /* Apply tool name shortening */
+    if (window.ToolUtils) {
+        window.ToolUtils.applyShortening();
+    }
+
 }());

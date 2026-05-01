@@ -1,11 +1,17 @@
 {
   "name": "claude-telemetry",
-  "description": "Claude Telemetry - Observablity stack for claude - Prompt, Observablity, Tokens.",
-  "version": "0.1.6",
+  "version": "0.1.7",
+  "description": "Claude Telemetry - Observability stack for claude - Prompt, Observability, Tokens.",
   "author": {
     "name": "CloudByte-AI"
   },
-    "mcpServers": {
+  "hooks": {
+    "setup": {
+      "command": "bash",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/validate.sh"]
+    }
+  },
+  "mcpServers": {
     "cloudbyte": {
       "command": "uv",
       "args": [

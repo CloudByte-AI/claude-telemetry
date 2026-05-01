@@ -168,11 +168,18 @@ class DatabaseWriter:
             conn = self.get_connection()
             cursor = conn.cursor()
 
-            # Check if prompt_id already exists (idempotent)
+            # Check if prompt_id already exists - update timestamp if so (for correct JSONL ordering)
             prompt_id = prompt_data["prompt_id"]
             cursor.execute("SELECT 1 FROM USER_PROMPT WHERE prompt_id = ? LIMIT 1", (prompt_id,))
             if cursor.fetchone() is not None:
-                logger.debug(f"User prompt {prompt_id} already exists, skipping")
+                # Update timestamp with correct value from JSONL (more reliable than hook timestamp)
+                cursor.execute("""
+                    UPDATE USER_PROMPT
+                    SET timestamp = ?
+                    WHERE prompt_id = ?
+                """, (prompt_data["timestamp"], prompt_id))
+                conn.commit()
+                logger.debug(f"Updated user prompt timestamp: {prompt_id} → {prompt_data['timestamp']}")
                 return True
 
             session_id = prompt_data["session_id"]

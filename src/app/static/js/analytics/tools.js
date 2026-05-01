@@ -24,6 +24,11 @@
         el.style.background = color(i);
     });
 
+    // Apply tool name shortening
+    if (window.ToolUtils) {
+        window.ToolUtils.applyShortening();
+    }
+
     /* Chart.js Defaults */
     Chart.defaults.font.family = "'Inter', sans-serif";
     Chart.defaults.font.weight = 500;
@@ -61,7 +66,7 @@
         donut = new Chart(donutCtx, {
             type: 'doughnut',
             data: {
-                labels: labels,
+                labels: labels.map(function(name) { return window.ToolUtils ? window.ToolUtils.shortenToolName(name) : name; }),
                 datasets: [{
                     data: calls,
                     backgroundColor: labels.map(function (_, i) { return color(i); }),
@@ -84,6 +89,9 @@
                         cornerRadius: 0,
                         displayColors: false,
                         callbacks: {
+                            title: function (ctx) {
+                                return window.ToolUtils ? window.ToolUtils.shortenToolName(ctx[0].label) : ctx[0].label;
+                            },
                             label: function (ctx) {
                                 var total = calls.reduce(function (a, b) { return a+b; }, 0);
                                 return ' ' + ctx.parsed + ' CALLS (' + Math.round(ctx.parsed/total*100) + '%)';
@@ -104,7 +112,7 @@
         bar = new Chart(barCtx, {
             type: 'bar',
             data: {
-                labels: labels,
+                labels: labels.map(function(name) { return window.ToolUtils ? window.ToolUtils.shortenToolName(name) : name; }),
                 datasets: [
                     { label:'INPUT',        data:inp,     backgroundColor: '#111', borderRadius:0 },
                     { label:'OUTPUT',       data:out,     backgroundColor:'#fe4c02',  borderRadius:0 },

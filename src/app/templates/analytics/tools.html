@@ -74,7 +74,7 @@
                     {% for label in chart_labels %}
                     <div class="legend-item" data-idx="{{ loop.index0 }}" onclick="toggleDonutSegment(this)">
                         <div class="legend-dot" data-index="{{ loop.index0 }}"></div>
-                        <span class="legend-name">{{ label }}</span>
+                        <span class="legend-name" title="{{ label }}">{{ label }}</span>
                         <span class="legend-val">{{ chart_calls[loop.index0] }}</span>
                     </div>
                     {% endfor %}
@@ -134,7 +134,7 @@
                     <tbody>
                         {% for row in tool_rows %}
                         <tr>
-                            <td><span class="mono" style="font-weight: 700; color:var(--text);">{{ row.tool_name }}</span></td>
+                            <td><span class="mono" style="font-weight: 700; color:var(--text);" title="{{ row.tool_name }}">{{ row.tool_name }}</span></td>
                             <td><span class="mono" style="font-weight: 600;">{{ row.call_count }}</span></td>
                             <td>
                                 <div style="display:flex; align-items:center; gap:8px;">
@@ -224,5 +224,6 @@
 
 {% block scripts %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="/static/js/analytics/tool-utils.js"></script>
 <script src="/static/js/analytics/tools.js"></script>
 {% endblock %}

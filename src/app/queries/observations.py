@@ -134,16 +134,24 @@ def get_session_observations_full(session_id: str):
                files_read, files_modified, content_hash, created_at
         FROM HOOK_OBSERVATION
         WHERE session_id = ?
-        ORDER BY created_at ASC
+        ORDER BY created_at DESC
     """, (session_id,))
 
 
 def get_nearby_observations(session_id: str, limit: int = 10):
     return q("""
-        SELECT id, type, title, subtitle, created_at
-        FROM HOOK_OBSERVATION
-        WHERE session_id = ?
-        ORDER BY created_at ASC
+        SELECT o.id, o.type, o.title, o.subtitle, o.created_at,
+               (
+                   SELECT COUNT(*) FROM USER_PROMPT up2
+                   WHERE up2.session_id = o.session_id
+                   AND up2.timestamp <= (
+                       SELECT timestamp FROM USER_PROMPT up3
+                       WHERE up3.prompt_id = o.prompt_id
+                   )
+               ) AS turn_number
+        FROM HOOK_OBSERVATION o
+        WHERE o.session_id = ?
+        ORDER BY turn_number DESC
         LIMIT ?
     """, (session_id, limit))
 
