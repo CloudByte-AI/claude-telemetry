@@ -165,6 +165,8 @@ def extract_prompt_response_pairs(events: List[Dict[str, Any]]) -> List[Dict[str
     for r in records:
         if r.get("type") != "user":
             continue
+        if r.get("isMeta"):      # skip synthetic resume messages
+            continue
         pid = r.get("promptId") or r.get("uuid")
         if not pid:
             continue
