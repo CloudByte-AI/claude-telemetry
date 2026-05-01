@@ -120,3 +120,14 @@ def get_config_file() -> Path:
         Path: The full path to config.json
     """
     return get_cloudbyte_dir() / "config.json"
+
+
+def get_sync_checkpoint_file() -> Path:
+    """
+    Get the central sync checkpoint file path.
+    Stores last-synced rowid per table so incremental sync knows where to resume.
+
+    Returns:
+        Path: ~/.cloudbyte/sync-checkpoint.json
+    """
+    return get_cloudbyte_dir() / "sync-checkpoint.json"

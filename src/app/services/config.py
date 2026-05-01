@@ -18,6 +18,7 @@ def get_config_context() -> dict:
     endpoint = cfg.get("llm", {}).get("endpoints", {}).get("default", {})
     settings = cfg.get("settings", {})
     worker   = cfg.get("worker", {})
+    central  = cfg.get("central", {})
     key      = endpoint.get("api_key", "")
     key_set  = _api_key_is_real(key)
 
@@ -34,6 +35,7 @@ def get_config_context() -> dict:
         "config_exists":   config_exists(),
         "settings":        settings,
         "worker":          worker,
+        "central":         central,
         "api_key_set":     key_set,
         "feature_warning": feature_warning,
     }
@@ -72,6 +74,18 @@ def update_config(form: dict) -> tuple[bool, str]:
         new_port = form.get("worker_port", "").strip()
         if new_port:
             cfg["worker"]["port"] = _int(new_port, cfg["worker"].get("port", 8765))
+
+        # ── Central sync ──────────────────────────────────────────────────────
+        cfg.setdefault("central", {})
+        cfg["central"]["enabled"] = form.get("central_enabled") == "1"
+        new_central_url = form.get("central_url", "").strip()
+        if new_central_url:
+            cfg["central"]["url"] = new_central_url
+        new_central_key = form.get("central_api_key", "").strip()
+        if new_central_key and new_central_key not in PLACEHOLDER_KEYS:
+            cfg["central"]["api_key"] = new_central_key
+        cfg["central"]["sync_on_stop"] = form.get("central_sync_on_stop") == "1"
+        cfg["central"]["sync_on_session_end"] = form.get("central_sync_on_session_end") == "1"
 
         save_config(cfg)
 

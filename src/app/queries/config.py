@@ -28,6 +28,13 @@ _EMPTY_CONFIG = {
         "enabled": True,
         "port":    8765,
     },
+    "central": {
+        "enabled": False,
+        "url":     "",
+        "api_key": "",
+        "sync_on_stop":         True,
+        "sync_on_session_end":  True,
+    },
 }
 
 

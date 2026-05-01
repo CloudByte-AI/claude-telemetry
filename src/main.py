@@ -108,6 +108,13 @@ def setup() -> None:
                         },
                     },
                 },
+                "central": {
+                    "enabled": False,
+                    "url": "",
+                    "api_key": "",
+                    "sync_on_stop": True,
+                    "sync_on_session_end": True,
+                },
             }
             write_json(config_file, default_config)
             logger.info("Created default configuration")
@@ -530,6 +537,13 @@ def stop() -> None:
         from src.db.manager import close_db
         close_db()
         logger.debug("Database connection closed")
+
+        # Central sync — fire-and-forget, never blocks or fails the Stop hook
+        try:
+            from src.sync.runner import run_sync
+            run_sync(session_id=session_id, mode="stop")
+        except Exception as sync_err:
+            logger.warning(f"Central sync skipped in stop hook: {sync_err}")
 
     except Exception as e:
         logger.error(f"Stop handling failed: {e}", exc_info=True)

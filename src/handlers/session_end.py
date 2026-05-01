@@ -143,6 +143,13 @@ def handle_session_end():
 
         logger.info("Session end handler completing...")
 
+        # Central sync — full session flush (picks up anything Stop missed)
+        try:
+            from src.sync.runner import run_sync
+            run_sync(session_id=session_id, mode="session_end")
+        except Exception as sync_err:
+            logger.warning(f"Central sync skipped in session_end: {sync_err}")
+
         # Return response
         print(json.dumps({
             "status": "success",
