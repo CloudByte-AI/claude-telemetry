@@ -6,10 +6,7 @@
   "plugins": [
     {
       "name": "claude-telemetry",
-      "source": {
-        "source": "github",
-        "repo": "CloudByte-AI/claude-telemetry"
-      },
+      "source": "./",
       "description": "Claude Telemetry - Observability stack for Claude — captures prompts, responses, tool usage, tokens, and observations across sessions.",
       "version": "0.1.11",
       "author": {
