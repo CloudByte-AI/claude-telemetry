@@ -15,18 +15,83 @@ if [ -t 1 ]; then
     GREEN='\033[0;32m'
     YELLOW='\033[1;33m'
     BLUE='\033[0;34m'
-    NC='\033[0m' # No Color
+    NC='\033[0m'
 else
-    RED=''
-    GREEN=''
-    YELLOW=''
-    BLUE=''
-    NC=''
+    RED=''; GREEN=''; YELLOW=''; BLUE=''; NC=''
 fi
+
+# ── Cross-platform home directory & .cloudbyte folder ─────────────────────────
+# Resolves the user home on Windows (USERPROFILE), macOS, and Linux (HOME)
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || -n "$USERPROFILE" ]]; then
+    # Git Bash / Cygwin on Windows
+    USER_HOME="${USERPROFILE:-$HOME}"
+else
+    USER_HOME="$HOME"
+fi
+
+CLOUDBYTE_DIR="$USER_HOME/.cloudbyte"
+LOG_DIR="$CLOUDBYTE_DIR/logs"
+
+# Create .cloudbyte and logs dir if they don't exist
+if [ ! -d "$CLOUDBYTE_DIR" ]; then
+    mkdir -p "$CLOUDBYTE_DIR"
+    echo -e "${GREEN}✅ Created ~/.cloudbyte at: $CLOUDBYTE_DIR${NC}"
+else
+    echo -e "${BLUE}ℹ️  ~/.cloudbyte already exists at: $CLOUDBYTE_DIR${NC}"
+fi
+
+mkdir -p "$LOG_DIR"
+# ── End home dir setup ─────────────────────────────────────────────────────────
+
+# ── Logging setup ──────────────────────────────────────────────────────────────
+LOG_FILE="$LOG_DIR/setup_$(date '+%Y%m%d_%H%M%S').log"
+
+# Tee all stdout+stderr to the log file, keeping terminal output too
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+}
+
+log "=== CloudByte Setup started ==="
+log "OS: $OSTYPE"
+log "Home directory: $USER_HOME"
+log "CloudByte directory: $CLOUDBYTE_DIR"
+log "Log file: $LOG_FILE"
+echo ""
+# ── End logging setup ──────────────────────────────────────────────────────────
+
+# ── Port 8765 cleanup ──────────────────────────────────────────────────────────
+log "🔌 Checking port 8765..."
+echo "🔌 Checking port 8765..."
+PORT_PID=$(lsof -ti tcp:8765 2>/dev/null || true)
+
+if [ -n "$PORT_PID" ]; then
+    log "⚠️  Port 8765 in use by PID(s): $PORT_PID — killing..."
+    echo -e "${YELLOW}⚠️  Port 8765 is in use by PID(s): $PORT_PID — killing...${NC}"
+    kill -9 $PORT_PID 2>/dev/null || true
+    sleep 1
+
+    STILL_RUNNING=$(lsof -ti tcp:8765 2>/dev/null || true)
+    if [ -n "$STILL_RUNNING" ]; then
+        log "❌ Could not free port 8765 (PID $STILL_RUNNING still running). Aborting."
+        echo -e "${RED}❌ Could not free port 8765 (PID $STILL_RUNNING still running). Aborting.${NC}"
+        exit 1
+    fi
+
+    log "✅ Port 8765 successfully freed."
+    echo -e "${GREEN}✅ Port 8765 is now free.${NC}"
+else
+    log "✅ Port 8765 was already free."
+    echo -e "${GREEN}✅ Port 8765 is already free.${NC}"
+fi
+echo ""
+# ── End port cleanup ───────────────────────────────────────────────────────────
 
 echo "🔍 CloudByte Setup - Prerequisites Check"
 echo "=========================================="
 echo ""
+log "Plugin directory: $PLUGIN_ROOT"
 echo "📁 Plugin directory: $PLUGIN_ROOT"
 echo ""
 
@@ -45,6 +110,7 @@ elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]]; then
 else
     OS="unknown"
 fi
+log "Detected OS: $OS"
 
 # Check Python
 echo "🐍 Checking Python..."
@@ -53,12 +119,15 @@ PYTHON_CMD=""
 if command_exists python3; then
     PYTHON_CMD="python3"
     PYTHON_VERSION=$(python3 --version 2>&1 | sed 's/Python //')
+    log "Python found: $PYTHON_VERSION (python3)"
     echo -e "${GREEN}✅ Python $PYTHON_VERSION found${NC}"
 elif command_exists python; then
     PYTHON_CMD="python"
     PYTHON_VERSION=$(python --version 2>&1 | sed 's/Python //')
+    log "Python found: $PYTHON_VERSION (python)"
     echo -e "${GREEN}✅ Python $PYTHON_VERSION found${NC}"
 else
+    log "❌ Python not found. Aborting."
     echo ""
     echo -e "${RED}❌ Python not found!${NC}"
     echo ""
@@ -92,6 +161,7 @@ elif [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -ge 10 ]; then
 fi
 
 if [ $VERSION_OK -eq 0 ]; then
+    log "❌ Python version $PYTHON_VERSION is too old. Aborting."
     echo ""
     echo -e "${RED}❌ Python version $PYTHON_VERSION is too old!${NC}"
     echo ""
@@ -105,9 +175,11 @@ echo ""
 echo "⚡ Checking for uv (optional)..."
 if command_exists uv; then
     UV_VERSION=$(uv --version 2>&1)
+    log "uv found: $UV_VERSION"
     echo -e "${GREEN}✅ uv $UV_VERSION found${NC}"
     USE_UV=1
 else
+    log "uv not found — will use pip."
     echo -e "${YELLOW}⚠️  uv not found (will use pip instead)${NC}"
     USE_UV=0
 fi
@@ -123,26 +195,33 @@ cd "$PLUGIN_ROOT"
 
 # Run the Python setup
 if [ $USE_UV -eq 1 ]; then
+    log "Running setup with uv..."
     echo "Running setup with uv..."
     uv run -m src.main setup
 else
+    log "Running setup with $PYTHON_CMD..."
     echo "Running setup with $PYTHON_CMD..."
     $PYTHON_CMD -m src.main setup
 fi
 
-# Capture exit code
 EXIT_CODE=$?
 
 if [ $EXIT_CODE -eq 0 ]; then
+    log "✅ CloudByte Setup completed successfully."
     echo ""
     echo "=========================================="
     echo -e "${GREEN}✅ CloudByte Setup Complete!${NC}"
     echo "=========================================="
+    echo ""
+    echo "📄 Log saved to: $LOG_FILE"
     exit 0
 else
+    log "❌ Setup failed with exit code $EXIT_CODE."
     echo ""
     echo "=========================================="
-    echo -e "${RED}❌ Setup Failed${NC}"
+    echo -e "${RED}❌ Setup Failed (exit code: $EXIT_CODE)${NC}"
     echo "=========================================="
+    echo ""
+    echo "📄 Log saved to: $LOG_FILE"
     exit $EXIT_CODE
 fi
