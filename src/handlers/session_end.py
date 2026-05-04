@@ -120,56 +120,47 @@ def handle_session_end():
         except Exception as e:
             logger.warning(f"Could not check task queue status: {e}")
 
-        # Kill worker process
-        logger.info("Attempting graceful worker shutdown...")
+        # Kill worker process - DIRECT execution only
+        logger.info("🚀 Starting worker shutdown...")
 
-        # Step 1: Try HTTP shutdown first
-        shutdown_success = False
         try:
-            import subprocess
-            project_root = Path(__file__).parent.parent.parent
-
-            # Try to call shutdown endpoint
-            logger.info("Step 1: Calling /shutdown-after-session endpoint...")
-            shutdown_result = subprocess.run(
-                [sys.executable, "-c", "import requests; requests.post('http://localhost:8765/shutdown-after-session', timeout=2)"],
-                capture_output=True,
-                timeout=5,
-                cwd=project_root
+            # Import kill_worker functions directly
+            from src.workers.kill_worker import (
+                kill_worker_by_pid,
+                kill_worker_by_port,
+                kill_all_claude_telemetry_processes,
+                kill_uv_process
             )
 
-            if shutdown_result.returncode == 0:
-                logger.info("Shutdown request sent successfully")
-                shutdown_success = True
+            # Step 1: Try killing by PID first
+            logger.info("Step 1: Killing worker by PID...")
+            killed = kill_worker_by_pid()
+            logger.info(f"✓ Kill by PID result: {killed}")
+
+            # Step 2: Fallback to killing by port
+            if not killed:
+                logger.info("Step 2: Trying to kill by port...")
+                killed = kill_worker_by_port()
+                logger.info(f"✓ Kill by port result: {killed}")
+
+            # Step 3: Comprehensive cleanup of all claude-telemetry processes
+            logger.info("Step 3: Performing comprehensive cleanup of all processes...")
+            all_killed = kill_all_claude_telemetry_processes()
+            logger.info(f"✓ Comprehensive cleanup result: {all_killed}")
+
+            # Step 4: Kill uv process
+            logger.info("Step 4: Killing uv process...")
+            uv_killed = kill_uv_process()
+            logger.info(f"✓ Kill uv result: {uv_killed}")
+
+            # Overall result
+            if killed or all_killed or uv_killed:
+                logger.info("✅ Worker cleanup completed successfully")
             else:
-                logger.debug(f"Shutdown endpoint not reachable: {shutdown_result.stderr}")
-        except ImportError:
-            logger.debug("requests module not available, skipping HTTP shutdown")
-        except Exception as e:
-            logger.debug(f"HTTP shutdown failed: {e}")
+                logger.warning("⚠️ No processes were killed")
 
-        # Step 2: Wait a moment for graceful shutdown
-        if shutdown_success:
-            import time
-            logger.info("Waiting for graceful shutdown...")
-            time.sleep(2)
-
-        # Step 3: Force kill if still running
-        logger.info("Step 2: Force killing worker process (if still running)...")
-        try:
-            kill_script = project_root / "kill_worker.py"
-            logger.info(f"Running kill_worker.py from: {kill_script}")
-            result = subprocess.run(
-                [sys.executable, str(kill_script)],
-                capture_output=True,
-                text=True,
-                cwd=project_root
-            )
-            logger.info(f"kill_worker.py output: {result.stdout}")
-            if result.returncode != 0:
-                logger.warning(f"kill_worker.py failed: {result.stderr}")
         except Exception as e:
-            logger.warning(f"Failed to run kill_worker.py: {e}", exc_info=True)
+            logger.error(f"❌ Failed to run kill_worker functions: {e}", exc_info=True)
 
         logger.info("Session end handler completing...")
 

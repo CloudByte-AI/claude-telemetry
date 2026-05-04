@@ -11,9 +11,9 @@ import os
 import time
 from pathlib import Path
 
-# Add src to path
-src_path = Path(__file__).parent / "src"
-sys.path.insert(0, str(src_path))
+# Add project root to path
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
 
 from src.common.paths import get_cloudbyte_dir
 from src.common.logging import get_logger, setup_logging

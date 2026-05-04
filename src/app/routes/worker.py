@@ -330,15 +330,65 @@ async def queue_task(request: QueueTaskRequest):
 
 @router.post("/shutdown", response_model=ShutdownResponse)
 async def shutdown_worker():
-    """Request worker shutdown."""
-    if _worker_state.shutdown_requested:
-        return ShutdownResponse(
-            status="already_shutting_down",
-            pending_tasks=_worker_state.task_queue.get_pending_count() if _worker_state.task_queue else 0,
-            running_tasks=_worker_state.task_queue.get_running_count() if _worker_state.task_queue else 0,
-        )
+    """Request worker shutdown - executes comprehensive process cleanup."""
+    import asyncio
+    from src.common.logging import get_logger
 
+    logger = get_logger(__name__)
+    logger.info("🚨 /shutdown endpoint called")
+
+    # Set shutdown flag
     _worker_state.shutdown_requested = True
+    logger.info("✅ Shutdown flag set")
+
+    # Execute cleanup in background to avoid timeout
+    def cleanup_background():
+        """Execute cleanup in background thread."""
+        try:
+            from src.workers.kill_worker import (
+                kill_worker_by_pid,
+                kill_worker_by_port,
+                kill_all_claude_telemetry_processes,
+                kill_uv_process
+            )
+
+            logger.info("🔧 Starting comprehensive cleanup...")
+
+            # Step 1: Try killing by PID first
+            killed = kill_worker_by_pid()
+            logger.info(f"📋 Kill by PID result: {killed}")
+
+            # Step 2: Fallback to killing by port
+            if not killed:
+                logger.info("🔄 Trying to kill by port...")
+                killed = kill_worker_by_port()
+                logger.info(f"📋 Kill by port result: {killed}")
+
+            # Step 3: Comprehensive cleanup of all claude-telemetry processes
+            logger.info("🧹 Performing comprehensive cleanup of all processes...")
+            all_killed = kill_all_claude_telemetry_processes()
+            logger.info(f"📋 Comprehensive cleanup result: {all_killed}")
+
+            # Step 4: Kill uv process
+            logger.info("🔨 Killing uv process...")
+            uv_killed = kill_uv_process()
+            logger.info(f"📋 Kill uv result: {uv_killed}")
+
+            # Overall result
+            if killed or all_killed or uv_killed:
+                logger.info("✅ All processes cleaned up successfully")
+            else:
+                logger.warning("⚠️ No processes were killed")
+
+        except Exception as e:
+            logger.error(f"❌ Error during cleanup: {e}", exc_info=True)
+
+        logger.info("🏁 Background cleanup completed")
+
+    # Start background cleanup task in thread pool
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, cleanup_background)
+    logger.info("📤 Background cleanup task started")
 
     return ShutdownResponse(
         status="shutting_down",
@@ -350,51 +400,65 @@ async def shutdown_worker():
 @router.post("/shutdown-after-session", response_model=ShutdownResponse)
 async def shutdown_worker_after_session():
     """Request worker shutdown after queue drains (called on session end)."""
+    import asyncio
     from src.common.logging import get_logger
-    import subprocess
-    import threading
-    from pathlib import Path
 
     logger = get_logger(__name__)
+    logger.info("🚨 /shutdown-after-session endpoint called")
 
-    if _worker_state.session_end_shutdown:
-        return ShutdownResponse(
-            status="already_shutting_down",
-            pending_tasks=_worker_state.task_queue.get_pending_count() if _worker_state.task_queue else 0,
-            running_tasks=_worker_state.task_queue.get_running_count() if _worker_state.task_queue else 0,
-        )
-
-    # Set both flags for compatibility
+    # Set shutdown flags
     _worker_state.session_end_shutdown = True
     _worker_state.shutdown_requested = True
+    logger.info("✅ Shutdown flags set")
 
-    # Execute kill_worker.py in background thread for comprehensive cleanup
-    def execute_kill_worker():
-        """Execute kill_worker.py for comprehensive process cleanup."""
+    # Execute cleanup in background to avoid timeout
+    def cleanup_background():
+        """Execute cleanup in background thread."""
         try:
-            project_root = Path(__file__).parent.parent.parent.parent
-            kill_script = project_root / "kill_worker.py"
-
-            logger.info(f"Executing kill_worker.py from: {kill_script}")
-            result = subprocess.run(
-                [sys.executable, str(kill_script)],
-                capture_output=True,
-                text=True,
-                cwd=project_root,
-                timeout=30  # 30 second timeout
+            from src.workers.kill_worker import (
+                kill_worker_by_pid,
+                kill_worker_by_port,
+                kill_all_claude_telemetry_processes,
+                kill_uv_process
             )
-            logger.info(f"kill_worker.py output: {result.stdout}")
-            if result.returncode != 0:
-                logger.warning(f"kill_worker.py failed: {result.stderr}")
-            else:
-                logger.info("kill_worker.py completed successfully")
-        except Exception as e:
-            logger.error(f"Error executing kill_worker.py: {e}", exc_info=True)
 
-    # Start kill_worker.py in background thread
-    kill_thread = threading.Thread(target=execute_kill_worker, daemon=True, name="KillWorker")
-    kill_thread.start()
-    logger.info("Started kill_worker.py execution in background thread")
+            logger.info("🔧 Starting comprehensive cleanup...")
+
+            # Step 1: Try killing by PID first
+            killed = kill_worker_by_pid()
+            logger.info(f"📋 Kill by PID result: {killed}")
+
+            # Step 2: Fallback to killing by port
+            if not killed:
+                logger.info("🔄 Trying to kill by port...")
+                killed = kill_worker_by_port()
+                logger.info(f"📋 Kill by port result: {killed}")
+
+            # Step 3: Comprehensive cleanup of all claude-telemetry processes
+            logger.info("🧹 Performing comprehensive cleanup of all processes...")
+            all_killed = kill_all_claude_telemetry_processes()
+            logger.info(f"📋 Comprehensive cleanup result: {all_killed}")
+
+            # Step 4: Kill uv process
+            logger.info("🔨 Killing uv process...")
+            uv_killed = kill_uv_process()
+            logger.info(f"📋 Kill uv result: {uv_killed}")
+
+            # Overall result
+            if killed or all_killed or uv_killed:
+                logger.info("✅ All processes cleaned up successfully")
+            else:
+                logger.warning("⚠️ No processes were killed")
+
+        except Exception as e:
+            logger.error(f"❌ Error during cleanup: {e}", exc_info=True)
+
+        logger.info("🏁 Background cleanup completed")
+
+    # Start background cleanup task in thread pool
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, cleanup_background)
+    logger.info("📤 Background cleanup task started")
 
     return ShutdownResponse(
         status="shutting_down_after_session",
