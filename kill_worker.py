@@ -256,6 +256,143 @@ def kill_worker_by_port():
         return killed
 
 
+def kill_all_claude_telemetry_processes():
+    """Kill all processes related to claude-telemetry plugin."""
+    logger.info("Attempting to kill all claude-telemetry related processes...")
+
+    if sys.platform == "win32":
+        import subprocess
+        killed_processes = []
+
+        try:
+            # Get all processes with claude-telemetry in their command line
+            result = subprocess.run(
+                ["Get-WmiObject", "Win32_Process", "|", "Where-Object", "{", "$_.CommandLine", "-like", "*claude-telemetry*", "}", "|", "Select-Object", "-ExpandProperty", "ProcessId"],
+                capture_output=True,
+                text=True,
+                shell=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+
+            # PowerShell approach
+            ps_command = '''
+            Get-WmiObject Win32_Process | Where-Object {
+                $_.CommandLine -like "*claude-telemetry*"
+            } | Select-Object -ExpandProperty ProcessId
+            '''
+
+            result = subprocess.run(
+                ["powershell", "-Command", ps_command],
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+
+            if result.stdout.strip():
+                pids = result.stdout.strip().split('\n')
+                pids = [p.strip() for p in pids if p.strip() and p.strip().isdigit()]
+
+                logger.info(f"Found {len(pids)} claude-telemetry process(es): {pids}")
+
+                for pid in pids:
+                    try:
+                        kill_result = subprocess.run(
+                            ["taskkill", "/F", "/PID", pid],
+                            capture_output=True,
+                            text=True,
+                            creationflags=subprocess.CREATE_NO_WINDOW
+                        )
+                        if kill_result.returncode == 0:
+                            logger.info(f"Killed process {pid}")
+                            killed_processes.append(pid)
+                        else:
+                            logger.warning(f"Failed to kill process {pid}: {kill_result.stderr}")
+                    except Exception as e:
+                        logger.warning(f"Error killing process {pid}: {e}")
+
+                # Verify all processes are dead
+                if killed_processes:
+                    time.sleep(0.5)
+                    verify_result = subprocess.run(
+                        ["powershell", "-Command", ps_command],
+                        capture_output=True,
+                        text=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW
+                    )
+
+                    remaining_pids = [p.strip() for p in verify_result.stdout.strip().split('\n') if p.strip() and p.strip().isdigit()]
+                    if remaining_pids:
+                        logger.warning(f"Some processes still alive: {remaining_pids}")
+                    else:
+                        logger.info("All claude-telemetry processes killed successfully")
+
+                return len(killed_processes) > 0
+            else:
+                logger.debug("No claude-telemetry processes found")
+                return False
+
+        except Exception as e:
+            logger.error(f"Error killing claude-telemetry processes: {e}")
+            return False
+    else:
+        # Unix-like systems
+        import subprocess
+        killed_processes = []
+
+        try:
+            # Find processes with claude-telemetry in command line
+            result = subprocess.run(
+                ["pgrep", "-f", "claude-telemetry"],
+                capture_output=True,
+                text=True
+            )
+
+            if result.stdout.strip():
+                pids = result.stdout.strip().split('\n')
+                pids = [p.strip() for p in pids if p.strip()]
+
+                logger.info(f"Found {len(pids)} claude-telemetry process(es): {pids}")
+
+                for pid in pids:
+                    try:
+                        kill_result = subprocess.run(
+                            ["kill", "-9", pid],
+                            capture_output=True,
+                            text=True
+                        )
+                        if kill_result.returncode == 0:
+                            logger.info(f"Killed process {pid}")
+                            killed_processes.append(pid)
+                        else:
+                            logger.warning(f"Failed to kill process {pid}")
+                    except Exception as e:
+                        logger.warning(f"Error killing process {pid}: {e}")
+
+                # Verify all processes are dead
+                if killed_processes:
+                    time.sleep(0.5)
+                    verify_result = subprocess.run(
+                        ["pgrep", "-f", "claude-telemetry"],
+                        capture_output=True,
+                        text=True
+                    )
+
+                    remaining_pids = [p.strip() for p in verify_result.stdout.strip().split('\n') if p.strip()]
+                    if remaining_pids:
+                        logger.warning(f"Some processes still alive: {remaining_pids}")
+                    else:
+                        logger.info("All claude-telemetry processes killed successfully")
+
+                return len(killed_processes) > 0
+            else:
+                logger.debug("No claude-telemetry processes found")
+                return False
+
+        except Exception as e:
+            logger.error(f"Error killing claude-telemetry processes: {e}")
+            return False
+
+
 def kill_uv_process():
     """Kill the uv package manager process."""
     logger.info("Attempting to kill uv process...")
@@ -328,23 +465,30 @@ def kill_uv_process():
 if __name__ == "__main__":
     logger.info("=== Kill Worker Script ===")
 
-    # Try killing by PID first
+    # Step 1: Try killing by PID first
     killed = kill_worker_by_pid()
 
-    # Fallback to killing by port
+    # Step 2: Fallback to killing by port
     if not killed:
         logger.info("Trying to kill by port...")
         killed = kill_worker_by_port()
 
-    # Kill uv.exe/uv process
-    logger.info("Attempting to kill uv process...")
+    # Step 3: Kill all claude-telemetry related processes (comprehensive cleanup)
+    logger.info("Step 3: Performing comprehensive cleanup of all claude-telemetry processes...")
+    all_killed = kill_all_claude_telemetry_processes()
+    if all_killed:
+        logger.info("All claude-telemetry processes killed successfully")
+        killed = True  # Update status if comprehensive cleanup succeeded
+
+    # Step 4: Kill any remaining uv.exe/uv processes
+    logger.info("Step 4: Killing any remaining uv processes...")
     uv_killed = kill_uv_process()
     if uv_killed:
         logger.info("uv process killed successfully")
 
-    if killed:
-        logger.info("Worker killed successfully")
+    if killed or all_killed or uv_killed:
+        logger.info("Cleanup completed successfully")
         sys.exit(0)
     else:
-        logger.warning("No worker was killed")
+        logger.warning("No processes were killed")
         sys.exit(1)

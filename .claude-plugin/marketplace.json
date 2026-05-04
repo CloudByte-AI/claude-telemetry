@@ -8,7 +8,7 @@
       "name": "claude-telemetry",
       "source": "./",
       "description": "Claude Telemetry - Observability stack for Claude — captures prompts, responses, tool usage, tokens, and observations across sessions.",
-      "version": "0.1.13",
+      "version": "0.1.14",
       "author": {
         "name": "CloudByte-AI"
       },

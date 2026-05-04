@@ -7,7 +7,7 @@ CONFIG_PATH = Path.home() / ".cloudbyte" / "config.json"
 
 # Used only when file doesn't exist — minimal structure so UI has something to show
 _EMPTY_CONFIG = {
-    "version":  "0.1.13",
+    "version":  "0.1.14",
     "settings": {
         "log_level":            "INFO",
         "enable_observations":  False,
