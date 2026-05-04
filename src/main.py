@@ -71,7 +71,7 @@ def setup() -> None:
         config_file = get_config_file()
         if not config_file.exists():
             default_config = {
-                "version": "0.1.9",
+                "version": "0.1.10",
                 "created_at": datetime.now().isoformat(),
                 "settings": {
                     "log_level": "INFO",
@@ -347,34 +347,33 @@ def stop() -> None:
                     logger.info(f"Created new prompt record: {db_prompt_id}")
 
         if not prompt_created:
-            # Always update to real JSONL prompt_id.
-            # user_prompt.py may have stored an auto-generated ID due to
-            # transcript timing race — JSONL ID is always the source of truth.
-            if db_prompt_id != jsonl_prompt_id:
-                try:
-                    conn = get_db_connection()
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        """UPDATE USER_PROMPT 
-                           SET prompt_id = ?,
-                               timestamp = ?,
-                               parent_uuid = COALESCE(parent_uuid, ?)
-                           WHERE prompt_id = ?""",
-                        (
-                            jsonl_prompt_id,
-                            most_recent_pair.get("prompt_rec", {}).get("timestamp") or datetime.now().isoformat(),
-                            most_recent_pair.get("prompt_rec", {}).get("parentUuid"),
-                            db_prompt_id,
-                        )
+            # Store real JSONL ID in jsonl_prompt_id column.
+            # prompt_id (auto-gen) stays unchanged to preserve relationships with responses/tools/tokens.
+            try:
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute(
+                    """UPDATE USER_PROMPT
+                       SET jsonl_prompt_id = ?,
+                           timestamp = ?,
+                           parent_uuid = COALESCE(parent_uuid, ?)
+                       WHERE prompt_id = ?""",
+                    (
+                        jsonl_prompt_id,
+                        most_recent_pair.get("prompt_rec", {}).get("timestamp") or datetime.now().isoformat(),
+                        most_recent_pair.get("prompt_rec", {}).get("parentUuid"),
+                        db_prompt_id,
                     )
-                    conn.commit()
-                    logger.info(f"Updated prompt_id: {db_prompt_id[:20]}... → {jsonl_prompt_id[:20]}...")
-                except Exception as e:
-                    logger.warning(f"Could not update prompt_id: {e}")
+                )
+                conn.commit()
+                logger.info(f"Stored jsonl_prompt_id={jsonl_prompt_id}... for prompt_id={db_prompt_id}...")
+            except Exception as e:
+                logger.warning(f"Could not store jsonl_prompt_id: {e}")
 
-            effective_prompt_id = jsonl_prompt_id
+            # prompt_id is stable — use as effective_prompt_id for all child records
+            effective_prompt_id = db_prompt_id
         else:
-            effective_prompt_id = db_prompt_id  # newly created, already has jsonl_prompt_id
+            effective_prompt_id = db_prompt_id  # newly created by stop(), already correct
 
         # Convert pairs to DB format
         db_data = convert_pairs_to_db_format(pairs)

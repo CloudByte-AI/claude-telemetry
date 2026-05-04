@@ -149,3 +149,28 @@ input:checked + .toggle-slider:before {
     color: #fff !important;
     transform: translateY(-2px);
 }
+
+/* ── Worker Buttons ── */
+.btn-worker {
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btn-worker:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.btn-worker:disabled {
+    cursor: not-allowed;
+    opacity: 0.5 !important;
+}
+
+.btn-worker.btn-danger:hover:not(:disabled) {
+    background: var(--red) !important;
+    border-color: var(--red) !important;
+    color: white !important;
+}
+
+.btn-worker.btn-danger:active:not(:disabled) {
+    transform: translateY(0);
+}

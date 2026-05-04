@@ -96,6 +96,8 @@ def create_tables(conn: sqlite3.Connection) -> None:
     """)
 
     # ---------------- USER_PROMPT ----------------
+    # prompt_id      : stable auto-gen UUID — URL key, never changes
+    # jsonl_prompt_id: real ID from Claude Code JSONL — stored by stop() hook
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS USER_PROMPT (
         prompt_id TEXT PRIMARY KEY,
@@ -104,6 +106,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
         parent_uuid TEXT,
         prompt TEXT,
         timestamp DATETIME,
+        jsonl_prompt_id TEXT,
         FOREIGN KEY (session_id) REFERENCES SESSION(session_id)
     );
     """)
@@ -264,6 +267,20 @@ def create_tables(conn: sqlite3.Connection) -> None:
     conn.commit()
     logger.info("Database tables created successfully")
 
+def migrate_schema(conn: sqlite3.Connection) -> None:
+    """
+    Apply schema migrations for existing databases.
+    Safe to run on any database — skips if column already exists.
+    """
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(USER_PROMPT)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if "jsonl_prompt_id" not in columns:
+        cursor.execute("ALTER TABLE USER_PROMPT ADD COLUMN jsonl_prompt_id TEXT")
+        conn.commit()
+        logger.info("Migration: added jsonl_prompt_id column to USER_PROMPT")
+    else:
+        logger.debug("Migration: jsonl_prompt_id column already exists, skipping")
 
 def create_indexes(conn: sqlite3.Connection) -> None:
     """
@@ -298,6 +315,8 @@ def create_indexes(conn: sqlite3.Connection) -> None:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_task_queue_priority ON TASK_QUEUE(priority DESC, created_at);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_task_queue_session ON TASK_QUEUE(session_id);")
 
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_prompt_jsonl_id ON USER_PROMPT(jsonl_prompt_id);")
+
     conn.commit()
     logger.info("Database indexes created successfully")
 
@@ -318,6 +337,7 @@ def initialize_database(db_path: Optional[str] = None) -> None:
 
     conn = create_connection(db_path)
     create_tables(conn)
+    migrate_schema(conn)  
     create_indexes(conn)
     conn.close()
 
@@ -334,6 +354,7 @@ def initialize_database_with_manager(db_manager: DatabaseManager) -> None:
     ensure_directories()
     conn = db_manager.get_connection()
     create_tables(conn)
+    migrate_schema(conn)
     create_indexes(conn)
     logger.info(f"Database initialized at: {db_manager.db_path}")
 
@@ -437,6 +458,7 @@ def main():
     conn = create_connection(db_path)
 
     create_tables(conn)
+    migrate_schema(conn)
     create_indexes(conn)
 
     conn.close()
@@ -446,3 +468,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+ 
