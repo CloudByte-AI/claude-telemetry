@@ -350,6 +350,13 @@ async def shutdown_worker():
 @router.post("/shutdown-after-session", response_model=ShutdownResponse)
 async def shutdown_worker_after_session():
     """Request worker shutdown after queue drains (called on session end)."""
+    from src.common.logging import get_logger
+    import subprocess
+    import threading
+    from pathlib import Path
+
+    logger = get_logger(__name__)
+
     if _worker_state.session_end_shutdown:
         return ShutdownResponse(
             status="already_shutting_down",
@@ -360,6 +367,34 @@ async def shutdown_worker_after_session():
     # Set both flags for compatibility
     _worker_state.session_end_shutdown = True
     _worker_state.shutdown_requested = True
+
+    # Execute kill_worker.py in background thread for comprehensive cleanup
+    def execute_kill_worker():
+        """Execute kill_worker.py for comprehensive process cleanup."""
+        try:
+            project_root = Path(__file__).parent.parent.parent.parent
+            kill_script = project_root / "kill_worker.py"
+
+            logger.info(f"Executing kill_worker.py from: {kill_script}")
+            result = subprocess.run(
+                [sys.executable, str(kill_script)],
+                capture_output=True,
+                text=True,
+                cwd=project_root,
+                timeout=30  # 30 second timeout
+            )
+            logger.info(f"kill_worker.py output: {result.stdout}")
+            if result.returncode != 0:
+                logger.warning(f"kill_worker.py failed: {result.stderr}")
+            else:
+                logger.info("kill_worker.py completed successfully")
+        except Exception as e:
+            logger.error(f"Error executing kill_worker.py: {e}", exc_info=True)
+
+    # Start kill_worker.py in background thread
+    kill_thread = threading.Thread(target=execute_kill_worker, daemon=True, name="KillWorker")
+    kill_thread.start()
+    logger.info("Started kill_worker.py execution in background thread")
 
     return ShutdownResponse(
         status="shutting_down_after_session",
