@@ -121,12 +121,42 @@ def handle_session_end():
             logger.warning(f"Could not check task queue status: {e}")
 
         # Kill worker process
-        logger.info("Killing worker process...")
-        import subprocess
+        logger.info("Attempting graceful worker shutdown...")
 
-        # Run kill_worker.py script (it's in the project root, not src/)
+        # Step 1: Try HTTP shutdown first
+        shutdown_success = False
         try:
+            import subprocess
             project_root = Path(__file__).parent.parent.parent
+
+            # Try to call shutdown endpoint
+            logger.info("Step 1: Calling /shutdown-after-session endpoint...")
+            shutdown_result = subprocess.run(
+                [sys.executable, "-c", "import requests; requests.post('http://localhost:8765/shutdown-after-session', timeout=2)"],
+                capture_output=True,
+                timeout=5,
+                cwd=project_root
+            )
+
+            if shutdown_result.returncode == 0:
+                logger.info("Shutdown request sent successfully")
+                shutdown_success = True
+            else:
+                logger.debug(f"Shutdown endpoint not reachable: {shutdown_result.stderr}")
+        except ImportError:
+            logger.debug("requests module not available, skipping HTTP shutdown")
+        except Exception as e:
+            logger.debug(f"HTTP shutdown failed: {e}")
+
+        # Step 2: Wait a moment for graceful shutdown
+        if shutdown_success:
+            import time
+            logger.info("Waiting for graceful shutdown...")
+            time.sleep(2)
+
+        # Step 3: Force kill if still running
+        logger.info("Step 2: Force killing worker process (if still running)...")
+        try:
             kill_script = project_root / "kill_worker.py"
             logger.info(f"Running kill_worker.py from: {kill_script}")
             result = subprocess.run(
