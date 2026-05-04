@@ -256,6 +256,75 @@ def kill_worker_by_port():
         return killed
 
 
+def kill_uv_process():
+    """Kill the uv package manager process."""
+    logger.info("Attempting to kill uv process...")
+
+    if sys.platform == "win32":
+        import subprocess
+        try:
+            # Try to kill uv.exe on Windows
+            result = subprocess.run(
+                ["taskkill", "/F", "/IM", "uv.exe"],
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            if result.returncode == 0:
+                logger.info("Successfully killed uv.exe process")
+                return True
+            else:
+                # uv.exe might not be running
+                logger.debug(f"uv.exe not running or could not be killed")
+                return False
+        except Exception as e:
+            logger.warning(f"Error killing uv.exe: {e}")
+            return False
+    else:
+        # Unix-like systems
+        import subprocess
+        try:
+            # Try to kill uv process on Unix
+            # Use pkill to match process name
+            result = subprocess.run(
+                ["pkill", "-f", "uv"],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                logger.info("Successfully killed uv process")
+                return True
+            else:
+                # uv might not be running
+                logger.debug(f"uv not running or could not be killed")
+                return False
+        except FileNotFoundError:
+            # pkill not available, try alternative method
+            try:
+                result = subprocess.run(
+                    ["pgrep", "-f", "uv"],
+                    capture_output=True,
+                    text=True
+                )
+                pids = result.stdout.strip().split('\n') if result.stdout.strip() else []
+                pids = [p for p in pids if p]
+
+                if pids:
+                    for pid in pids:
+                        subprocess.run(["kill", "-9", pid], capture_output=True)
+                    logger.info(f"Killed {len(pids)} uv process(es)")
+                    return True
+                else:
+                    logger.debug("No uv process found")
+                    return False
+            except Exception as e:
+                logger.warning(f"Error killing uv process: {e}")
+                return False
+        except Exception as e:
+            logger.warning(f"Error killing uv process: {e}")
+            return False
+
+
 if __name__ == "__main__":
     logger.info("=== Kill Worker Script ===")
 
@@ -266,6 +335,12 @@ if __name__ == "__main__":
     if not killed:
         logger.info("Trying to kill by port...")
         killed = kill_worker_by_port()
+
+    # Kill uv.exe/uv process
+    logger.info("Attempting to kill uv process...")
+    uv_killed = kill_uv_process()
+    if uv_killed:
+        logger.info("uv process killed successfully")
 
     if killed:
         logger.info("Worker killed successfully")
