@@ -8,7 +8,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from .routes import dashboard, sessions, conversations, tokens, tools, observations, projects, config, sse, worker
+from .routes import dashboard, sessions, conversations, tokens, tools, observations, projects, config, sse, worker, version
 
 BASE_DIR = Path(__file__).parent
 
@@ -64,3 +64,4 @@ app.include_router(projects.router)
 app.include_router(config.router)
 app.include_router(sse.router)
 app.include_router(worker.router)
+app.include_router(version.router)
