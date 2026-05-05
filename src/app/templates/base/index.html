@@ -69,6 +69,7 @@
         <div class="sidebar-footer" style="padding: 20px; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between;">
             <div class="mono" style="font-size: 10px; font-weight: 700; color: var(--accent);">v0.1.18</div>
             <div style="display: flex; align-items: center; gap: 6px;">
+                <button id="update-btn" onclick="applyUpdate()" style="display:none; font-size:9px; font-weight:700; color: var(--bg); background: var(--accent); border: none; border-radius: 4px; padding: 3px 7px; cursor: pointer; letter-spacing: 0.05em;"></button>
                 <div style="width: 6px; height: 6px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 8px var(--accent);"></div>
             </div>
         </div>
@@ -97,6 +98,7 @@
 <script src="https://unpkg.com/htmx.org@1.9.10/dist/htmx.min.js"></script>
 <script src="/static/js/theme.js"></script>
 <script src="/static/js/sse.js"></script>
+<script src="/static/js/version.js"></script>
 <script>
     function toggleTheme() {
         const curr = document.documentElement.getAttribute('data-theme');
