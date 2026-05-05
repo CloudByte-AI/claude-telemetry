@@ -10,22 +10,76 @@
 }
 
 .clear-btn {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 11px;
-    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
     color: var(--red);
     text-decoration: none;
-    padding: 6px 14px;
-    border-radius: var(--radius-xs); /* 4px */
+    border-radius: var(--radius-xs);
     background: rgba(196, 28, 28, 0.08);
     border: 1px solid rgba(196, 28, 28, 0.2);
     transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
 }
 
 .clear-btn:hover {
     background: rgba(196, 28, 28, 0.15);
     border-color: var(--red);
-    transform: scale(1.1);
+    transform: scale(1.05);
+}
+
+.project-filter-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.filter-icon {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+    z-index: 1;
+}
+
+.table-toolbar .project-filter-select {
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: normal;
+    color: var(--text);
+    background: var(--bg-alt) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-xs);
+    padding: 0 32px 0 32px;
+    height: 36px;
+    min-width: 220px;
+    max-width: 400px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239c9fa5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") !important;
+    background-repeat: no-repeat !important;
+    background-position: right 12px center !important;
+}
+
+.table-toolbar .project-filter-select:hover {
+    border-color: var(--accent) !important;
+    background-color: var(--bg-surface) !important;
+}
+
+.table-toolbar .project-filter-select:focus {
+    outline: none !important;
+    border-color: var(--accent) !important;
+    background-color: var(--bg-surface) !important;
+    box-shadow: 0 0 0 3px var(--accent-glow) !important;
+}
+
+.table-toolbar .project-filter-select:active {
+    transform: translateY(1px);
 }

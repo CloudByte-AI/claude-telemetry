@@ -7,8 +7,10 @@ from ..queries import sessions as sq
 from .utils import paginate
 
 
-def get_sessions_list_context(search: str, page: int, per_page: int) -> dict:
-    all_sessions = list(sq.get_sessions_list(search))
+def get_sessions_list_context(search: str, page: int, per_page: int, project_id: str = None) -> dict:
+    from ..queries import projects as pq
+
+    all_sessions = list(sq.get_sessions_list(search, project_id))
     total_records = len(all_sessions)
     total_pages   = max(1, (total_records + per_page - 1) // per_page)
     page          = max(1, min(page, total_pages))
@@ -16,6 +18,10 @@ def get_sessions_list_context(search: str, page: int, per_page: int) -> dict:
     paged         = all_sessions[offset: offset + per_page]
     pg_start      = max(1, page - 2)
     pg_end        = min(total_pages, page + 2)
+
+    # Get all projects for the filter dropdown
+    all_projects = list(pq.get_all_projects())
+
     return {
         "active":        "sessions",
         "sessions":      paged,
@@ -27,6 +33,8 @@ def get_sessions_list_context(search: str, page: int, per_page: int) -> dict:
         "page_nums":     list(range(pg_start, pg_end + 1)),
         "pg_start":      pg_start,
         "pg_end":        pg_end,
+        "project_id":    project_id,
+        "projects":      all_projects,
     }
 
 
@@ -39,7 +47,7 @@ def get_session_detail_context(session_id: str) -> dict | None:
     turns            = []
     total_tool_count = 0
 
-    for p in prompts:
+    for i, p in enumerate(prompts):
         pid          = p["prompt_id"]
         tool_list    = build_tool_list(pid)
         response_row = sq.get_prompt_response(pid)
@@ -48,6 +56,7 @@ def get_session_detail_context(session_id: str) -> dict | None:
 
         total_tool_count += len(tool_list)
         turns.append({
+            "index":           i + 1,
             "prompt":          p["prompt"],
             "timestamp":       p["timestamp"],
             "prompt_id":       pid,
@@ -56,6 +65,8 @@ def get_session_detail_context(session_id: str) -> dict | None:
             "tokens":          dict(tokens_row)      if tokens_row      else None,
             "tool_tokens_agg": dict(tool_tok_agg)    if tool_tok_agg    else None,
         })
+
+    turns.reverse()
 
     obs_rows = sq.get_session_observations(session_id)
     observations = []

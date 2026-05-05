@@ -3,13 +3,20 @@
 from ..routers.db import q, build_tool_list
 
 
-def get_sessions_list(search: str = ""):
+def get_sessions_list(search: str = "", project_id: str = None):
     search_filter = ""
+    project_filter = ""
     params: tuple = ()
+
     if search.strip():
         search_filter = "AND (p.name LIKE ? OR s.session_id LIKE ?)"
         like = f"%{search.strip()}%"
         params = (like, like)
+
+    if project_id:
+        project_filter = "AND s.project_id = ?"
+        params = params + (project_id,) if params else (project_id,)
+
     return q(f"""
         SELECT s.session_id, s.cwd, s.created_at,
                p.name                       AS project_name,
@@ -28,7 +35,7 @@ def get_sessions_list(search: str = ""):
             JOIN USER_PROMPT up ON up.prompt_id = t.prompt_id
             GROUP BY up.session_id
         ) tc ON tc.session_id = s.session_id
-        WHERE 1=1 {search_filter}
+        WHERE 1=1 {search_filter} {project_filter}
         ORDER BY s.created_at DESC
     """, params)
 

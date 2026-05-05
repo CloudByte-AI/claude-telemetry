@@ -39,6 +39,12 @@
     align-items: center;
     justify-content: space-between;
     padding: 16px 20px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.turn-header:hover {
+    background: var(--bg-surface) !important;
 }
 
 .turn-index {
@@ -48,12 +54,22 @@
     color: var(--accent);
     background: var(--accent-soft);
     padding: 4px 10px;
-    border-radius: var(--radius-xs); /* 4px */
+    border-radius: var(--radius-xs);
+    /* 4px */
 }
 
 .turn-prompt-preview {
     font-size: 13px;
     color: var(--text-muted);
+}
+
+.turn-card .card-body {
+    display: none;
+}
+
+.turn-card .card-body.open {
+    display: block !important;
+    border-top: 1px solid var(--border);
 }
 
 /* ── Inline Token Panel ── */
@@ -70,8 +86,15 @@
 }
 
 @keyframes slideDown {
-    from { opacity: 0; transform: translateY(-10px); }
-    to { opacity: 1; transform: translateY(0); }
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 .tp-grid {
@@ -83,7 +106,8 @@
 .tp-cell {
     background: var(--bg-surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius-xs); /* 4px */
+    border-radius: var(--radius-xs);
+    /* 4px */
     padding: 16px;
     text-align: center;
     transition: all 0.2s;
@@ -124,7 +148,9 @@
     border-bottom: 1px solid var(--border);
 }
 
-.detail-row:last-child { border-bottom: none; }
+.detail-row:last-child {
+    border-bottom: none;
+}
 
 .detail-label {
     font-family: 'IBM Plex Mono', monospace;

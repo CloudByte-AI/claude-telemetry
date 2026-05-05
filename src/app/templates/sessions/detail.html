@@ -11,19 +11,23 @@
 {% endblock %}
 
 {% block content %}
-<div class="section" style="margin-bottom: 40px; padding-top: 10px; display: flex; align-items: flex-end; justify-content: space-between;">
+<div class="section"
+    style="margin-bottom: 40px; padding-top: 10px; display: flex; align-items: flex-end; justify-content: space-between;">
     <div>
         <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">
             <a href="/sessions" class="btn btn-ghost" style="padding: 0 12px; font-size: 11px;">← Sessions</a>
             <span class="dimmer">/</span>
             <span class="mono" style="font-weight: 500; font-size: 11px;">{{ session.session_id[:12] }}</span>
         </div>
-        <h1 style="font-size: 54px; font-weight: 400; color: var(--text); line-height: 1.0; letter-spacing: -0.05em;" title="Full ID: {{ session.session_id }}">Session Detail</h1>
+        <h1 style="font-size: 54px; font-weight: 400; color: var(--text); line-height: 1.0; letter-spacing: -0.05em;"
+            title="Full ID: {{ session.session_id }}">Session Detail</h1>
     </div>
-    
+
     <div style="display: flex; gap: 12px;">
-        <a href="/tokens/session/{{ session.session_id }}" class="btn btn-primary" style="font-size: 11px;">Token Breakdown</a>
-        <a href="/tools/session/{{ session.session_id }}" class="btn btn-ghost" style="font-size: 11px;">Tool Analysis</a>
+        <a href="/tokens/session/{{ session.session_id }}" class="btn btn-primary" style="font-size: 11px;">Token
+            Breakdown</a>
+        <a href="/tools/session/{{ session.session_id }}" class="btn btn-ghost" style="font-size: 11px;">Tool
+            Analysis</a>
     </div>
 </div>
 
@@ -33,40 +37,56 @@
     <div class="turns-container">
         {% for turn in turns %}
         <div class="turn-card card">
-            <div class="turn-header" style="display:flex; align-items:center; justify-content:space-between; padding:12px 20px; border-bottom:1px solid var(--border); background:var(--bg-alt);">
+            <div class="turn-header" onclick="toggleTurn(this)"
+                style="display:flex; align-items:center; justify-content:space-between; padding:12px 20px; border-bottom:1px solid var(--border); background:var(--bg-alt);">
                 <div style="display:flex; align-items:center; gap:16px;">
-                    <div class="mono" style="font-size:10px; font-weight:800; color:var(--text-dim); letter-spacing:0.1em;">TURN {{ loop.index }}</div>
+                    <div class="mono"
+                        style="font-size:10px; font-weight:800; color:var(--text-dim); letter-spacing:0.1em;">TURN {{
+                        turn.index }}</div>
                     <div style="width:1px; height:12px; background:var(--border);"></div>
-                    <div class="mono" style="font-size:11px; color:var(--text-muted); max-width:400px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ turn.prompt | truncate(80) }}</div>
+                    <div class="mono"
+                        style="font-size:11px; color:var(--text-muted); max-width:400px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                        {{ turn.prompt | truncate(80) }}</div>
                 </div>
 
                 <div style="display:flex; align-items:center; gap:12px;">
                     <div style="display:flex; gap:6px;">
                         {% if turn.tool_list %}
-                        <div style="display:flex; align-items:center; background:rgba(254, 76, 2, 0.05); border:1px solid rgba(254, 76, 2, 0.1); padding:2px 8px; gap:6px;">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="#fe4c02" stroke-width="2.5" style="width:10px; height:10px;"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-                            <span style="font-size:10px; font-weight:800; color:#fe4c02;">{{ turn.tool_list|length }}</span>
+                        <div
+                            style="display:flex; align-items:center; background:rgba(254, 76, 2, 0.05); border:1px solid rgba(254, 76, 2, 0.1); padding:2px 8px; gap:6px;">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="#fe4c02" stroke-width="2.5"
+                                style="width:10px; height:10px;">
+                                <path
+                                    d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+                            </svg>
+                            <span style="font-size:10px; font-weight:800; color:#fe4c02;">{{ turn.tool_list|length
+                                }}</span>
                         </div>
                         {% endif %}
 
                         {% if obs_by_prompt and turn.prompt_id in obs_by_prompt %}
                         {% set obs = obs_by_prompt[turn.prompt_id] %}
-                        <a href="/observations/{{ obs.id }}" style="text-decoration:none; display:flex; align-items:center; background:rgba(11, 223, 80, 0.05); border:1px solid rgba(11, 223, 80, 0.1); padding:2px 8px; gap:4px;">
+                        <a href="/observations/{{ obs.id }}"
+                            style="text-decoration:none; display:flex; align-items:center; background:rgba(11, 223, 80, 0.05); border:1px solid rgba(11, 223, 80, 0.1); padding:2px 8px; gap:4px;">
                             <span style="color:#0bdf50; font-size:11px;">✦</span>
-                            <span style="font-size:8px; font-weight:800; color:#0bdf50; letter-spacing:0.05em;">OBS</span>
+                            <span
+                                style="font-size:8px; font-weight:800; color:#0bdf50; letter-spacing:0.05em;">OBS</span>
                         </a>
                         {% endif %}
                     </div>
 
                     <div style="display:flex; gap:1px; background:var(--border); border:1px solid var(--border);">
-                        <button class="btn btn-ghost tok-trigger" onclick="toggleTokenPanel(this)" style="background:var(--bg-surface); height:28px; font-size:9px; font-weight:800; border:none; padding:0 10px; letter-spacing:0.05em;">TOKENS</button>
-                        <a href="/conversation/{{ turn.prompt_id }}" class="btn btn-primary" style="height:28px; font-size:9px; font-weight:800; border:none; padding:0 10px; background:#111; color:#fff; letter-spacing:0.05em;">LOGS</a>
+                        <button class="btn btn-ghost tok-trigger" onclick="toggleTokenPanel(this, event)"
+                            style="background:var(--bg-surface); height:28px; font-size:9px; font-weight:800; border:none; padding:0 10px; letter-spacing:0.05em;">TOKENS</button>
+                        <a href="/conversation/{{ turn.prompt_id }}" class="btn btn-primary" onclick="event.stopPropagation()"
+                            style="height:28px; font-size:9px; font-weight:800; border:none; padding:0 10px; background:#111; color:#fff; letter-spacing:0.05em;">LOGS</a>
                     </div>
                 </div>
             </div>
 
-            <div class="card-body" style="padding:24px;">
-                <div class="mono" style="font-size:14px; line-height:1.6; color:var(--text); white-space:pre-wrap;">{{ turn.prompt }}</div>
+            <div class="card-body" style="padding:24px; display: none;">
+                <div class="mono" style="font-size:14px; line-height:1.6; color:var(--text); white-space:pre-wrap;">{{
+                    turn.prompt }}</div>
             </div>
 
             <!-- Token panel -->
@@ -98,7 +118,8 @@
         {% endfor %}
     </div>
 
-    {% set proj_display = (session.cwd|replace('--', '/')|replace('\\', '/') if session.cwd else '').split('/')|last or 'Default' %}
+    {% set proj_display = (session.cwd|replace('--', '/')|replace('\\', '/') if session.cwd else '').split('/')|last or
+    'Default' %}
     <!-- Sidebar -->
     <aside class="sidebar-info">
         <div class="card">
