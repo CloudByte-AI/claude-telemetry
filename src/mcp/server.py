@@ -168,6 +168,10 @@ def _dispatch(req: dict) -> None:
         else:
             _reply_err(id_, -32601, f"Unknown tool: {name}")
 
+    elif method == "ping":
+        if id_ is not None:
+            _reply_ok(id_, {})
+
     elif method.startswith("notifications/"):
         pass  # Fire-and-forget — no response needed.
 
@@ -183,7 +187,12 @@ def main() -> None:
     Reads newline-delimited JSON-RPC messages from stdin,
     writes responses to stdout.
     """
-    for raw_line in sys.stdin:
+    # Use readline() instead of the file iterator — Python's file iterator
+    # uses a hidden read-ahead buffer on pipes which can stall delivery.
+    while True:
+        raw_line = sys.stdin.readline()
+        if not raw_line:
+            break  # EOF — client closed the pipe
         line = raw_line.strip()
         if not line:
             continue
