@@ -7,7 +7,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/sessions/detail.js"></script>
+<script src="/static/js/sessions/detail.js?v=2.0"></script>
 {% endblock %}
 
 {% block content %}
@@ -138,6 +138,23 @@
                 <div class="detail-row">
                     <span class="detail-label">Directory</span>
                     <span class="detail-val mono dimmer" style="font-size: 10px;">{{ session.cwd }}</span>
+                </div>
+                <div class="divider"></div>
+                <div class="detail-row" style="flex-direction: column; align-items: flex-start; gap: 10px; border-bottom: 1px solid var(--border); padding: 16px 0;">
+                    <span class="detail-label">Resume Session</span>
+                    <div style="display: flex; align-items: center; gap: 8px; width: 100%;">
+                        <div class="mono resume-cmd" style="font-size: 10px; background: var(--bg-alt); padding: 10px 12px; border: 1px solid var(--border); flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); border-radius: 2px; user-select: all; cursor: text;">
+                            claude --resume {{ session.session_id }}
+                        </div>
+                        <button class="btn btn-ghost copy-btn" onclick="copyResumeCommand('{{ session.session_id }}', this)" 
+                                style="padding: 10px; height: 34px; width: 34px; display: flex; align-items: center; justify-content: center; background: var(--bg-alt); border: 1px solid var(--border); border-radius: 2px;"
+                                title="Copy resume command">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:14px; height:14px;">
+                                <rect x="9" y="9" width="13" height="13" rx="1" ry="1"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                            </svg>
+                        </button>
+                    </div>
                 </div>
                 <div class="divider"></div>
                 <div class="detail-row">

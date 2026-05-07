@@ -10,7 +10,7 @@ function toggleCard(header) {
 /* Timeline: prompt + thinking */
 function toggleTl(bar) {
     const full = bar.nextElementSibling;
-    const btn  = bar.querySelector('.expand-btn');
+    const btn = bar.querySelector('.expand-btn');
     const open = full.classList.toggle('open');
     btn.textContent = open ? 'less ↑' : 'more ↓';
 }
@@ -18,7 +18,7 @@ function toggleTl(bar) {
 /* Tool cards */
 function toggleTool(bar) {
     const full = bar.nextElementSibling;
-    const btn  = bar.querySelector('.expand-btn');
+    const btn = bar.querySelector('.expand-btn');
     const open = full.classList.toggle('open');
     btn.textContent = open ? 'less ↑' : 'more ↓';
 }
@@ -26,7 +26,7 @@ function toggleTool(bar) {
 /* Response */
 function toggleResp(bar) {
     const full = bar.nextElementSibling;
-    const btn  = bar.querySelector('.expand-btn');
+    const btn = bar.querySelector('.expand-btn');
     const open = full.classList.toggle('open');
     btn.textContent = open ? 'less ↑' : 'more ↓';
 }

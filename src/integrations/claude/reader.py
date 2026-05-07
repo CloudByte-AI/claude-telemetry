@@ -127,7 +127,7 @@ def normalize_project_name(cwd: str) -> str:
     normalized = normalized.replace("&", "-")
 
     # Replace all other special characters with dashes
-    for char in ['!', '@', '#', '$', '%', '^', '*', '(', ')', '+', '=', '[', ']', '{', '}', '|', ';', "'", '"', '<', '>', ',', '?', '~', '`']:
+    for char in ['.', '!', '@', '#', '$', '%', '^', '*', '(', ')', '+', '=', '[', ']', '{', '}', '|', ';', "'", '"', '<', '>', ',', '?', '~', '`']:
         normalized = normalized.replace(char, "-")
 
     # Replace forward slashes with dashes

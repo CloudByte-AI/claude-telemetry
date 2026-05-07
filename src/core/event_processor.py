@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional
 
 from src.common.logging import get_logger
+from src.common.time_utils import get_now_ist_iso, to_ist
 from src.integrations.claude.reader import (
     get_claude_dir,
     normalize_project_name,
@@ -109,7 +110,7 @@ class EventProcessor:
                 "project_id": project_info["project_id"],
                 "cwd": cwd,
                 "jsonl_file": f"{project_info['name']}/{session_id}.jsonl",
-                "created_at": datetime.now().isoformat(),
+                "created_at": get_now_ist_iso(),
                 "kind": "interactive",
                 "entrypoint": "cli",
             }
@@ -163,7 +164,7 @@ class EventProcessor:
             "parent_uuid": parent_uuid,
             "prompt": prompt,
             "cwd": cwd,  # Pass cwd for project/session creation if needed
-            "timestamp": event_timestamp or datetime.now().isoformat(),  # Use original if available
+            "timestamp": to_ist(event_timestamp),  # Use original if available, will fallback to IST now if None
         }
 
         success = self.db_writer.write_user_prompt(prompt_data)

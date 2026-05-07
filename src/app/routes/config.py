@@ -35,6 +35,15 @@ def config_page(request: Request):
     return templates.TemplateResponse(request=request, name="config/config.html", context=ctx)
 
 
+@router.post("/config/cleanup", response_class=HTMLResponse)
+def database_cleanup(request: Request):
+    stats = svc.run_database_cleanup()
+    ctx = svc.get_config_context()
+    ctx["cleanup_stats"] = stats
+    ctx["worker_status"] = get_worker_status()
+    return templates.TemplateResponse(request=request, name="config/config.html", context=ctx)
+
+
 @router.post("/config", response_class=HTMLResponse)
 async def config_save(request: Request):
     form_data = await request.form()

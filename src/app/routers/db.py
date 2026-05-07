@@ -35,6 +35,18 @@ def q(sql: str, params: tuple = (), one: bool = False):
         conn.close()
 
 
+def cmd(sql: str, params: tuple = ()):
+    """Run a command (commit) and return rowcount."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA foreign_keys = ON")
+    try:
+        cur = conn.execute(sql, params)
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
 def build_tool_list(prompt_id: str) -> list[dict]:
     """
     Return tools for a prompt in execution order (rowid ASC).

@@ -43,15 +43,46 @@
 </div>
 
 <!-- Feedback alerts -->
-{% if save_message %}
+{% if save_message or cleanup_stats %}
 <div class="section" style="margin-bottom: 32px;">
-    <div style="padding: 16px 24px; background: var(--bg-alt); border-left: 4px solid {% if save_success %}#fe4c02{% else %}var(--red){% endif %}; font-family:'IBM Plex Mono'; font-size:12px; font-weight:700; color:var(--text);">
+    {% if save_message %}
+    <div style="padding: 16px 24px; background: var(--bg-alt); border-left: 4px solid {% if save_success %}#fe4c02{% else %}var(--red){% endif %}; font-family:'IBM Plex Mono'; font-size:12px; font-weight:700; color:var(--text); margin-bottom: 8px;">
         {{ '✓' if save_success else '✗' }} {{ save_message | upper }}
     </div>
+    {% endif %}
+    
+    {% if cleanup_stats %}
+    <div style="padding: 16px 24px; background: var(--bg-alt); border-left: 4px solid #fe4c02; font-family:'IBM Plex Mono'; font-size:12px; font-weight:700; color:var(--text);">
+        ✓ DATABASE CLEANUP COMPLETE: {{ cleanup_stats.sessions_deleted }} SESSIONS AND {{ cleanup_stats.projects_deleted }} PROJECTS REMOVED.
+    </div>
+    {% endif %}
 </div>
 {% endif %}
 
-<form method="post" action="/config" id="config-form" class="config-form-container">
+<div class="config-form-container">
+    <!-- Database Maintenance -->
+    <div class="section">
+        <div class="config-section-label">◈ Database Maintenance</div>
+        <div style="background:var(--bg-alt); border:1px solid var(--border); padding:24px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;">
+                <div>
+                    <div style="font-size:11px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">Cleanup Optimization</div>
+                    <div style="font-size:13px; color:var(--text-dim); line-height:1.4; max-width:600px;">
+                        Remove unnecessary database entries including sessions with zero prompts and projects with no active sessions. This helps keep the dashboard clean and fast.
+                    </div>
+                </div>
+            </div>
+            
+            <form method="post" action="/config/cleanup" style="margin:0;">
+                <button type="submit" class="btn-worker" onclick="return confirm('Are you sure you want to clean up the database?')" 
+                        style="background:#111; border:1px solid var(--border); color:#fff; padding:12px 24px; font-family:'IBM Plex Mono'; font-size:11px; font-weight:700; cursor:pointer; border-radius:0; letter-spacing:0.05em; transition:all 0.2s;">
+                    ◈ RUN DATABASE CLEANUP
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <form method="post" action="/config" id="config-form">
 
     <!-- Features -->
     <div class="section">
@@ -185,6 +216,7 @@
     </div>
 
 </form>
+</div>
 
 {% endblock %}
 

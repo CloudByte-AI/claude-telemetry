@@ -46,3 +46,54 @@ function checkPrompts() {
 
 window.addEventListener('DOMContentLoaded', checkPrompts);
 window.addEventListener('load', checkPrompts); // Backup for fonts/images
+
+/**
+ * Bulletproof copy to clipboard
+ */
+function copyResumeCommand(sessionId, btn) {
+    alert("Copying command for session: " + sessionId);
+    const command = "claude --resume " + sessionId;
+    
+    // Create a temporary input element
+    const input = document.createElement("input");
+    input.setAttribute("value", command);
+    document.body.appendChild(input);
+    input.select();
+    input.setSelectionRange(0, 99999); // For mobile devices
+
+    let successful = false;
+    try {
+        successful = document.execCommand("copy");
+    } catch (err) {
+        console.error("execCommand failed:", err);
+    }
+
+    if (!successful && navigator.clipboard) {
+        navigator.clipboard.writeText(command).then(() => {
+            successful = true;
+            handleCopyFeedback(btn);
+        }).catch(err => {
+            console.error("navigator.clipboard failed:", err);
+            window.prompt("Copy this command:", command);
+        });
+    } else if (successful) {
+        handleCopyFeedback(btn);
+    } else {
+        window.prompt("Copy this command:", command);
+    }
+
+    document.body.removeChild(input);
+}
+
+function handleCopyFeedback(btn) {
+    const originalHtml = btn.innerHTML;
+    const originalBorder = btn.style.borderColor;
+    
+    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="#0bdf50" stroke-width="3" style="width:14px; height:14px;"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+    btn.style.borderColor = '#0bdf50';
+    
+    setTimeout(() => {
+        btn.innerHTML = originalHtml;
+        btn.style.borderColor = originalBorder;
+    }, 2000);
+}

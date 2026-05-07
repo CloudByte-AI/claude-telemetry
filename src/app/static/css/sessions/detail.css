@@ -167,3 +167,21 @@
     text-align: right;
     color: var(--text);
 }
+
+.resume-cmd {
+    font-family: 'IBM Plex Mono', monospace !important;
+    transition: all 0.2s;
+}
+
+.copy-btn {
+    transition: all 0.2s;
+}
+
+.copy-btn:active {
+    transform: scale(0.95);
+}
+
+.copy-btn:hover {
+    background: var(--bg-surface) !important;
+    border-color: var(--text-muted) !important;
+}

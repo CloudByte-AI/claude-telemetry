@@ -31,6 +31,7 @@ from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
 from src.common.logging import get_logger
+from src.common.time_utils import to_ist
 
 
 # Import filter function for cleaning system messages from prompts
@@ -396,7 +397,7 @@ def extract_prompt_response_pairs(events: List[Dict[str, Any]]) -> List[Dict[str
             "prompt_id": pid,
             "message_id": response_mid,
             "session_id": prompt_rec.get("sessionId", ""),
-            "timestamp": prompt_rec.get("timestamp", ""),
+            "timestamp": to_ist(prompt_rec.get("timestamp")),
             "prompt": prompt_text_filtered,  # Use filtered version for matching
             "response": response_merged["text"] or "",
             "model": response_merged["model"],

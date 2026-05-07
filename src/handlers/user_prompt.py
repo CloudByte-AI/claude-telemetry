@@ -554,7 +554,7 @@ def handle_user_prompt():
             logger.warning(
                 "No transcript_path in hook data — cannot resolve promptId or parentUuid."
             )
-
+        
         # ── Ensure session record exists in DB ───────────────────────────────
         if session_id and cwd:
             ensure_session_initialized(session_id, cwd)
