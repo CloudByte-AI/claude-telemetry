@@ -6,13 +6,20 @@
     "name": "CloudByte-AI"
   },
   "hooks": {
-    "Setup": [
+    "ConfigChange": [
       {
-        "matcher": ".*",
+        "matcher": "user_settings",
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/validate.sh\"",
+            "shell": "bash",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/validate.sh",
+            "timeout": 600
+          },
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "powershell -ExecutionPolicy Bypass -File \"$env:CLAUDE_PLUGIN_ROOT\\scripts\\validate.ps1\"",
             "timeout": 600
           }
         ]
