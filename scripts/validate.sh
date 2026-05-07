@@ -1,15 +1,11 @@
 #!/usr/bin/env bash
 # CloudByte Setup Validation Script
-# This script is called directly by Claude Code on setup
-# It validates prerequisites and then runs the Python setup
+# Pure installation setup - auto-installs Python and uv if missing
 
-set -e
-
-# Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$(dirname "$SCRIPT_DIR")"
 
-# Colors for output (disable if not a terminal)
+# Colors
 if [ -t 1 ]; then
     RED='\033[0;31m'
     GREEN='\033[0;32m'
@@ -20,10 +16,8 @@ else
     RED=''; GREEN=''; YELLOW=''; BLUE=''; NC=''
 fi
 
-# ── Cross-platform home directory & .cloudbyte folder ─────────────────────────
-# Resolves the user home on Windows (USERPROFILE), macOS, and Linux (HOME)
+# Home directory
 if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || -n "$USERPROFILE" ]]; then
-    # Git Bash / Cygwin on Windows
     USER_HOME="${USERPROFILE:-$HOME}"
 else
     USER_HOME="$HOME"
@@ -31,76 +25,20 @@ fi
 
 CLOUDBYTE_DIR="$USER_HOME/.cloudbyte"
 LOG_DIR="$CLOUDBYTE_DIR/logs"
-
-# Create .cloudbyte and logs dir if they don't exist
-if [ ! -d "$CLOUDBYTE_DIR" ]; then
-    mkdir -p "$CLOUDBYTE_DIR"
-    echo -e "${GREEN}✅ Created ~/.cloudbyte at: $CLOUDBYTE_DIR${NC}"
-else
-    echo -e "${BLUE}ℹ️  ~/.cloudbyte already exists at: $CLOUDBYTE_DIR${NC}"
-fi
+SETUP_LOG_DIR="$CLOUDBYTE_DIR/logs/setup"
+INIT_FILE="$CLOUDBYTE_DIR/.initialized"
+VERSION_FILE="$CLOUDBYTE_DIR/.version"
 
 mkdir -p "$LOG_DIR"
-# ── End home dir setup ─────────────────────────────────────────────────────────
+mkdir -p "$SETUP_LOG_DIR"
 
-# ── Logging setup ──────────────────────────────────────────────────────────────
-LOG_FILE="$LOG_DIR/setup_$(date '+%Y%m%d_%H%M%S').log"
+# Get current plugin version from .claude-plugin/plugin.json
+CURRENT_VERSION=$(grep '"version"' "$PLUGIN_ROOT/.claude-plugin/plugin.json" \
+    2>/dev/null | head -1 | \
+    sed 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' | \
+    tr -d '[:space:]\r')
 
-# Tee all stdout+stderr to the log file, keeping terminal output too
-exec > >(tee -a "$LOG_FILE") 2>&1
-
-log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
-}
-
-log "=== CloudByte Setup started ==="
-log "OS: $OSTYPE"
-log "Home directory: $USER_HOME"
-log "CloudByte directory: $CLOUDBYTE_DIR"
-log "Log file: $LOG_FILE"
-echo ""
-# ── End logging setup ──────────────────────────────────────────────────────────
-
-# ── Port 8765 cleanup ──────────────────────────────────────────────────────────
-log "🔌 Checking port 8765..."
-echo "🔌 Checking port 8765..."
-PORT_PID=$(lsof -ti tcp:8765 2>/dev/null || true)
-
-if [ -n "$PORT_PID" ]; then
-    log "⚠️  Port 8765 in use by PID(s): $PORT_PID — killing..."
-    echo -e "${YELLOW}⚠️  Port 8765 is in use by PID(s): $PORT_PID — killing...${NC}"
-    kill -9 $PORT_PID 2>/dev/null || true
-    sleep 1
-
-    STILL_RUNNING=$(lsof -ti tcp:8765 2>/dev/null || true)
-    if [ -n "$STILL_RUNNING" ]; then
-        log "❌ Could not free port 8765 (PID $STILL_RUNNING still running). Aborting."
-        echo -e "${RED}❌ Could not free port 8765 (PID $STILL_RUNNING still running). Aborting.${NC}"
-        exit 1
-    fi
-
-    log "✅ Port 8765 successfully freed."
-    echo -e "${GREEN}✅ Port 8765 is now free.${NC}"
-else
-    log "✅ Port 8765 was already free."
-    echo -e "${GREEN}✅ Port 8765 is already free.${NC}"
-fi
-echo ""
-# ── End port cleanup ───────────────────────────────────────────────────────────
-
-echo "🔍 CloudByte Setup - Prerequisites Check"
-echo "=========================================="
-echo ""
-log "Plugin directory: $PLUGIN_ROOT"
-echo "📁 Plugin directory: $PLUGIN_ROOT"
-echo ""
-
-# Function to check command exists
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
-
-# Detect OS
+# OS Detection
 if [[ "$OSTYPE" == "darwin"* ]]; then
     OS="macos"
 elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
@@ -110,46 +48,148 @@ elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]]; then
 else
     OS="unknown"
 fi
+
+# Windows: exit cleanly, let ps1 handle setup
+if [ "$OS" = "windows" ]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] SH: Windows detected - deferring to validate.ps1" \
+        >> "$LOG_DIR/hook_trace.log"
+    exit 0
+fi
+
+# Early exit if already initialized for this version
+if [ -f "$INIT_FILE" ] && [ -f "$VERSION_FILE" ]; then
+    SAVED_VERSION=$(cat "$VERSION_FILE" 2>/dev/null)
+    if [ "$SAVED_VERSION" = "$CURRENT_VERSION" ]; then
+        exit 0
+    fi
+    echo "Version changed: $SAVED_VERSION to $CURRENT_VERSION"
+    echo "Re-running setup for new version..."
+fi
+
+# Logging - setup/setup-YYYY-MM-DD.log
+DATE_STR=$(date '+%Y-%m-%d')
+LOG_FILE="$SETUP_LOG_DIR/setup-$DATE_STR.log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
+
+log "=== CloudByte Setup started ==="
+log "Version: $CURRENT_VERSION"
+log "OS: $OSTYPE"
+log "Home: $USER_HOME"
+log "Plugin: $PLUGIN_ROOT"
+echo ""
+
 log "Detected OS: $OS"
 
-# Check Python
-echo "🐍 Checking Python..."
-PYTHON_CMD=""
+echo "CloudByte Setup - Prerequisites Check"
+echo "=========================================="
+echo ""
+echo "Plugin directory: $PLUGIN_ROOT"
+echo ""
 
-if command_exists python3; then
+# Python install function
+install_python() {
+    log "Python not found - installing automatically..."
+
+    if [ "$OS" = "macos" ]; then
+        if command -v brew >/dev/null 2>&1; then
+            log "Installing Python via brew..."
+            brew install python@3.12
+            INSTALL_EXIT=$?
+        else
+            log "Homebrew not found - installing homebrew first..."
+            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            INSTALL_EXIT=$?
+            if [ $INSTALL_EXIT -eq 0 ]; then
+                export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+                brew install python@3.12
+                INSTALL_EXIT=$?
+            fi
+        fi
+    elif [ "$OS" = "linux" ]; then
+        if command -v apt >/dev/null 2>&1; then
+            log "Installing Python via apt..."
+            sudo apt update -y
+            sudo apt install -y python3.12 python3.12-venv python3-pip
+            INSTALL_EXIT=$?
+        elif command -v dnf >/dev/null 2>&1; then
+            log "Installing Python via dnf..."
+            sudo dnf install -y python3.12
+            INSTALL_EXIT=$?
+        elif command -v pacman >/dev/null 2>&1; then
+            log "Installing Python via pacman..."
+            sudo pacman -S --noconfirm python
+            INSTALL_EXIT=$?
+        elif command -v zypper >/dev/null 2>&1; then
+            log "Installing Python via zypper..."
+            sudo zypper install -y python312
+            INSTALL_EXIT=$?
+        else
+            log "No supported package manager found"
+            echo "Please install Python 3.10+ manually: https://www.python.org/downloads/"
+            return 1
+        fi
+    else
+        log "Unknown OS - cannot auto-install Python"
+        echo "Please install Python 3.10+ manually: https://www.python.org/downloads/"
+        return 1
+    fi
+
+    if [ "${INSTALL_EXIT:-1}" -ne 0 ]; then
+        log "Failed to install Python"
+        echo "Please install manually: https://www.python.org/downloads/"
+        return 1
+    fi
+
+    log "Python installed successfully"
+    return 0
+}
+
+# Python check - detects Windows Store stub
+echo "Checking Python..."
+PYTHON_CMD=""
+PYTHON_VERSION=""
+
+python_works() {
+    local cmd=$1
+    local ver
+    ver=$("$cmd" --version 2>&1)
+    echo "$ver" | grep -q "^Python [0-9]"
+    return $?
+}
+
+if command -v python3 >/dev/null 2>&1 && python_works python3; then
     PYTHON_CMD="python3"
     PYTHON_VERSION=$(python3 --version 2>&1 | sed 's/Python //')
     log "Python found: $PYTHON_VERSION (python3)"
-    echo -e "${GREEN}✅ Python $PYTHON_VERSION found${NC}"
-elif command_exists python; then
+    echo "Python $PYTHON_VERSION found"
+elif command -v python >/dev/null 2>&1 && python_works python; then
     PYTHON_CMD="python"
     PYTHON_VERSION=$(python --version 2>&1 | sed 's/Python //')
     log "Python found: $PYTHON_VERSION (python)"
-    echo -e "${GREEN}✅ Python $PYTHON_VERSION found${NC}"
+    echo "Python $PYTHON_VERSION found"
 else
-    log "❌ Python not found. Aborting."
-    echo ""
-    echo -e "${RED}❌ Python not found!${NC}"
-    echo ""
-    echo "Python 3.10+ is required to run CloudByte."
-    echo ""
-    echo "Please install Python:"
-    if [ "$OS" = "macos" ]; then
-        echo "  • macOS: brew install python@3.12"
-    elif [ "$OS" = "linux" ]; then
-        echo "  • Ubuntu/Debian: sudo apt install python3.12"
-        echo "  • Fedora: sudo dnf install python3.12"
-        echo "  • Arch: sudo pacman -S python"
-    else
-        echo "  • Windows: winget install Python.Python.3.12"
-        echo "  • Or: https://www.python.org/downloads/"
+    install_python
+    if [ $? -ne 0 ]; then
+        exit 1
     fi
-    echo ""
-    echo "After installing Python, restart Claude Code and try again."
-    exit 1
+    export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
+    if command -v python3 >/dev/null 2>&1 && python_works python3; then
+        PYTHON_CMD="python3"
+        PYTHON_VERSION=$(python3 --version 2>&1 | sed 's/Python //')
+        log "Python now available: $PYTHON_VERSION"
+    elif command -v python >/dev/null 2>&1 && python_works python; then
+        PYTHON_CMD="python"
+        PYTHON_VERSION=$(python --version 2>&1 | sed 's/Python //')
+        log "Python now available: $PYTHON_VERSION"
+    else
+        log "Python not available after install"
+        exit 1
+    fi
 fi
 
-# Check Python version is 3.10+
+# Python version 3.10+ check
 PYTHON_MAJOR=$(echo "$PYTHON_VERSION" | cut -d. -f1)
 PYTHON_MINOR=$(echo "$PYTHON_VERSION" | cut -d. -f2)
 
@@ -161,67 +201,80 @@ elif [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -ge 10 ]; then
 fi
 
 if [ $VERSION_OK -eq 0 ]; then
-    log "❌ Python version $PYTHON_VERSION is too old. Aborting."
-    echo ""
-    echo -e "${RED}❌ Python version $PYTHON_VERSION is too old!${NC}"
-    echo ""
-    echo "Python 3.10 or higher is required."
-    echo "Please upgrade Python."
+    log "Python $PYTHON_VERSION too old - need 3.10+"
+    echo "Please upgrade: https://www.python.org/downloads/"
     exit 1
 fi
 
-# Check for uv (optional)
+# uv check and auto-install
 echo ""
-echo "⚡ Checking for uv (optional)..."
-if command_exists uv; then
+echo "Checking uv..."
+
+if command -v uv >/dev/null 2>&1; then
     UV_VERSION=$(uv --version 2>&1)
-    log "uv found: $UV_VERSION"
-    echo -e "${GREEN}✅ uv $UV_VERSION found${NC}"
+    log "uv: $UV_VERSION"
     USE_UV=1
 else
-    log "uv not found — will use pip."
-    echo -e "${YELLOW}⚠️  uv not found (will use pip instead)${NC}"
-    USE_UV=0
+    log "uv not found - installing automatically..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    INSTALL_EXIT=$?
+
+    if [ $INSTALL_EXIT -ne 0 ]; then
+        log "Failed to install uv"
+        echo "Please install manually: https://docs.astral.sh/uv/getting-started/installation/"
+        exit 1
+    fi
+
+    export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+
+    if command -v uv >/dev/null 2>&1; then
+        log "uv installed successfully"
+        USE_UV=1
+    else
+        log "uv installed but not on PATH yet"
+        USE_UV=0
+    fi
 fi
 
+# Run setup
 echo ""
 echo "=========================================="
-echo -e "${GREEN}✅ Prerequisites OK - Running Setup${NC}"
+echo "Prerequisites OK - Running Setup"
 echo "=========================================="
 echo ""
 
-# Change to plugin directory
 cd "$PLUGIN_ROOT"
 
-# Run the Python setup
 if [ $USE_UV -eq 1 ]; then
     log "Running setup with uv..."
-    echo "Running setup with uv..."
     uv run -m src.main setup
+    EXIT_CODE=$?
 else
     log "Running setup with $PYTHON_CMD..."
-    echo "Running setup with $PYTHON_CMD..."
     $PYTHON_CMD -m src.main setup
+    EXIT_CODE=$?
 fi
 
-EXIT_CODE=$?
-
+# Write .initialized on success
 if [ $EXIT_CODE -eq 0 ]; then
-    log "✅ CloudByte Setup completed successfully."
+    echo "$CURRENT_VERSION" > "$VERSION_FILE"
+    touch "$INIT_FILE"
+    log "Initialized version $CURRENT_VERSION"
+    log "Setup completed successfully"
     echo ""
     echo "=========================================="
-    echo -e "${GREEN}✅ CloudByte Setup Complete!${NC}"
+    echo "CloudByte Setup Complete!"
     echo "=========================================="
     echo ""
-    echo "📄 Log saved to: $LOG_FILE"
+    echo "Log saved to: $LOG_FILE"
     exit 0
 else
-    log "❌ Setup failed with exit code $EXIT_CODE."
+    log "Setup failed with exit code $EXIT_CODE"
     echo ""
     echo "=========================================="
-    echo -e "${RED}❌ Setup Failed (exit code: $EXIT_CODE)${NC}"
+    echo "Setup Failed (exit code: $EXIT_CODE)"
     echo "=========================================="
     echo ""
-    echo "📄 Log saved to: $LOG_FILE"
+    echo "Log saved to: $LOG_FILE"
     exit $EXIT_CODE
 fi

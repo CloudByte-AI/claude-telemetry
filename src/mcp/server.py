@@ -11,10 +11,21 @@ observations are visible in the JSONL transcript for inspection.
 Start command (declared in plugin.json mcpServers):
     uv run --directory "${CLAUDE_PLUGIN_ROOT}" python -m src.mcp.server
 """
-
+import os
 import json
+import logging
 import sys
+import time
+from datetime import datetime
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Any
+
+# ── Add src to path for imports ───────────────────────────
+src_path = Path(__file__).parent.parent
+sys.path.insert(0, str(src_path))
+
+from src.common.paths import get_logs_dir
 
 
 # ── Constants ──────────────────────────────────────────────────────────────────
@@ -22,6 +33,36 @@ from typing import Any
 _SERVER_NAME      = "cloudbyte-obs"
 _SERVER_VERSION   = "1.0.0"
 _PROTOCOL_VERSION = "2024-11-05"
+
+
+# ── MCP Logger setup ───────────────────────────────────────────────────────────
+
+def _setup_mcp_logger() -> logging.Logger:
+    """Setup separate MCP log file — mcp-YYYY-MM-DD.log"""
+    log_dir = get_logs_dir()
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    current_date = datetime.now().strftime("%Y-%m-%d")
+    log_file = log_dir / f"mcp-{current_date}.log"
+
+    logger = logging.getLogger("mcp.server")
+    logger.setLevel(logging.DEBUG)
+    logger.propagate = False
+
+    handler = RotatingFileHandler(
+        log_file,
+        maxBytes=10 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8"
+    )
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    ))
+    logger.addHandler(handler)
+    return logger
+
+_log = _setup_mcp_logger()
 
 
 # ── Tool schema ────────────────────────────────────────────────────────────────
@@ -118,8 +159,12 @@ _TOOLS: list = [
 
 def _send(obj: dict) -> None:
     """Write a JSON-RPC message to stdout and flush immediately."""
-    sys.stdout.write(json.dumps(obj) + "\n")
-    sys.stdout.flush()
+    try:
+        sys.stdout.write(json.dumps(obj) + "\n")
+        sys.stdout.flush()
+    except BrokenPipeError:
+        _log.warning("BrokenPipe — client disconnected")
+        sys.exit(0)
 
 
 def _reply_ok(id_: Any, result: dict) -> None:
@@ -141,6 +186,7 @@ def _dispatch(req: dict) -> None:
     params = req.get("params", {})
 
     if method == "initialize":
+        _log.info("Client connected — initialize received")
         _reply_ok(id_, {
             "protocolVersion": _PROTOCOL_VERSION,
             "capabilities":    {"tools": {}},
@@ -148,16 +194,21 @@ def _dispatch(req: dict) -> None:
         })
 
     elif method == "tools/list":
+        _log.debug("tools/list requested")
         _reply_ok(id_, {"tools": _TOOLS})
+
+    elif method == "ping":
+        _log.debug("ping received — responding")
+        if id_ is not None:
+            _reply_ok(id_, {})
 
     elif method == "tools/call":
         name = params.get("name")
         args = params.get("arguments", {})
 
         if name == "record_observation":
-            # Return a meaningful response so Claude knows to continue
-            # with its final answer to the user.
             title = args.get("title", "observation")
+            _log.info(f"record_observation called: {title}")
             _reply_ok(id_, {
                 "content": [{"type": "text", "text": (
                     f"Observation recorded: {title}. "
@@ -166,12 +217,15 @@ def _dispatch(req: dict) -> None:
                 "isError": False,
             })
         else:
+            _log.warning(f"Unknown tool called: {name}")
             _reply_err(id_, -32601, f"Unknown tool: {name}")
 
     elif method.startswith("notifications/"):
+        _log.debug(f"notification received: {method}")
         pass  # Fire-and-forget — no response needed.
 
     elif id_ is not None:
+        _log.warning(f"Method not found: {method}")
         _reply_err(id_, -32601, f"Method not found: {method}")
 
 
@@ -183,17 +237,64 @@ def main() -> None:
     Reads newline-delimited JSON-RPC messages from stdin,
     writes responses to stdout.
     """
-    for raw_line in sys.stdin:
-        line = raw_line.strip()
-        if not line:
-            continue
+    _log.info(f"=== {_SERVER_NAME} v{_SERVER_VERSION} started ===")
+    _log.info(f"Platform: {sys.platform}")
+    _log.info(f"Python: {sys.version}")
+    _log.info("Environment variables from Claude Code:")
+    for key, val in os.environ.items():
+        if "CLAUDE" in key.upper() or "SESSION" in key.upper():
+            _log.info(f"  {key}={val}")
+    # ── Counter outside loop so it persists across iterations ─
+    _eof_counter = 0
+    _LOG_INTERVAL = 300  
+
+    while True:
         try:
-            _dispatch(json.loads(line))
-        except json.JSONDecodeError:
-            pass  # Ignore malformed input lines.
+            raw_line = sys.stdin.readline()
+
+            if raw_line == "":
+                _eof_counter += 1
+                if _eof_counter % _LOG_INTERVAL == 0:
+                    minutes = _eof_counter // 60
+                    _log.debug(f"stdin EOF — waiting... ({minutes}m elapsed)")
+                time.sleep(1)
+                continue
+
+            # Reset counter when actual data arrives
+            _eof_counter = 0
+
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            try:
+                _dispatch(json.loads(line))
+            except json.JSONDecodeError:
+                _log.warning(f"Malformed JSON: {line[:100]}")
+                pass
+            except Exception as exc:
+                _log.error(f"Dispatch error: {exc}", exc_info=True)
+                sys.stderr.write(f"[{_SERVER_NAME}] unhandled error: {exc}\n")
+                sys.stderr.flush()
+
+        except KeyboardInterrupt:
+            _log.info("KeyboardInterrupt — shutting down")
+            break
+        except EOFError:
+            _eof_counter += 1
+            if _eof_counter % _LOG_INTERVAL == 0:
+                minutes = _eof_counter // 60
+                _log.debug(f"EOFError — waiting... ({minutes}m elapsed)")
+            time.sleep(1)
+            continue
         except Exception as exc:
-            sys.stderr.write(f"[{_SERVER_NAME}] unhandled error: {exc}\n")
+            _log.error(f"Main loop error: {exc}", exc_info=True)
+            sys.stderr.write(f"[{_SERVER_NAME}] error: {exc}\n")
             sys.stderr.flush()
+            time.sleep(1)
+            continue
+
+    _log.info(f"=== {_SERVER_NAME} stopped ===")
 
 
 if __name__ == "__main__":
