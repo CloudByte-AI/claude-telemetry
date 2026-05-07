@@ -11,7 +11,7 @@ Handles all Claude Code hooks:
 
 import os
 import sys
-from datetime import datetime
+from src.common.time_utils import get_now_ist_iso, to_ist
 from pathlib import Path
 
 # Add src directory to path for imports
@@ -71,8 +71,8 @@ def setup() -> None:
         config_file = get_config_file()
         if not config_file.exists():
             default_config = {
-                "version": "0.1.20",
-                "created_at": datetime.now().isoformat(),
+                "version": "0.1.21",
+                "created_at": get_now_ist_iso(),
                 "settings": {
                     "log_level": "INFO",
                     "enable_observations": True,
@@ -242,8 +242,8 @@ def stop() -> None:
 
         # Find the matching prompt_id in the database (by content and session_id)
         from src.db.manager import get_db_connection
+        from src.common.time_utils import get_now_ist_iso, to_ist
         import uuid
-        from datetime import datetime
 
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -326,7 +326,7 @@ def stop() -> None:
                                 prompt_rec.get("uuid", str(uuid.uuid4())),
                                 prompt_rec.get("parentUuid"),
                                 prompt_text,
-                                prompt_rec.get("timestamp") or datetime.now().isoformat(),
+                                to_ist(prompt_rec.get("timestamp")),
                             ))
                             conn.commit()
                             insert_success = True
@@ -360,7 +360,7 @@ def stop() -> None:
                        WHERE prompt_id = ?""",
                     (
                         jsonl_prompt_id,
-                        most_recent_pair.get("prompt_rec", {}).get("timestamp") or datetime.now().isoformat(),
+                        to_ist(most_recent_pair.get("prompt_rec", {}).get("timestamp")),
                         most_recent_pair.get("prompt_rec", {}).get("parentUuid"),
                         db_prompt_id,
                     )

@@ -22,6 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.common.logging import get_logger, setup_logging
+from src.common.time_utils import get_now_ist_iso
 from src.core.event_processor import process_user_prompt
 
 
@@ -59,7 +60,7 @@ def ensure_session_initialized(session_id: str, cwd: str) -> bool:
 
     from src.db.manager import get_db_connection
     from src.integrations.claude.extractor import extract_project_info
-    from datetime import datetime
+    from src.common.time_utils import get_now_ist_iso
 
     try:
         conn = get_db_connection()
@@ -116,7 +117,7 @@ def ensure_session_initialized(session_id: str, cwd: str) -> bool:
                 project_id,
                 cwd,
                 f"{project_info['name']}/{session_id}.jsonl",
-                datetime.now().isoformat(),
+                get_now_ist_iso(),
             ),
         )
 

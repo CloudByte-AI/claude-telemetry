@@ -6,7 +6,7 @@ Handles queueing and management of observation generation tasks.
 
 import json
 import uuid
-from datetime import datetime
+from src.common.time_utils import get_now_ist_iso
 from typing import Any, Dict, Optional
 
 from src.db.manager import get_db_connection
@@ -55,7 +55,7 @@ def queue_observation_task(
             "pending",
             priority,
             payload,
-            datetime.now().isoformat(),
+            get_now_ist_iso(),
         ))
 
         conn.commit()
@@ -136,7 +136,7 @@ def mark_task_started(task_id: str) -> bool:
             UPDATE TASK_QUEUE
             SET status = 'processing', started_at = ?
             WHERE id = ?
-        """, (datetime.now().isoformat(), task_id))
+        """, (get_now_ist_iso(), task_id))
 
         conn.commit()
         cursor.close()
@@ -169,7 +169,7 @@ def mark_task_completed(task_id: str, error_message: Optional[str] = None) -> bo
             UPDATE TASK_QUEUE
             SET status = ?, completed_at = ?, error_message = ?
             WHERE id = ?
-        """, (status, datetime.now().isoformat(), error_message, task_id))
+        """, (status, get_now_ist_iso(), error_message, task_id))
 
         conn.commit()
         cursor.close()

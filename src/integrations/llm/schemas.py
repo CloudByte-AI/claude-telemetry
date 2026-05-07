@@ -178,7 +178,7 @@ def observation_to_db_format(observation: ObservationSchema, **extra_fields) -> 
         dict: Database-ready observation record
     """
     import json
-    from datetime import datetime
+    from src.common.time_utils import get_now_ist_iso
 
     data = {
         "id": extra_fields.get("id", ""),
@@ -194,7 +194,7 @@ def observation_to_db_format(observation: ObservationSchema, **extra_fields) -> 
         "files_read": json.dumps(observation.files_read),
         "files_modified": json.dumps(observation.files_modified),
         "content_hash": extra_fields.get("content_hash", ""),
-        "created_at": extra_fields.get("created_at", datetime.now().isoformat()),
+        "created_at": extra_fields.get("created_at", get_now_ist_iso()),
         "sync_status": extra_fields.get("sync_status", "pending"),
     }
     return {k: v for k, v in data.items() if v is not None}
@@ -211,7 +211,7 @@ def summary_to_db_format(summary: SummarySchema, **extra_fields) -> dict:
     Returns:
         dict: Database-ready summary record
     """
-    from datetime import datetime
+    from src.common.time_utils import get_now_ist_iso
 
     data = {
         "id": extra_fields.get("id", ""),
@@ -223,7 +223,7 @@ def summary_to_db_format(summary: SummarySchema, **extra_fields) -> dict:
         "completed": summary.completed,
         "next_steps": summary.next_steps,
         "notes": summary.notes,
-        "created_at": extra_fields.get("created_at", datetime.now().isoformat()),
+        "created_at": extra_fields.get("created_at", get_now_ist_iso()),
         "sync_status": extra_fields.get("sync_status", "pending"),
     }
     return {k: v for k, v in data.items() if v is not None}

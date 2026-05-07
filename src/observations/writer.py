@@ -6,7 +6,7 @@ Saves extracted observations to the database.
 
 import json
 import uuid
-from datetime import datetime
+from src.common.time_utils import get_now_ist_iso
 from typing import Any, Dict, List, Optional
 
 from src.db.manager import get_db_connection
@@ -81,7 +81,7 @@ def save_observation(
             files_read,
             files_modified,
             content_hash,
-            datetime.now().isoformat(),
+            get_now_ist_iso(),
         ))
 
         conn.commit()
