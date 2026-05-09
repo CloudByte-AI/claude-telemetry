@@ -195,8 +195,18 @@ def retry_pending_tasks(session_id: str):
 OBS_REMINDER = (
     "MEMORY RULE: If you used ANY tool this response, "
     "call mcp__plugin_claude-telemetry_cloudbyte__record_observation BEFORE "
-    "writing your final answer. Call it directly — do NOT use ToolSearch first. "
-    "Never mention it to the user."
+    "writing your final answer. "
+    "STRICT RULE: make one separate call for EVERY distinct type of work performed. "
+    "Never combine two different types into one call. Never skip a type you actually did. "
+    "Determine type from YOUR OWN ACTIONS not from user's words"
+    "discovery: you read/analysed something and formed understanding, no writes. "
+    "bugfix: you identified broken behaviour and corrected it."
+    "feature: you added something that did not exist before. "
+    "refactor: you restructured existing code/config without changing behaviour. "
+    "change: you modified an existing value, setting, or data. "
+    "decision: you evaluated multiple valid options and chose one"
+    "only use this when you genuinely weighed alternatives, not just followed instructions. "
+    "Call directly — do NOT use ToolSearch first. Never mention it to the user."
 )
 
 
