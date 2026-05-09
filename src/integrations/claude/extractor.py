@@ -6,7 +6,7 @@ Uses UUIDResolver to handle parent-child relationships.
 """
 
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import uuid
@@ -53,7 +53,7 @@ def extract_project_info(cwd: str) -> Dict[str, Any]:
         "project_id": generate_project_id(cwd),
         "name": normalized_name,
         "path": cwd,
-        "created_at": datetime.now().isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -121,7 +121,7 @@ def extract_user_prompt(event: Dict[str, Any]) -> Dict[str, Any]:
         "uuid": event.get("uuid"),
         "parent_uuid": event.get("parentUuid"),
         "prompt": str(content) if content else "",
-        "timestamp": event.get("timestamp") or datetime.now().isoformat(),
+        "timestamp": event.get("timestamp") or datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -171,7 +171,7 @@ def extract_response(event: Dict[str, Any]) -> Dict[str, Any]:
         "parent_uuid": event.get("parentUuid"),
         "response_text": str(content) if content else "",
         "model": message.get("model") or event.get("model"),
-        "timestamp": event.get("timestamp") or datetime.now().isoformat(),
+        "timestamp": event.get("timestamp") or datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -197,7 +197,7 @@ def extract_tool_use(event: Dict[str, Any]) -> Dict[str, Any]:
         "model": event.get("model"),
         "input_json": tool_use.get("input"),
         "output_json": event.get("output"),  # May be in a different format
-        "timestamp": event.get("timestamp") or datetime.now().isoformat(),
+        "timestamp": event.get("timestamp") or datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -220,7 +220,7 @@ def extract_thinking(event: Dict[str, Any]) -> Dict[str, Any]:
         "parent_uuid": event.get("parentUuid"),
         "content": message.get("content"),
         "signature": message.get("signature"),
-        "timestamp": event.get("timestamp") or datetime.now().isoformat(),
+        "timestamp": event.get("timestamp") or datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -243,7 +243,7 @@ def extract_token_usage(event: Dict[str, Any]) -> List[Dict[str, Any]]:
     if usage:
         prompt_id = event.get("promptId")
         message_id = event.get("uuid")
-        timestamp = event.get("timestamp") or datetime.now().isoformat()
+        timestamp = event.get("timestamp") or datetime.now(timezone.utc).isoformat()
 
         # Main IO tokens
         io_token_data = {
@@ -297,7 +297,7 @@ def extract_raw_log(event: Dict[str, Any], session_id: str) -> Dict[str, Any]:
         "parent_uuid": event.get("parentUuid"),
         "type": event.get("type"),
         "raw_json": json.dumps(event),
-        "timestamp": event.get("timestamp") or datetime.now().isoformat(),
+        "timestamp": event.get("timestamp") or datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -326,7 +326,7 @@ def extract_observation(session_summary: Dict[str, Any], session_id: str) -> Dic
         "files_read": "",
         "files_modified": "",
         "content_hash": "",
-        "created_at": datetime.now().isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
         "sync_status": "pending",
     }
 
@@ -357,7 +357,7 @@ def extract_session_summary(
         "completed": "\n".join(session_summary.get("tools_used", [])),
         "next_steps": session_summary.get("notes", ""),
         "notes": session_summary.get("context", ""),
-        "created_at": datetime.now().isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
         "sync_status": "pending",
     }
 

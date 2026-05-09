@@ -13,7 +13,7 @@ Updated to support:
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from src.common.logging import get_logger
@@ -244,7 +244,7 @@ def generate_observation_for_tools(
             "files_read": files_read,
             "files_modified": files_modified,
             "content_hash": content_hash,
-            "created_at": datetime.now().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
         }
 
         logger.info(f"Generated observation for prompt {prompt_id}")
@@ -430,7 +430,7 @@ def generate_summary_from_observations(
             "completed": summary_data.get("completed", ""),
             "next_steps": summary_data.get("next_steps", ""),
             "notes": summary_data.get("notes", ""),
-            "created_at": datetime.now().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
         }
 
         logger.info(f"Generated summary for session {session_id}")

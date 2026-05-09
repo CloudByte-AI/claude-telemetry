@@ -59,7 +59,7 @@ def ensure_session_initialized(session_id: str, cwd: str) -> bool:
 
     from src.db.manager import get_db_connection
     from src.integrations.claude.extractor import extract_project_info
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     try:
         conn = get_db_connection()
@@ -116,7 +116,7 @@ def ensure_session_initialized(session_id: str, cwd: str) -> bool:
                 project_id,
                 cwd,
                 f"{project_info['name']}/{session_id}.jsonl",
-                datetime.now().isoformat(),
+                datetime.now(timezone.utc).isoformat(),
             ),
         )
 
