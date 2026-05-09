@@ -11,7 +11,7 @@ Handles all Claude Code hooks:
 
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Add src directory to path for imports
@@ -72,7 +72,7 @@ def setup() -> None:
         if not config_file.exists():
             default_config = {
                 "version": "0.1.19",
-                "created_at": datetime.now().isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
                 "settings": {
                     "log_level": "INFO",
                     "enable_observations": True,
@@ -243,7 +243,7 @@ def stop() -> None:
         # Find the matching prompt_id in the database (by content and session_id)
         from src.db.manager import get_db_connection
         import uuid
-        from datetime import datetime
+        from datetime import datetime, timezone
 
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -326,7 +326,7 @@ def stop() -> None:
                                 prompt_rec.get("uuid", str(uuid.uuid4())),
                                 prompt_rec.get("parentUuid"),
                                 prompt_text,
-                                prompt_rec.get("timestamp") or datetime.now().isoformat(),
+                                prompt_rec.get("timestamp") or datetime.now(timezone.utc).isoformat(),
                             ))
                             conn.commit()
                             insert_success = True
@@ -360,7 +360,7 @@ def stop() -> None:
                        WHERE prompt_id = ?""",
                     (
                         jsonl_prompt_id,
-                        most_recent_pair.get("prompt_rec", {}).get("timestamp") or datetime.now().isoformat(),
+                        most_recent_pair.get("prompt_rec", {}).get("timestamp") or datetime.now(timezone.utc).isoformat(),
                         most_recent_pair.get("prompt_rec", {}).get("parentUuid"),
                         db_prompt_id,
                     )

@@ -101,7 +101,7 @@ class EventProcessor:
 
             # Create a basic session record
             import uuid
-            from datetime import datetime
+            from datetime import datetime, timezone
 
             session_id = session_id or str(uuid.uuid4())
             extracted = {
@@ -109,7 +109,7 @@ class EventProcessor:
                 "project_id": project_info["project_id"],
                 "cwd": cwd,
                 "jsonl_file": f"{project_info['name']}/{session_id}.jsonl",
-                "created_at": datetime.now().isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
                 "kind": "interactive",
                 "entrypoint": "cli",
             }
@@ -152,7 +152,7 @@ class EventProcessor:
             Dict with processed data
         """
         import uuid
-        from datetime import datetime
+        from datetime import datetime, timezone
 
         logger.debug(f"Processing user prompt for session: {session_id}")
 
@@ -163,7 +163,7 @@ class EventProcessor:
             "parent_uuid": parent_uuid,
             "prompt": prompt,
             "cwd": cwd,  # Pass cwd for project/session creation if needed
-            "timestamp": event_timestamp or datetime.now().isoformat(),  # Use original if available
+            "timestamp": event_timestamp or datetime.now(timezone.utc).isoformat(),  # Use original if available
         }
 
         success = self.db_writer.write_user_prompt(prompt_data)

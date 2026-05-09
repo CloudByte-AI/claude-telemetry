@@ -6,7 +6,7 @@ Used by hooks to queue tasks for the worker.
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from src.common.logging import get_logger
@@ -41,7 +41,7 @@ def queue_task_direct(
         conn = get_db_connection()
         cursor = conn.cursor()
         task_id = str(uuid.uuid4())
-        created_at = datetime.now().isoformat()
+        created_at = datetime.now(timezone.utc).isoformat()
 
         # Direct insert to TASK_QUEUE table
         cursor.execute(
