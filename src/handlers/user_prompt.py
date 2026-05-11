@@ -18,6 +18,8 @@ import sys
 import time
 from pathlib import Path
 
+from ftfy import fix_text
+
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -519,7 +521,7 @@ def handle_user_prompt():
             retry_pending_tasks(session_id)
 
         # ── Extract clean prompt text (filter system messages) ───────────────
-        prompt_text = extract_user_text_from_hook_data(hook_data)
+        prompt_text = fix_text(extract_user_text_from_hook_data(hook_data))
 
         if not prompt_text:
             logger.warning("No prompt content provided (after filtering system messages)")
