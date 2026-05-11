@@ -1,6 +1,6 @@
 {
   "name": "claude-telemetry",
-  "version": "0.1.23",
+  "version": "0.1.24",
   "description": "Claude Telemetry - Observability stack for claude - Prompt, Observability, Tokens.",
   "author": {
     "name": "CloudByte-AI"
@@ -31,6 +31,8 @@
       "command": "uv",
       "args": [
         "run",
+        "--python",
+        "3.12",
         "--directory",
         "${CLAUDE_PLUGIN_ROOT}",
         "python",

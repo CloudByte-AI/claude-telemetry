@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.main session_start",
+            "command": "uv run --python 3.12  --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.main session_start",
             "timeout": 60
           }
         ]
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.main user_prompt",
+            "command": "uv run --python 3.12  --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.main user_prompt",
             "timeout": 60
           }
         ]
@@ -41,7 +41,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.main stop",
+            "command": "uv run --python 3.12  --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.main stop",
             "timeout": 120
           }
         ]
@@ -53,7 +53,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.main session_end",
+            "command": "uv run --python 3.12  --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.main session_end",
             "timeout": 60
           }
         ]
