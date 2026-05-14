@@ -114,13 +114,17 @@ function Install-Python {
     log "Python not found - installing 3.12..."
     Write-Host "Python not found - installing 3.12..."
 
-    $wingetOk = Install-Python-Via-Winget
-    if ($wingetOk) { return $true }
+    $wingetOk = $false
+    try { $wingetOk = Install-Python-Via-Winget } catch { $wingetOk = $false }
+    $global:LASTEXITCODE = 0
+    if ($wingetOk -eq $true) { return $true }
 
     log "Falling back to direct download..."
     Write-Host "Falling back to direct download..."
-    $directOk = Install-Python-Via-Direct-Download
-    if ($directOk) { return $true }
+    $directOk = $false
+    try { $directOk = Install-Python-Via-Direct-Download } catch { $directOk = $false }
+    $global:LASTEXITCODE = 0
+    if ($directOk -eq $true) { return $true }
 
     log "All install methods failed"
     Write-Host ""
