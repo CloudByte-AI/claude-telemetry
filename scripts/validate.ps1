@@ -45,29 +45,28 @@ Write-Host ""
 
 # ── Python ─────────────────────────────────────────────────────────────────────
 
-function Install-Python {
-    log "Python not found - installing 3.12..."
-    Write-Color $YELLOW "Python not found - installing 3.12..."
+function Install-Python-Via-Winget {
+    log "Trying winget..."
+    Write-Host "Trying winget..."
 
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-        log "winget not found"
-        Write-Color $RED "✗ winget not found"
-        Write-Host "Please install Python 3.12 manually: https://www.python.org/downloads/"
+        log "winget not available"
         return $false
     }
 
-    log "Installing Python 3.12 via winget..."
-    Write-Host "Installing Python 3.12 via winget..."
+    # Initialize winget source on first run
+    Write-Host "Initializing winget source..."
+    winget source update --disable-interactivity 2>$null
+    Start-Sleep -Seconds 2
 
     winget install Python.Python.3.12 `
         --silent `
         --accept-package-agreements `
-        --accept-source-agreements
+        --accept-source-agreements `
+        --disable-interactivity
 
     if ($LASTEXITCODE -ne 0) {
-        log "Failed to install Python 3.12 (exit: $LASTEXITCODE)"
-        Write-Color $RED "✗ Failed to install Python 3.12"
-        Write-Host "Please install manually: https://www.python.org/downloads/"
+        log "winget install failed (exit: $LASTEXITCODE)"
         return $false
     }
 
@@ -75,9 +74,73 @@ function Install-Python {
     $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" +
                 [System.Environment]::GetEnvironmentVariable("PATH", "User")
 
-    log "Python 3.12 installed successfully"
-    Write-Color $GREEN "✓ Python 3.12 installed"
+    log "Python 3.12 installed via winget"
+    Write-Color $GREEN "✓ Python 3.12 installed via winget"
     return $true
+}
+
+function Install-Python-Via-Direct-Download {
+    log "Trying direct download from python.org..."
+    Write-Color $YELLOW "winget failed - downloading Python 3.12 directly from python.org..."
+
+    $pythonUrl      = "https://www.python.org/ftp/python/3.12.0/python-3.12.0-amd64.exe"
+    $installerPath  = "$env:TEMP\python-3.12.0-amd64.exe"
+
+    try {
+        Write-Host "Downloading Python 3.12 installer (~25MB)..."
+        Invoke-WebRequest -Uri $pythonUrl -OutFile $installerPath -UseBasicParsing
+        if (-not (Test-Path $installerPath)) {
+            log "Download failed - installer not found"
+            return $false
+        }
+
+        Write-Host "Running Python installer silently..."
+        $installArgs = "/quiet InstallAllUsers=0 PrependPath=1 Include_test=0"
+        $proc = Start-Process -FilePath $installerPath -ArgumentList $installArgs -Wait -PassThru
+        Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
+
+        if ($proc.ExitCode -ne 0) {
+            log "Python installer failed (exit: $($proc.ExitCode))"
+            return $false
+        }
+
+        # Refresh PATH
+        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" +
+                    [System.Environment]::GetEnvironmentVariable("PATH", "User") + ";" +
+                    "$env:LOCALAPPDATA\Programs\Python\Python312;" +
+                    "$env:LOCALAPPDATA\Programs\Python\Python312\Scripts"
+
+        log "Python 3.12 installed via direct download"
+        Write-Color $GREEN "✓ Python 3.12 installed via direct download"
+        return $true
+    }
+    catch {
+        log "Direct download failed: $_"
+        Write-Color $RED "✗ Direct download failed: $_"
+        return $false
+    }
+}
+
+function Install-Python {
+    log "Python not found - installing 3.12..."
+    Write-Color $YELLOW "Python not found - installing 3.12..."
+
+    # Try winget first
+    $wingetOk = Install-Python-Via-Winget
+    if ($wingetOk) { return $true }
+
+    # Fallback: direct download from python.org
+    log "Falling back to direct download..."
+    $directOk = Install-Python-Via-Direct-Download
+    if ($directOk) { return $true }
+
+    # Both failed
+    log "All install methods failed"
+    Write-Color $RED "✗ Could not install Python automatically"
+    Write-Host ""
+    Write-Host "Please install Python 3.12 manually: https://www.python.org/downloads/"
+    Write-Host "Then re-run /cloudbyte-claude-plugin-install"
+    return $false
 }
 
 function Test-PythonWorks {
@@ -115,7 +178,9 @@ else {
 
     # Refresh PATH
     $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" +
-                [System.Environment]::GetEnvironmentVariable("PATH", "User")
+                [System.Environment]::GetEnvironmentVariable("PATH", "User") + ";" +
+                "$env:LOCALAPPDATA\Programs\Python\Python312;" +
+                "$env:LOCALAPPDATA\Programs\Python\Python312\Scripts"
 
     if ((Get-Command python3 -ErrorAction SilentlyContinue) -and (Test-PythonWorks "python3")) {
         $PYTHON_CMD     = "python3"
@@ -132,6 +197,7 @@ else {
     else {
         log "Python not available after install"
         Write-Color $RED "✗ Python not available after install"
+        Write-Host "Please install Python 3.12 manually: https://www.python.org/downloads/"
         exit 1
     }
 }
@@ -142,7 +208,7 @@ $PYTHON_MAJOR = [int]$versionParts[0]
 $PYTHON_MINOR = [int]$versionParts[1]
 
 $VERSION_OK = $false
-if ($PYTHON_MAJOR -gt 3)                          { $VERSION_OK = $true }
+if ($PYTHON_MAJOR -gt 3)                               { $VERSION_OK = $true }
 elseif ($PYTHON_MAJOR -eq 3 -and $PYTHON_MINOR -ge 10) { $VERSION_OK = $true }
 
 if (-not $VERSION_OK) {
