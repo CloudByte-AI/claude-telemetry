@@ -1,30 +1,9 @@
 {
   "name": "claude-telemetry",
-  "version": "0.1.24",
+  "version": "0.1.25",
   "description": "Claude Telemetry - Observability stack for claude - Prompt, Observability, Tokens.",
   "author": {
     "name": "CloudByte-AI"
-  },
-  "hooks": {
-    "ConfigChange": [
-      {
-        "matcher": "user_settings",
-        "hooks": [
-          {
-            "type": "command",
-            "shell": "bash",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/validate.sh",
-            "timeout": 600
-          },
-          {
-            "type": "command",
-            "shell": "powershell",
-            "command": "powershell -ExecutionPolicy Bypass -File \"$env:CLAUDE_PLUGIN_ROOT\\scripts\\validate.ps1\"",
-            "timeout": 600
-          }
-        ]
-      }
-    ]
   },
   "mcpServers": {
     "cloudbyte": {

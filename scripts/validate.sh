@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# CloudByte Setup Validation Script
-# Pure installation setup - auto-installs Python and uv if missing
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PLUGIN_ROOT="$(dirname "$SCRIPT_DIR")"
+# CloudByte Prerequisites Script
+# Checks and installs Python 3.12 and uv
+# Run directly or via skill - no plugin context required
 
 # Colors
 if [ -t 1 ]; then
@@ -23,22 +21,22 @@ else
     USER_HOME="$HOME"
 fi
 
+# Logging setup
 CLOUDBYTE_DIR="$USER_HOME/.cloudbyte"
 LOG_DIR="$CLOUDBYTE_DIR/logs"
 SETUP_LOG_DIR="$CLOUDBYTE_DIR/logs/setup"
-INIT_FILE="$CLOUDBYTE_DIR/.initialized"
-VERSION_FILE="$CLOUDBYTE_DIR/.version"
 
 mkdir -p "$LOG_DIR"
 mkdir -p "$SETUP_LOG_DIR"
 
-# Get current plugin version from .claude-plugin/plugin.json
-CURRENT_VERSION=$(grep '"version"' "$PLUGIN_ROOT/.claude-plugin/plugin.json" \
-    2>/dev/null | head -1 | \
-    sed 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' | \
-    tr -d '[:space:]\r')
+DATE_STR=$(date '+%Y-%m-%d')
+LOG_FILE="$SETUP_LOG_DIR/setup-$DATE_STR.log"
+exec > >(tee -a "$LOG_FILE") 2>&1
 
-# OS Detection
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
+
+# ── OS Detection ───────────────────────────────────────────────────────────────
+
 if [[ "$OSTYPE" == "darwin"* ]]; then
     OS="macos"
 elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
@@ -49,72 +47,51 @@ else
     OS="unknown"
 fi
 
-# Windows: exit cleanly, let ps1 handle setup
+# Windows: defer to validate.ps1
 if [ "$OS" = "windows" ]; then
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] SH: Windows detected - deferring to validate.ps1" \
-        >> "$LOG_DIR/hook_trace.log"
+    log "Windows detected - deferring to validate.ps1"
     exit 0
 fi
 
-# Early exit if already initialized for this version
-if [ -f "$INIT_FILE" ] && [ -f "$VERSION_FILE" ]; then
-    SAVED_VERSION=$(cat "$VERSION_FILE" 2>/dev/null)
-    if [ "$SAVED_VERSION" = "$CURRENT_VERSION" ]; then
-        exit 0
-    fi
-    echo "Version changed: $SAVED_VERSION to $CURRENT_VERSION"
-    echo "Re-running setup for new version..."
-fi
-
-# Logging - setup/setup-YYYY-MM-DD.log
-DATE_STR=$(date '+%Y-%m-%d')
-LOG_FILE="$SETUP_LOG_DIR/setup-$DATE_STR.log"
-exec > >(tee -a "$LOG_FILE") 2>&1
-
-log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
-
-log "=== CloudByte Setup started ==="
-log "Version: $CURRENT_VERSION"
-log "OS: $OSTYPE"
+log "=== CloudByte Prerequisites Check ==="
+log "OS: $OS ($OSTYPE)"
 log "Home: $USER_HOME"
-log "Plugin: $PLUGIN_ROOT"
+
+echo ""
+echo "╔══════════════════════════════════════╗"
+echo "║   CloudByte Prerequisites Check      ║"
+echo "╚══════════════════════════════════════╝"
 echo ""
 
-log "Detected OS: $OS"
+# ── Python ─────────────────────────────────────────────────────────────────────
 
-echo "CloudByte Setup - Prerequisites Check"
-echo "=========================================="
-echo ""
-echo "Plugin directory: $PLUGIN_ROOT"
-echo ""
-
-# Python install function
 install_python() {
-    log "Python not found - installing automatically..."
+    log "Python not found - installing 3.12..."
+    echo -e "${YELLOW}Python not found - installing 3.12...${NC}"
 
     if [ "$OS" = "macos" ]; then
-        if command -v brew >/dev/null 2>&1; then
-            log "Installing Python via brew..."
-            brew install python@3.12
-            INSTALL_EXIT=$?
-        else
-            log "Homebrew not found - installing homebrew first..."
+        if ! command -v brew >/dev/null 2>&1; then
+            log "Homebrew not found - installing first..."
+            echo "Installing Homebrew..."
             /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-            INSTALL_EXIT=$?
-            if [ $INSTALL_EXIT -eq 0 ]; then
-                export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-                brew install python@3.12
-                INSTALL_EXIT=$?
+            if [ $? -ne 0 ]; then
+                log "Homebrew install failed"
+                echo "Please install Homebrew manually: https://brew.sh"
+                return 1
             fi
+            export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
         fi
+        log "Installing Python 3.12 via brew..."
+        brew install python@3.12
+        INSTALL_EXIT=$?
+
     elif [ "$OS" = "linux" ]; then
         if command -v apt >/dev/null 2>&1; then
-            log "Installing Python via apt..."
-            sudo apt update -y
-            sudo apt install -y python3.12 python3.12-venv python3-pip
+            log "Installing Python 3.12 via apt..."
+            sudo apt update -y && sudo apt install -y python3.12 python3.12-venv python3-pip
             INSTALL_EXIT=$?
         elif command -v dnf >/dev/null 2>&1; then
-            log "Installing Python via dnf..."
+            log "Installing Python 3.12 via dnf..."
             sudo dnf install -y python3.12
             INSTALL_EXIT=$?
         elif command -v pacman >/dev/null 2>&1; then
@@ -122,74 +99,68 @@ install_python() {
             sudo pacman -S --noconfirm python
             INSTALL_EXIT=$?
         elif command -v zypper >/dev/null 2>&1; then
-            log "Installing Python via zypper..."
+            log "Installing Python 3.12 via zypper..."
             sudo zypper install -y python312
             INSTALL_EXIT=$?
         else
             log "No supported package manager found"
-            echo "Please install Python 3.10+ manually: https://www.python.org/downloads/"
+            echo "Please install Python 3.12 manually: https://www.python.org/downloads/"
             return 1
         fi
     else
         log "Unknown OS - cannot auto-install Python"
-        echo "Please install Python 3.10+ manually: https://www.python.org/downloads/"
+        echo "Please install Python 3.12 manually: https://www.python.org/downloads/"
         return 1
     fi
 
     if [ "${INSTALL_EXIT:-1}" -ne 0 ]; then
-        log "Failed to install Python"
+        log "Python 3.12 install failed"
         echo "Please install manually: https://www.python.org/downloads/"
         return 1
     fi
 
-    log "Python installed successfully"
+    log "Python 3.12 installed successfully"
     return 0
 }
 
-# Python check - detects Windows Store stub
-echo "Checking Python..."
+python_works() {
+    local ver
+    ver=$("$1" --version 2>&1)
+    echo "$ver" | grep -q "^Python [0-9]"
+}
+
+echo "── Checking Python ──────────────────────"
+
 PYTHON_CMD=""
 PYTHON_VERSION=""
-
-python_works() {
-    local cmd=$1
-    local ver
-    ver=$("$cmd" --version 2>&1)
-    echo "$ver" | grep -q "^Python [0-9]"
-    return $?
-}
 
 if command -v python3 >/dev/null 2>&1 && python_works python3; then
     PYTHON_CMD="python3"
     PYTHON_VERSION=$(python3 --version 2>&1 | sed 's/Python //')
-    log "Python found: $PYTHON_VERSION (python3)"
-    echo "Python $PYTHON_VERSION found"
 elif command -v python >/dev/null 2>&1 && python_works python; then
     PYTHON_CMD="python"
     PYTHON_VERSION=$(python --version 2>&1 | sed 's/Python //')
-    log "Python found: $PYTHON_VERSION (python)"
-    echo "Python $PYTHON_VERSION found"
 else
     install_python
-    if [ $? -ne 0 ]; then
-        exit 1
-    fi
+    if [ $? -ne 0 ]; then exit 1; fi
     export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
     if command -v python3 >/dev/null 2>&1 && python_works python3; then
         PYTHON_CMD="python3"
         PYTHON_VERSION=$(python3 --version 2>&1 | sed 's/Python //')
-        log "Python now available: $PYTHON_VERSION"
     elif command -v python >/dev/null 2>&1 && python_works python; then
         PYTHON_CMD="python"
         PYTHON_VERSION=$(python --version 2>&1 | sed 's/Python //')
-        log "Python now available: $PYTHON_VERSION"
     else
         log "Python not available after install"
+        echo -e "${RED}✗ Python not available after install${NC}"
         exit 1
     fi
 fi
 
-# Python version 3.10+ check
+log "Python found: $PYTHON_VERSION ($PYTHON_CMD)"
+echo -e "${GREEN}✓ Python $PYTHON_VERSION${NC}"
+
+# Version check - 3.10+ required
 PYTHON_MAJOR=$(echo "$PYTHON_VERSION" | cut -d. -f1)
 PYTHON_MINOR=$(echo "$PYTHON_VERSION" | cut -d. -f2)
 
@@ -202,25 +173,30 @@ fi
 
 if [ $VERSION_OK -eq 0 ]; then
     log "Python $PYTHON_VERSION too old - need 3.10+"
-    echo "Please upgrade: https://www.python.org/downloads/"
+    echo -e "${RED}✗ Python $PYTHON_VERSION is too old. Need 3.10+${NC}"
+    echo "Please install Python 3.12: https://www.python.org/downloads/"
     exit 1
 fi
 
-# uv check and auto-install
+# ── uv ─────────────────────────────────────────────────────────────────────────
+
 echo ""
-echo "Checking uv..."
+echo "── Checking uv ──────────────────────────"
 
 if command -v uv >/dev/null 2>&1; then
     UV_VERSION=$(uv --version 2>&1)
-    log "uv: $UV_VERSION"
-    USE_UV=1
+    log "uv found: $UV_VERSION"
+    echo -e "${GREEN}✓ $UV_VERSION${NC}"
 else
-    log "uv not found - installing automatically..."
+    log "uv not found - installing..."
+    echo -e "${YELLOW}uv not found - installing...${NC}"
+
     curl -LsSf https://astral.sh/uv/install.sh | sh
     INSTALL_EXIT=$?
 
     if [ $INSTALL_EXIT -ne 0 ]; then
-        log "Failed to install uv"
+        log "uv install failed"
+        echo -e "${RED}✗ Failed to install uv${NC}"
         echo "Please install manually: https://docs.astral.sh/uv/getting-started/installation/"
         exit 1
     fi
@@ -228,53 +204,22 @@ else
     export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 
     if command -v uv >/dev/null 2>&1; then
-        log "uv installed successfully"
-        USE_UV=1
+        UV_VERSION=$(uv --version 2>&1)
+        log "uv installed: $UV_VERSION"
+        echo -e "${GREEN}✓ $UV_VERSION installed${NC}"
     else
-        log "uv installed but not on PATH yet"
-        USE_UV=0
+        log "uv installed but not on PATH"
+        echo -e "${YELLOW}⚠ uv installed but needs terminal restart to be on PATH${NC}"
     fi
 fi
 
-# Run setup
+# ── Done ───────────────────────────────────────────────────────────────────────
+
+log "Prerequisites check complete"
 echo ""
-echo "=========================================="
-echo "Prerequisites OK - Running Setup"
-echo "=========================================="
+echo "╔══════════════════════════════════════╗"
+echo "║   ✓  Prerequisites Ready!            ║"
+echo "╚══════════════════════════════════════╝"
 echo ""
-
-cd "$PLUGIN_ROOT"
-
-if [ $USE_UV -eq 1 ]; then
-    log "Running setup with uv..."
-    uv run -m src.main setup
-    EXIT_CODE=$?
-else
-    log "Running setup with $PYTHON_CMD..."
-    $PYTHON_CMD -m src.main setup
-    EXIT_CODE=$?
-fi
-
-# Write .initialized on success
-if [ $EXIT_CODE -eq 0 ]; then
-    echo "$CURRENT_VERSION" > "$VERSION_FILE"
-    touch "$INIT_FILE"
-    log "Initialized version $CURRENT_VERSION"
-    log "Setup completed successfully"
-    echo ""
-    echo "=========================================="
-    echo "CloudByte Setup Complete!"
-    echo "=========================================="
-    echo ""
-    echo "Log saved to: $LOG_FILE"
-    exit 0
-else
-    log "Setup failed with exit code $EXIT_CODE"
-    echo ""
-    echo "=========================================="
-    echo "Setup Failed (exit code: $EXIT_CODE)"
-    echo "=========================================="
-    echo ""
-    echo "Log saved to: $LOG_FILE"
-    exit $EXIT_CODE
-fi
+echo "Log saved to: $LOG_FILE"
+exit 0

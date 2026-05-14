@@ -37,6 +37,7 @@ from src.handlers.user_prompt import handle_user_prompt
 from src.handlers.session_end import handle_session_end
 from src.observations.writer import save_observation
 import json as _json
+import glob as _glob
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -71,7 +72,7 @@ def setup() -> None:
         config_file = get_config_file()
         if not config_file.exists():
             default_config = {
-                "version": "0.1.24",
+                "version": "0.1.25",
                 "created_at": get_now_ist_iso(),
                 "settings": {
                     "log_level": "INFO",
@@ -204,8 +205,26 @@ def stop() -> None:
             logger.warning(f"JSONL file not found: {jsonl_path}")
             return
 
-        # Read events from JSONL and extract pairs
+        # Read events from JSONL — include subagent files if they exist
         events = list(read_jsonl_file(jsonl_path))
+
+        subagents_dir = str(jsonl_path).replace(".jsonl", "") + os.sep + "subagents"
+        if os.path.isdir(subagents_dir):
+            for subagent_file in _glob.glob(os.path.join(subagents_dir, "*.jsonl")):
+                try:
+                    with open(subagent_file, encoding="utf-8", errors="ignore") as sf:
+                        for line in sf:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                events.append(json.loads(line))
+                            except Exception:
+                                continue
+                    logger.debug(f"Loaded subagent events from: {os.path.basename(subagent_file)}")
+                except Exception as exc:
+                    logger.warning(f"Failed reading subagent file {subagent_file}: {exc}")
+
         pairs = extract_prompt_response_pairs(events)
 
         # Filter out hook/system output (e.g., "● Ran X hooks", "⎿")
