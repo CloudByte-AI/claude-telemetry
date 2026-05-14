@@ -34,6 +34,27 @@ Write-Host ""
 
 # ── Python ─────────────────────────────────────────────────────────────────────
 
+function Remove-GhostPythonRegistry {
+    # Remove registry entries pointing to non-existent folders
+    $regRoots = @("HKCU:\Software\Python\PythonCore", "HKLM:\Software\Python\PythonCore")
+    foreach ($root in $regRoots) {
+        if (-not (Test-Path $root)) { continue }
+        $versions = Get-ChildItem $root -ErrorAction SilentlyContinue
+        foreach ($ver in $versions) {
+            $installPath = "$($ver.PSPath)\InstallPath"
+            if (Test-Path $installPath) {
+                $entry = Get-ItemProperty $installPath -ErrorAction SilentlyContinue
+                $folder = $entry.'(default)'
+                if ($folder -and -not (Test-Path $folder)) {
+                    log "Removing ghost registry entry: $folder"
+                    Write-Host "Removing ghost registry entry: $folder"
+                    Remove-Item $ver.PSPath -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+        }
+    }
+}
+
 function Install-Python-Via-Winget {
     log "Trying winget..."
     Write-Host "Trying winget..."
@@ -72,6 +93,9 @@ function Install-Python-Via-Direct-Download {
     log "Trying direct download from python.org..."
     Write-Host "Downloading Python 3.12 directly from python.org (~25MB)..."
 
+    # Clean ghost registry entries first so installer doesn't get exit 1638
+    Remove-GhostPythonRegistry
+
     $pythonUrl     = "https://www.python.org/ftp/python/3.12.0/python-3.12.0-amd64.exe"
     $installerPath = "$env:TEMP\python-3.12.0-amd64.exe"
 
@@ -87,6 +111,24 @@ function Install-Python-Via-Direct-Download {
         $installArgs = "/quiet InstallAllUsers=0 PrependPath=1 Include_test=0"
         $proc = Start-Process -FilePath $installerPath -ArgumentList $installArgs -Wait -PassThru
         Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
+
+        # Exit 1638 = another version already installed
+        if ($proc.ExitCode -eq 1638) {
+            log "Python already registered (exit 1638) - locating existing install..."
+            Write-Host "Python already registered - locating..."
+            $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" +
+                        [System.Environment]::GetEnvironmentVariable("PATH", "User") + ";" +
+                        "$env:LOCALAPPDATA\Programs\Python\Python312;" +
+                        "$env:LOCALAPPDATA\Programs\Python\Python312\Scripts;" +
+                        "$env:LOCALAPPDATA\Programs\Python\Python311;" +
+                        "$env:LOCALAPPDATA\Programs\Python\Python311\Scripts;" +
+                        "$env:LOCALAPPDATA\Programs\Python\Python310;" +
+                        "$env:LOCALAPPDATA\Programs\Python\Python310\Scripts;" +
+                        "$env:PROGRAMFILES\Python312;" +
+                        "$env:PROGRAMFILES\Python312\Scripts"
+            log "PATH refreshed for existing Python"
+            return $true
+        }
 
         if ($proc.ExitCode -ne 0) {
             log "Python installer failed (exit: $($proc.ExitCode))"
@@ -170,7 +212,11 @@ else {
     $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" +
                 [System.Environment]::GetEnvironmentVariable("PATH", "User") + ";" +
                 "$env:LOCALAPPDATA\Programs\Python\Python312;" +
-                "$env:LOCALAPPDATA\Programs\Python\Python312\Scripts"
+                "$env:LOCALAPPDATA\Programs\Python\Python312\Scripts;" +
+                "$env:LOCALAPPDATA\Programs\Python\Python311;" +
+                "$env:LOCALAPPDATA\Programs\Python\Python311\Scripts;" +
+                "$env:LOCALAPPDATA\Programs\Python\Python310;" +
+                "$env:LOCALAPPDATA\Programs\Python\Python310\Scripts"
 
     if ((Get-Command python3 -ErrorAction SilentlyContinue) -and (Test-PythonWorks "python3")) {
         $PYTHON_CMD     = "python3"
