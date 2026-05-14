@@ -1,4 +1,4 @@
-# CloudByte Prerequisites Script (Windows PowerShell)
+﻿# CloudByte Prerequisites Script (Windows PowerShell)
 # Checks and installs Python 3.12 and uv
 # Run directly or via skill - no plugin context required
 
