@@ -35,7 +35,6 @@ Write-Host ""
 # ── Python ─────────────────────────────────────────────────────────────────────
 
 function Remove-GhostPythonRegistry {
-    # Remove registry entries pointing to non-existent folders
     $regRoots = @("HKCU:\Software\Python\PythonCore", "HKLM:\Software\Python\PythonCore")
     foreach ($root in $regRoots) {
         if (-not (Test-Path $root)) { continue }
@@ -53,6 +52,42 @@ function Remove-GhostPythonRegistry {
             }
         }
     }
+}
+
+function Get-RegisteredPythonVersion {
+    # Check MSI for any registered Python 3.12.x version
+    try {
+        # Quick registry check first - skip slow WMI if no Python registered
+        $hasRegistry = (Test-Path "HKCU:\Software\Python\PythonCore") -or 
+                       (Test-Path "HKLM:\Software\Python\PythonCore")
+        if (-not $hasRegistry) {
+            log "No Python registry entries - skipping MSI check"
+            return $null
+        }
+
+        $products = Get-WmiObject -Class Win32_Product -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like "Python 3.12*Core*" }
+        if ($products) {
+            # Version format is like 3.12.10150.0 - extract 3.12.x
+            $ver = $products[0].Version
+            $parts = $ver.Split(".")
+            if ($parts.Length -ge 3) {
+                $buildNum = [int]$parts[2]
+                $patchVersion = [Math]::Floor($buildNum / 1000)
+                $pyVer = "$($parts[0]).$($parts[1]).$patchVersion"
+                log "Found registered Python version: $pyVer"
+                return $pyVer
+            }
+        }
+    } catch {
+        log "Could not check MSI records: $_"
+    }
+    return $null
+}
+
+function Get-PythonDownloadUrl {
+    param($version)
+    return "https://www.python.org/ftp/python/$version/python-$version-amd64.exe"
 }
 
 function Install-Python-Via-Winget {
@@ -91,16 +126,32 @@ function Install-Python-Via-Winget {
 
 function Install-Python-Via-Direct-Download {
     log "Trying direct download from python.org..."
-    Write-Host "Downloading Python 3.12 directly from python.org (~25MB)..."
+    Write-Host "Downloading Python 3.12 from python.org..."
 
-    # Clean ghost registry entries first so installer doesn't get exit 1638
+    # Clean ghost registry entries first
     Remove-GhostPythonRegistry
 
-    $pythonUrl     = "https://www.python.org/ftp/python/3.12.0/python-3.12.0-amd64.exe"
-    $installerPath = "$env:TEMP\python-3.12.0-amd64.exe"
+    # Default version to download
+    $pythonVersion = "3.12.0"
+
+    # Check if a specific version is already registered in MSI
+    # If so, download that exact version to avoid 1638 error
+    $registeredVersion = Get-RegisteredPythonVersion
+    if ($registeredVersion) {
+        log "MSI has Python $registeredVersion registered - downloading same version"
+        Write-Host "Detected registered Python $registeredVersion - downloading matching version..."
+        $pythonVersion = $registeredVersion
+    }
+
+    $pythonUrl     = Get-PythonDownloadUrl $pythonVersion
+    $installerPath = "$env:TEMP\python-$pythonVersion-amd64.exe"
+
+    log "Downloading: $pythonUrl"
+    Write-Host "Downloading Python $pythonVersion (~25MB)..."
 
     try {
         Invoke-WebRequest -Uri $pythonUrl -OutFile $installerPath -UseBasicParsing
+
         if (-not (Test-Path $installerPath)) {
             log "Download failed - installer not found"
             Write-Host "Download failed"
@@ -110,25 +161,20 @@ function Install-Python-Via-Direct-Download {
         Write-Host "Running Python installer silently..."
         $installArgs = "/quiet InstallAllUsers=0 PrependPath=1 Include_test=0"
         $proc = Start-Process -FilePath $installerPath -ArgumentList $installArgs -Wait -PassThru
-        Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
 
-        # Exit 1638 = another version already installed
+        # Exit 1638 = same or newer version already registered
+        # This means Python IS installed but files may be missing
+        # Try REINSTALL flag with same installer
         if ($proc.ExitCode -eq 1638) {
-            log "Python already registered (exit 1638) - locating existing install..."
-            Write-Host "Python already registered - locating..."
-            $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" +
-                        [System.Environment]::GetEnvironmentVariable("PATH", "User") + ";" +
-                        "$env:LOCALAPPDATA\Programs\Python\Python312;" +
-                        "$env:LOCALAPPDATA\Programs\Python\Python312\Scripts;" +
-                        "$env:LOCALAPPDATA\Programs\Python\Python311;" +
-                        "$env:LOCALAPPDATA\Programs\Python\Python311\Scripts;" +
-                        "$env:LOCALAPPDATA\Programs\Python\Python310;" +
-                        "$env:LOCALAPPDATA\Programs\Python\Python310\Scripts;" +
-                        "$env:PROGRAMFILES\Python312;" +
-                        "$env:PROGRAMFILES\Python312\Scripts"
-            log "PATH refreshed for existing Python"
-            return $true
+            log "Exit 1638 - attempting reinstall with REINSTALL=ALL..."
+            Write-Host "Forcing reinstall..."
+            $reinstallArgs = "/quiet REINSTALL=ALL REINSTALLMODE=amus InstallAllUsers=0 PrependPath=1 Include_test=0"
+            $proc = Start-Process -FilePath $installerPath -ArgumentList $reinstallArgs -Wait -PassThru
+            log "Reinstall exit code: $($proc.ExitCode)"
         }
+
+        # Clean up installer
+        Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
 
         if ($proc.ExitCode -ne 0) {
             log "Python installer failed (exit: $($proc.ExitCode))"
@@ -136,18 +182,26 @@ function Install-Python-Via-Direct-Download {
             return $false
         }
 
+        # Refresh PATH with all common Python locations
         $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" +
                     [System.Environment]::GetEnvironmentVariable("PATH", "User") + ";" +
                     "$env:LOCALAPPDATA\Programs\Python\Python312;" +
-                    "$env:LOCALAPPDATA\Programs\Python\Python312\Scripts"
+                    "$env:LOCALAPPDATA\Programs\Python\Python312\Scripts;" +
+                    "$env:LOCALAPPDATA\Programs\Python\Python311;" +
+                    "$env:LOCALAPPDATA\Programs\Python\Python311\Scripts;" +
+                    "$env:LOCALAPPDATA\Programs\Python\Python310;" +
+                    "$env:LOCALAPPDATA\Programs\Python\Python310\Scripts;" +
+                    "$env:PROGRAMFILES\Python312;" +
+                    "$env:PROGRAMFILES\Python312\Scripts"
 
-        log "Python 3.12 installed via direct download"
-        Write-Host "[OK] Python 3.12 installed via direct download"
+        log "Python $pythonVersion installed via direct download"
+        Write-Host "[OK] Python $pythonVersion installed"
         return $true
     }
     catch {
         log "Direct download failed: $_"
         Write-Host "Direct download failed: $_"
+        Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
         return $false
     }
 }
@@ -187,6 +241,36 @@ function Test-PythonWorks {
     }
 }
 
+function Find-PythonExe {
+    # Search common install locations for python.exe
+    $searchPaths = @(
+        "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
+        "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe",
+        "$env:LOCALAPPDATA\Programs\Python\Python310\python.exe",
+        "$env:PROGRAMFILES\Python312\python.exe",
+        "$env:PROGRAMFILES\Python311\python.exe",
+        "C:\Python312\python.exe",
+        "C:\Python311\python.exe",
+        "C:\Python310\python.exe"
+    )
+    foreach ($path in $searchPaths) {
+        if (Test-Path $path) {
+            log "Found Python at: $path"
+            return $path
+        }
+    }
+    # Also check registry
+    $regEntry = Get-ItemProperty "HKCU:\Software\Python\PythonCore\*\InstallPath" -ErrorAction SilentlyContinue
+    if (-not $regEntry) {
+        $regEntry = Get-ItemProperty "HKLM:\Software\Python\PythonCore\*\InstallPath" -ErrorAction SilentlyContinue
+    }
+    if ($regEntry -and $regEntry.ExecutablePath -and (Test-Path $regEntry.ExecutablePath)) {
+        log "Found Python via registry: $($regEntry.ExecutablePath)"
+        return $regEntry.ExecutablePath
+    }
+    return $null
+}
+
 Write-Host "-- Checking Python ----------------------"
 
 $PYTHON_CMD     = $null
@@ -205,36 +289,67 @@ elseif ((Get-Command python -ErrorAction SilentlyContinue) -and (Test-PythonWork
     Write-Host "[OK] Python $PYTHON_VERSION"
 }
 else {
-    log "Python not found or Windows Store stub detected"
-    $installed = Install-Python
-    if (-not $installed) { exit 1 }
+    log "Python not found on PATH - checking other locations..."
 
-    $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" +
-                [System.Environment]::GetEnvironmentVariable("PATH", "User") + ";" +
-                "$env:LOCALAPPDATA\Programs\Python\Python312;" +
-                "$env:LOCALAPPDATA\Programs\Python\Python312\Scripts;" +
-                "$env:LOCALAPPDATA\Programs\Python\Python311;" +
-                "$env:LOCALAPPDATA\Programs\Python\Python311\Scripts;" +
-                "$env:LOCALAPPDATA\Programs\Python\Python310;" +
-                "$env:LOCALAPPDATA\Programs\Python\Python310\Scripts"
+    # Try to find Python in known locations before installing
+    $foundExe = Find-PythonExe
+    if ($foundExe) {
+        $pyDir = Split-Path $foundExe
+        $env:PATH = "$pyDir;$pyDir\Scripts;" + $env:PATH
+        log "Added $pyDir to PATH"
+        if (Test-PythonWorks $foundExe) {
+            $PYTHON_CMD     = $foundExe
+            $PYTHON_VERSION = (& $foundExe --version 2>&1) -replace "Python ", ""
+            log "Python found at: $foundExe version $PYTHON_VERSION"
+            Write-Host "[OK] Python $PYTHON_VERSION found at $foundExe"
+        }
+    }
 
-    if ((Get-Command python3 -ErrorAction SilentlyContinue) -and (Test-PythonWorks "python3")) {
-        $PYTHON_CMD     = "python3"
-        $PYTHON_VERSION = (python3 --version 2>&1) -replace "Python ", ""
-        log "Python now available: $PYTHON_VERSION"
-        Write-Host "[OK] Python $PYTHON_VERSION ready"
-    }
-    elseif ((Get-Command python -ErrorAction SilentlyContinue) -and (Test-PythonWorks "python")) {
-        $PYTHON_CMD     = "python"
-        $PYTHON_VERSION = (python --version 2>&1) -replace "Python ", ""
-        log "Python now available: $PYTHON_VERSION"
-        Write-Host "[OK] Python $PYTHON_VERSION ready"
-    }
-    else {
-        log "Python not available after install"
-        Write-Host "[FAIL] Python not available after install"
-        Write-Host "Please install Python 3.12 manually: https://www.python.org/downloads/"
-        exit 1
+    # Still not found - install
+    if (-not $PYTHON_CMD) {
+        log "Python not found anywhere - installing..."
+        $installed = Install-Python
+        if (-not $installed) { exit 1 }
+
+        # Refresh PATH after install
+        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" +
+                    [System.Environment]::GetEnvironmentVariable("PATH", "User") + ";" +
+                    "$env:LOCALAPPDATA\Programs\Python\Python312;" +
+                    "$env:LOCALAPPDATA\Programs\Python\Python312\Scripts;" +
+                    "$env:LOCALAPPDATA\Programs\Python\Python311;" +
+                    "$env:LOCALAPPDATA\Programs\Python\Python311\Scripts;" +
+                    "$env:LOCALAPPDATA\Programs\Python\Python310;" +
+                    "$env:LOCALAPPDATA\Programs\Python\Python310\Scripts"
+
+        # Check PATH commands first
+        if ((Get-Command python3 -ErrorAction SilentlyContinue) -and (Test-PythonWorks "python3")) {
+            $PYTHON_CMD     = "python3"
+            $PYTHON_VERSION = (python3 --version 2>&1) -replace "Python ", ""
+            log "Python now available: $PYTHON_VERSION"
+            Write-Host "[OK] Python $PYTHON_VERSION ready"
+        }
+        elseif ((Get-Command python -ErrorAction SilentlyContinue) -and (Test-PythonWorks "python")) {
+            $PYTHON_CMD     = "python"
+            $PYTHON_VERSION = (python --version 2>&1) -replace "Python ", ""
+            log "Python now available: $PYTHON_VERSION"
+            Write-Host "[OK] Python $PYTHON_VERSION ready"
+        }
+        else {
+            # Last resort - search by path
+            $foundExe = Find-PythonExe
+            if ($foundExe -and (Test-PythonWorks $foundExe)) {
+                $PYTHON_CMD     = $foundExe
+                $PYTHON_VERSION = (& $foundExe --version 2>&1) -replace "Python ", ""
+                log "Python found at path: $foundExe version $PYTHON_VERSION"
+                Write-Host "[OK] Python $PYTHON_VERSION"
+            }
+            else {
+                log "Python not available after install"
+                Write-Host "[FAIL] Python not available after install"
+                Write-Host "Please install Python 3.12 manually: https://www.python.org/downloads/"
+                exit 1
+            }
+        }
     }
 }
 
@@ -253,6 +368,9 @@ if (-not $VERSION_OK) {
     Write-Host "Please install Python 3.12: https://www.python.org/downloads/"
     exit 1
 }
+
+log "Python OK: $PYTHON_VERSION"
+Write-Host "[OK] Python $PYTHON_VERSION confirmed"
 
 # ── uv ─────────────────────────────────────────────────────────────────────────
 
