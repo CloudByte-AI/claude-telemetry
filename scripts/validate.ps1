@@ -150,7 +150,33 @@ function Install-Python-Via-Direct-Download {
     Write-Host "Downloading Python $pythonVersion (~25MB)..."
 
     try {
-        Invoke-WebRequest -Uri $pythonUrl -OutFile $installerPath -UseBasicParsing
+        $script:lastPercent = 0
+        $webClient = New-Object System.Net.WebClient
+        $webClient.DownloadProgressChanged += {
+            param($s, $e)
+            $percent = $e.ProgressPercentage
+            if ($percent -ge ($script:lastPercent + 10)) {
+                $script:lastPercent = $percent
+                $downloaded = [Math]::Round($e.BytesReceived / 1MB, 1)
+                $total = [Math]::Round($e.TotalBytesToReceive / 1MB, 1)
+                Write-Host "  Downloading... $percent% ($downloaded MB / $total MB)"
+            }
+        }
+        $script:downloadDone = $false
+        $script:downloadError = $null
+        $webClient.DownloadFileCompleted += {
+            param($s, $e)
+            if ($e.Error) { $script:downloadError = $e.Error.Message }
+            $script:downloadDone = $true
+        }
+        $webClient.DownloadFileAsync([Uri]$pythonUrl, $installerPath)
+        while (-not $script:downloadDone) { Start-Sleep -Milliseconds 500 }
+        $webClient.Dispose()
+        if ($script:downloadError) {
+            log "Download error: $script:downloadError"
+            Write-Host "Download error: $script:downloadError"
+            return $false
+        }
 
         if (-not (Test-Path $installerPath)) {
             log "Download failed - installer not found"

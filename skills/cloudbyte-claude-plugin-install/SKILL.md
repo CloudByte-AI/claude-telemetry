@@ -192,39 +192,86 @@ echo ""
 echo "✓ Plugin installed"
 ```
 
-## Step 4 — Reload plugins (manual — Claude cannot do this automatically)
+## Step 4 — Activate the plugin (manual — Claude cannot do this automatically)
 
-Claude cannot run `/reload-plugins` via bash. This is the ONLY step requiring user action.
+Claude cannot run `/reload-plugins` or restart sessions via bash. This is the ONLY step requiring user action.
 
-Tell the user exactly this message — word for word:
+Get the current session ID first:
+
+```bash
+# Get current session ID for resume command
+echo "Current session ID:"
+echo $CLAUDE_SESSION_ID 2>/dev/null || cat ~/.claude/.session_id 2>/dev/null || echo "(check your terminal title or claude --list-sessions)"
+```
+
+Then tell the user exactly this message — word for word:
 
 ---
 
-> ⚡ **One manual step required — then I'll take over automatically.**
->
-> **Option A — Claude Code CLI** (type in this terminal):
-> ```
-> /reload-plugins
-> ```
->
-> **Option B — VS Code / Desktop app:**
-> Close and reopen the Claude panel to restart the session.
+> ✅ **Plugin installed successfully!**
 >
 > ---
-> 💬 **After reload or restart — just type `done`**
-> I'll instantly open the CloudByte dashboard in your browser and guide you through it.
+>
+> ⚡ **One step to activate it — then I'll show you something cool.**
+>
+> **Try the quick way first:**
+> Type `/reload-plugins` in this terminal
+>
+> **⚠️ Important:** `/reload-plugins` is not always reliable for newly installed plugins.
+> If you see any MCP error or CloudByte tools don't appear after reload — don't worry, just restart this session:
+>
+> **Full restart — same session (recommended):**
+>
+> *Claude Code CLI:*
+> Press `Ctrl+C` to exit, then resume this exact session:
+> ```
+> claude --resume <your-session-id>
+> ```
+> *(Your session ID was shown above — copy it before pressing Ctrl+C)*
+>
+> *VS Code / Desktop:*
+> Close the Claude panel → reopen it → Claude will offer to resume your recent session → select it
+>
+> ---
+>
+> ⚠️ **Already have other Claude sessions open?**
+> Those sessions won't see the plugin until you restart them too.
+> `/reload-plugins` only affects the current session — each open session needs its own restart to activate the plugin.
+>
+> ---
+>
+> 💬 **Once restarted or reloaded — just type `done`**
+> I'll open the CloudByte dashboard and you'll see everything Claude has been tracking behind the scenes. Trust me, it's worth the restart. 🚀
 
 ---
 
 Do NOT say anything else after this. Do NOT ask any follow up questions. Just wait.
 
-The moment user sends ANY message — "done", "ok", "reloaded", "finished", or literally anything — treat it as confirmation and immediately execute Step 5 without asking.
+The moment user sends ANY message — check what they said:
+
+- **If user mentions MCP failed / tools not showing / error** → tell them:
+
+> MCP didn't connect in this session — this is completely normal after a quick reload.
+>
+> Please do a **full restart of this same session**:
+>
+> *CLI:* Press `Ctrl+C` → then run:
+> ```
+> claude --resume <session-id>
+> ```
+>
+> *VS Code:* Close Claude panel → reopen → resume the same session
+>
+> Come back and type `done` after restarting — it will work. 🚀
+
+- **If user says done / ok / restarted / anything positive** → immediately execute Step 5.
 
 ## Step 5 — Auto open browser the moment user replies (no prompt, no asking)
 
-The instant user sends any message after Step 4, open http://localhost:8765 in the browser directly — no bash script needed, just open the URL as a browser action. Then immediately tell the user:
+The instant user sends any positive message after Step 4, tell the user:
 
-> ✅ **CloudByte dashboard is open at http://localhost:8765**
+> ✅ **Open the CloudByte dashboard now:**
+> **http://localhost:8765**
 >
 > Here's what you'll see:
 > - **Sessions tab** — every Claude session tracked with start/end time
