@@ -22,8 +22,8 @@ from pathlib import Path
 from typing import Any
 
 # ── Add src to path for imports ───────────────────────────
-src_path = Path(__file__).parent.parent
-sys.path.insert(0, str(src_path))
+plugin_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(plugin_root))
 
 from src.common.paths import get_logs_dir
 

@@ -7,16 +7,9 @@
   },
   "mcpServers": {
     "cloudbyte": {
-      "command": "uv",
+      "command": "python",
       "args": [
-        "run",
-        "--python",
-        "3.12",
-        "--directory",
-        "${CLAUDE_PLUGIN_ROOT}",
-        "python",
-        "-m",
-        "src.mcp.server"
+        "${CLAUDE_PLUGIN_ROOT}/src/mcp/server.py"
       ],
       "alwaysLoad": true
     }
