@@ -95,7 +95,7 @@ def ensure_worker_quick_sync() -> bool:
 
         if sys.platform == "win32":
             # Windows: Use start /B to run in background without new window
-            cmd = f'start /B "" uv run --directory "{project_dir}" uvicorn src.app.app:app --host 0.0.0.0 --port 8765 >nul 2>&1'
+            cmd = f'start /B "" uv run --directory "{project_dir}" uvicorn src.app.app:app --host 127.0.0.1 --port 8765 >nul 2>&1'
             subprocess.Popen(
                 cmd,
                 shell=True,
@@ -104,7 +104,7 @@ def ensure_worker_quick_sync() -> bool:
         else:
             subprocess.Popen(
                 ["uv", "run", "--directory", str(project_dir),
-                 "uvicorn", "src.app.app:app", "--host", "0.0.0.0", "--port", "8765"],
+                 "uvicorn", "src.app.app:app", "--host", "127.0.0.1", "--port", "8765"],
                 start_new_session=True,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,

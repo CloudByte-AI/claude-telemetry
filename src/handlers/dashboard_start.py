@@ -89,7 +89,7 @@ def start_dashboard():
             startupinfo = None
 
         process = subprocess.Popen(
-            [sys.executable, "-m", "uvicorn", "src.app.app:app", "--host", "0.0.0.0", "--port", str(DASHBOARD_PORT)],
+            [sys.executable, "-m", "uvicorn", "src.app.app:app", "--host", "127.0.0.1", "--port", str(DASHBOARD_PORT)],
             cwd=project_dir,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
