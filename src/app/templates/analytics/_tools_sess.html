@@ -39,8 +39,8 @@
 {% set base = '/tools?top_n='~top_n~'&tool_search='~tool_search~'&sess_search='~sess_search~'&proj_search='~proj_search %}
 {% if sess_pg.total > 0 %}
 <div class="pagination">
-    <span class="pg-info">showing {{ ((sess_pg.page-1)*10)+1 }}–{{ [sess_pg.page*10, sess_pg.total]|min }} of {{ sess_pg.total }}</span>
-    <div class="pg-btns">
+    <span class="pg-info">showing {{ ((sess_pg.page-1)*sess_pg.per_page)+1 }}–{{ [sess_pg.page*sess_pg.per_page, sess_pg.total]|min }} of {{ sess_pg.total }}</span>
+    <div class="pg-btns" hx-boost="true" hx-target="#sess-table-wrap">
         <a href="{{ base }}&sess_page={{ sess_pg.page-1 }}" class="pg-btn {% if sess_pg.page <= 1 %}disabled{% endif %}">← prev</a>
         {% if sess_pg.pg_start > 1 %}
             <a href="{{ base }}&sess_page=1" class="pg-btn">1</a>

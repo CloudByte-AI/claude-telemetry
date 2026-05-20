@@ -19,7 +19,7 @@ def tool_calls(
     tool_page:    int = 1,
     sess_page:    int = 1,
     proj_page:    int = 1,
-    per_page:     int = 10,
+    per_page:     int = 5,
 ):
     ctx    = svc.get_tools_page_context(dr, date_from, date_to, tool_search, sess_search, proj_search, tool_page, sess_page, proj_page, per_page)
     target = request.headers.get("HX-Target", "")

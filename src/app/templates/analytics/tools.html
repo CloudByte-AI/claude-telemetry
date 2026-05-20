@@ -113,56 +113,13 @@
                 <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;">
                     <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
                 </svg>
-                <input type="text" id="tool-search" class="search-input" value="{{ tool_search }}" 
-                       placeholder="Filter tools..." 
+                <input type="text" id="tool-search" name="tool_search" class="search-input" value="{{ tool_search }}"
+                       placeholder="Filter tools..."
                        hx-get="/tools" hx-target="#tool-table-wrap" hx-trigger="keyup changed delay:400ms">
             </div>
         </div>
         <div id="tool-table-wrap">
-            <div class="table-wrap">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Tool Name</th>
-                            <th>Calls</th>
-                            <th style="width:200px;">Volume Share</th>
-                            <th>Input</th>
-                            <th>Output</th>
-                            <th style="text-align:right;">Cache Rd.</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for row in tool_rows %}
-                        <tr>
-                            <td><span class="mono" style="font-weight: 700; color:var(--text);" title="{{ row.tool_name }}">{{ row.tool_name }}</span></td>
-                            <td><span class="mono" style="font-weight: 600;">{{ row.call_count }}</span></td>
-                            <td>
-                                <div style="display:flex; align-items:center; gap:8px;">
-                                    <div style="flex: 1; height: 4px; background: var(--bg-alt); border-radius: 0px; overflow: hidden;">
-                                        <div style="width: {{ row.call_pct or 0 }}%; height: 100%; background: #fe4c02;"></div>
-                                    </div>
-                                    <span class="mono dimmer" style="font-size:10px;">{{ row.call_pct }}%</span>
-                                </div>
-                            </td>
-                            <td class="mono" style="color:var(--text); font-weight:700;">{{ "{:,}".format(row.input_tokens or 0) }}</td>
-                            <td class="mono" style="color:#fe4c02; font-weight:600;">{{ "{:,}".format(row.output_tokens or 0) }}</td>
-                            <td class="mono" style="color:#ff8e5f; font-weight:500; text-align:right;">{{ "{:,}".format(row.cache_read_tokens or 0) }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% if tool_pg.total > 0 %}
-            <div class="pagination">
-                <span class="pg-info">showing {{ ((tool_pg.page-1)*10)+1 }}–{{ [tool_pg.page*10, tool_pg.total]|min }} of {{ tool_pg.total }}</span>
-                <div class="pg-btns">
-                    {% set base = '/tools?dr='~dr~'&tool_search='~tool_search %}
-                    <a href="{{ base }}&page={{ tool_pg.page - 1 }}" class="pg-btn {% if tool_pg.page <= 1 %}disabled{% endif %}">← prev</a>
-                    {% for pn in tool_pg.page_nums %}<a href="{{ base }}&page={{ pn }}" class="pg-btn {% if pn == tool_pg.page %}active{% endif %}">{{ pn }}</a>{% endfor %}
-                    <a href="{{ base }}&page={{ tool_pg.page + 1 }}" class="pg-btn {% if tool_pg.page >= tool_pg.pages %}disabled{% endif %}">next →</a>
-                </div>
-            </div>
-            {% endif %}
+            {% include "analytics/_tools_tool.html" %}
         </div>
     </div>
 </div>
@@ -174,48 +131,7 @@
             <div class="card-title">Top Activity Sessions</div>
         </div>
         <div id="sess-table-wrap">
-            <div class="table-wrap">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Session</th>
-                            <th>Project context</th>
-                            <th>Activity</th>
-                            <th>Token Impact</th>
-                            <th style="width:140px;"></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for row in sess_rows %}
-                        <tr>
-                            <td><span class="mono" style="font-weight:600; color:var(--text);">{{ row.session_id[:8] }}…</span></td>
-                            <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                                <div style="font-weight:600; color:var(--text);">
-                                    {% set raw_p = row.project_name or row.path or '—' %}
-                                    {{ (raw_p|replace('--', '/')|replace('\\', '/') if raw_p else '').split('/')|last }}
-                                </div>
-                            </td>
-                            <td><span class="mono" style="color:#fe4c02; font-weight:700;">{{ row.tool_calls }} calls</span></td>
-                            <td><span class="mono dimmer" style="font-size: 11px;">{{ "{:,}".format((row.input_tokens or 0) + (row.output_tokens or 0)) }} tokens</span></td>
-                            <td style="text-align: right;">
-                                <a href="/tools/session/{{ row.session_id }}" class="tbl-btn">drill down ↗</a>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% if sess_pg.total > 0 %}
-            <div class="pagination">
-                <span class="pg-info">showing {{ ((sess_pg.page-1)*10)+1 }}–{{ [sess_pg.page*10, sess_pg.total]|min }} of {{ sess_pg.total }}</span>
-                <div class="pg-btns">
-                    {% set base = '/tools?dr='~dr %}
-                    <a href="{{ base }}&sess_page={{ sess_pg.page-1 }}" class="pg-btn {% if sess_pg.page<=1 %}disabled{% endif %}">← prev</a>
-                    {% for pn in sess_pg.page_nums %}<a href="{{ base }}&sess_page={{ pn }}" class="pg-btn {% if pn==sess_pg.page %}active{% endif %}">{{ pn }}</a>{% endfor %}
-                    <a href="{{ base }}&sess_page={{ sess_pg.page+1 }}" class="pg-btn {% if sess_pg.page>=sess_pg.pages %}disabled{% endif %}">next →</a>
-                </div>
-            </div>
-            {% endif %}
+            {% include "analytics/_tools_sess.html" %}
         </div>
     </div>
 </div>

@@ -35,8 +35,8 @@
 {% set base = '/tools?top_n='~top_n~'&tool_search='~tool_search~'&sess_search='~sess_search~'&proj_search='~proj_search %}
 {% if proj_pg.total > 0 %}
 <div class="pagination">
-    <span class="pg-info">showing {{ ((proj_pg.page-1)*10)+1 }}–{{ [proj_pg.page*10, proj_pg.total]|min }} of {{ proj_pg.total }}</span>
-    <div class="pg-btns">
+    <span class="pg-info">showing {{ ((proj_pg.page-1)*proj_pg.per_page)+1 }}–{{ [proj_pg.page*proj_pg.per_page, proj_pg.total]|min }} of {{ proj_pg.total }}</span>
+    <div class="pg-btns" hx-boost="true" hx-target="#proj-table-wrap">
         <a href="{{ base }}&proj_page={{ proj_pg.page-1 }}" class="pg-btn {% if proj_pg.page <= 1 %}disabled{% endif %}">← prev</a>
         {% if proj_pg.pg_start > 1 %}
             <a href="{{ base }}&proj_page=1" class="pg-btn">1</a>
