@@ -141,18 +141,39 @@ def _ensure_mcp_permission() -> None:
     user_settings = Path.home() / ".claude" / "settings.json"
 
     try:
+        settings = {}
         if user_settings.exists():
+            raw_bytes = user_settings.read_bytes()
+            has_bom = raw_bytes.startswith(b'\xef\xbb\xbf')
+
+            if has_bom:
+                logger.warning("settings.json has BOM — stripping and parsing with utf-8-sig")
+            else:
+                logger.info("settings.json has no BOM — parsing normally")
+
             try:
-                settings = _json.loads(user_settings.read_text(encoding="utf-8"))
-            except Exception:
+                raw = raw_bytes.decode("utf-8-sig").strip()
+                if raw:
+                    settings = _json.loads(raw)
+                    if has_bom:
+                        logger.info(f"BOM parse succeeded, existing keys: {list(settings.keys())}")
+                    else:
+                        logger.info(f"Normal parse succeeded, existing keys: {list(settings.keys())}")
+                else:
+                    logger.warning("settings.json exists but is empty")
+            except Exception as e:
+                logger.warning(f"Parse failed ({e}), starting fresh")
+                import shutil, time
+                backup = user_settings.with_suffix(f".bak.{int(time.time())}")
+                shutil.copy2(user_settings, backup)
+                logger.warning(f"Backed up unparseable settings to {backup}")
                 settings = {}
         else:
-            settings = {}
+            logger.info("settings.json does not exist, will create fresh")
             user_settings.parent.mkdir(parents=True, exist_ok=True)
 
         changed = False
 
-        # 1. permissions.allow — so user is never prompted for permission
         if "permissions" not in settings:
             settings["permissions"] = {}
         if "allow" not in settings["permissions"]:
@@ -161,9 +182,6 @@ def _ensure_mcp_permission() -> None:
             settings["permissions"]["allow"].append(MCP_TOOL)
             changed = True
 
-        # 2. allowedTools — so schema loads eagerly at session start
-        #    without this, the tool is in the deferred pool of ~39 tools
-        #    and Claude cannot call it on the very first prompt of a session
         if "allowedTools" not in settings:
             settings["allowedTools"] = []
         if MCP_TOOL not in settings["allowedTools"]:
@@ -175,9 +193,9 @@ def _ensure_mcp_permission() -> None:
                 _json.dumps(settings, indent=2),
                 encoding="utf-8",
             )
-            logger.info(f"Updated MCP tool config in {user_settings}")
+            logger.info(f"settings.json updated, final keys: {list(settings.keys())}")
         else:
-            logger.debug(f"MCP tool config already present in {user_settings}")
+            logger.debug(f"MCP tool config already present, no write needed, keys: {list(settings.keys())}")
 
     except Exception as e:
         logger.warning(f"Could not update {user_settings}: {e}")

@@ -125,6 +125,7 @@ def session_start() -> None:
     SessionStart hook - Called when a new Claude session starts.
     Delegates to the session_start handler.
     """
+    setup_logging(log_to_file=True, log_to_console=False)
     _ensure_mcp_permission()
     handle_session_start()
 
