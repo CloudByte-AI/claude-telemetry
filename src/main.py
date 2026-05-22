@@ -177,6 +177,9 @@ def stop() -> None:
         from src.db.writers import DatabaseWriter
         from src.integrations.claude.reader import get_claude_dir, read_jsonl_file, normalize_project_name
         from src.db.schema import migrate_schema
+        from src.db.manager import get_db_connection
+        from src.common.time_utils import get_now_ist_iso, to_ist
+        import uuid
         MCP_OBS_TOOL = "mcp__plugin_claude-telemetry_cloudbyte__record_observation"
 
         # Run migrations before writing — handles mid-session plugin updates
@@ -295,10 +298,6 @@ def stop() -> None:
         logger.info(f"Most recent pair: prompt_id={jsonl_prompt_id}, prompt=\"{prompt_text[:50]}\"")
 
         # Find the matching prompt_id in the database (by content and session_id)
-        from src.db.manager import get_db_connection
-        from src.common.time_utils import get_now_ist_iso, to_ist
-        import uuid
-
         conn = get_db_connection()
         cursor = conn.cursor()
 
