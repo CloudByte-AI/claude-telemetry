@@ -100,13 +100,81 @@ def _int(val, default: int) -> int:
     except: return default
 
 
+# ---------------------------------------------------------------------------
+# Log Cleanup helpers
+# ---------------------------------------------------------------------------
+
+def count_old_log_files() -> int:
+    """Return the number of log files older than 3 days."""
+    import time
+    from common.paths import get_logs_dir
+
+    logs_dir = get_logs_dir()
+    if not logs_dir.exists():
+        return 0
+
+    cutoff = time.time() - (3 * 24 * 60 * 60)
+    return sum(
+        1 for f in logs_dir.iterdir()
+        if f.is_file() and f.stat().st_mtime < cutoff
+    )
+
+
+def run_log_cleanup() -> int:
+    """Delete log files older than 3 days and return the number deleted."""
+    import time
+    from common.paths import get_logs_dir
+
+    logs_dir = get_logs_dir()
+    if not logs_dir.exists():
+        return 0
+
+    cutoff = time.time() - (3 * 24 * 60 * 60)
+    deleted = 0
+    for f in list(logs_dir.iterdir()):
+        if f.is_file() and f.stat().st_mtime < cutoff:
+            try:
+                f.unlink()
+                deleted += 1
+            except Exception:
+                pass
+    return deleted
+
+
+def preview_database_cleanup() -> dict:
+    """
+    Preview how many entries would be affected by database cleanup.
+    Returns counts and details without deleting anything.
+    """
+    from ..routers.db import q
+    from common.logging import get_cloudbyte_logger
+
+    logger = get_cloudbyte_logger(__name__)
+    logger.info("Previewing database cleanup")
+
+    sessions = q("""
+        SELECT session_id, cwd FROM SESSION
+        WHERE session_id NOT IN (SELECT DISTINCT session_id FROM USER_PROMPT)
+    """)
+
+    projects = q("""
+        SELECT project_id, name, path FROM PROJECT
+        WHERE project_id NOT IN (SELECT DISTINCT project_id FROM SESSION)
+    """)
+
+    return {
+        "session_count": len(sessions),
+        "project_count": len(projects),
+    }
+
+
 def run_database_cleanup() -> dict:
     """
     Remove sessions with 0 prompts and projects with 0 sessions.
     Returns a summary of deleted items.
     """
     from ..routers.db import cmd, q
-    from src.common.logging import get_cloudbyte_logger
+    from common.logging import get_cloudbyte_logger
     
     logger = get_cloudbyte_logger(__name__)
     logger.info("Starting database cleanup process")
