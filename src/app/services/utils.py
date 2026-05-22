@@ -32,6 +32,7 @@ def paginate(rows: list, page: int, per_page: int) -> tuple[list, dict]:
         "page": page, "total": total, "pages": pages,
         "pg_start": pg_start, "pg_end": pg_end,
         "page_nums": list(range(pg_start, pg_end + 1)),
+        "per_page": per_page,
     }
 
 

@@ -11,31 +11,43 @@
 <div class="section" style="margin-bottom: 48px; padding-top: 10px;">
     <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:24px;">
         <div>
-            <div style="font-size:10px; font-weight:800; color:var(--amber); text-transform:uppercase; letter-spacing:0.12em; margin-bottom:8px;">Root Administration</div>
-            <h1 style="font-size: 54px; font-weight: 400; color: var(--text); line-height: 1.0; letter-spacing: -0.05em; margin:0;">System Config</h1>
+            <div
+                style="font-size:10px; font-weight:800; color:var(--amber); text-transform:uppercase; letter-spacing:0.12em; margin-bottom:8px;">
+                Root Administration</div>
+            <h1
+                style="font-size: 54px; font-weight: 400; color: var(--text); line-height: 1.0; letter-spacing: -0.05em; margin:0;">
+                System Config</h1>
         </div>
-        
+
         <div style="display: flex; align-items: center; gap: 8px;">
             {% if not config_exists %}
-                <span class="badge" style="color: var(--amber); border-color: var(--amber); border-radius:0px;">UNINITIALIZED</span>
+            <span class="badge"
+                style="color: var(--amber); border-color: var(--amber); border-radius:0px;">UNINITIALIZED</span>
             {% elif api_key_set %}
-                <span class="badge" style="color: #fe4c02; border-color: #fe4c02; border-radius:0px;">ENGINE READY</span>
+            <span class="badge" style="color: #fe4c02; border-color: #fe4c02; border-radius:0px;">ENGINE READY</span>
             {% else %}
-                <span class="badge" style="color: var(--amber); border-color: var(--amber); border-radius:0px;">AUTH REQUIRED</span>
+            <span class="badge" style="color: var(--amber); border-color: var(--amber); border-radius:0px;">AUTH
+                REQUIRED</span>
             {% endif %}
         </div>
     </div>
 
     <!-- Technical Meta Strip -->
-    <div style="display:flex; align-items:center; gap:20px; background:var(--bg-alt); padding:10px 20px; border:1px solid var(--border); width:fit-content;">
+    <div
+        style="display:flex; align-items:center; gap:20px; background:var(--bg-alt); padding:10px 20px; border:1px solid var(--border); width:fit-content;">
         <div style="display:flex; align-items:center; gap:8px;">
-            <span class="mono dimmer" style="font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:0.05em;">Config Path:</span>
-            <span class="mono" style="font-weight:700; font-size:11px; color:var(--text);">~/.cloudbyte/config.json</span>
+            <span class="mono dimmer"
+                style="font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:0.05em;">Config
+                Path:</span>
+            <span class="mono"
+                style="font-weight:700; font-size:11px; color:var(--text);">~/.cloudbyte/config.json</span>
         </div>
         <div style="width:1px; height:12px; background:var(--border);"></div>
         <div style="display:flex; align-items:center; gap:8px;">
-            <span class="mono dimmer" style="font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:0.05em;">State:</span>
-            <span class="mono" style="font-weight:700; font-size:11px; color:{% if config_exists %}#fe4c02{% else %}var(--text-dim){% endif %};">
+            <span class="mono dimmer"
+                style="font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:0.05em;">State:</span>
+            <span class="mono"
+                style="font-weight:700; font-size:11px; color:{% if config_exists %}#fe4c02{% else %}var(--text-dim){% endif %};">
                 {% if config_exists %}Persistence Active{% else %}Transient Defaults{% endif %}
             </span>
         </div>
@@ -43,19 +55,12 @@
 </div>
 
 <!-- Feedback alerts -->
-{% if save_message or cleanup_stats %}
+{% if save_message %}
 <div class="section" style="margin-bottom: 32px;">
-    {% if save_message %}
-    <div style="padding: 16px 24px; background: var(--bg-alt); border-left: 4px solid {% if save_success %}#fe4c02{% else %}var(--red){% endif %}; font-family:'IBM Plex Mono'; font-size:12px; font-weight:700; color:var(--text); margin-bottom: 8px;">
+    <div
+        style="padding: 16px 24px; background: var(--bg-alt); border-left: 4px solid {% if save_success %}#fe4c02{% else %}var(--red){% endif %}; font-family:'IBM Plex Mono'; font-size:12px; font-weight:700; color:var(--text);">
         {{ '✓' if save_success else '✗' }} {{ save_message | upper }}
     </div>
-    {% endif %}
-    
-    {% if cleanup_stats %}
-    <div style="padding: 16px 24px; background: var(--bg-alt); border-left: 4px solid #fe4c02; font-family:'IBM Plex Mono'; font-size:12px; font-weight:700; color:var(--text);">
-        ✓ DATABASE CLEANUP COMPLETE: {{ cleanup_stats.sessions_deleted }} SESSIONS AND {{ cleanup_stats.projects_deleted }} PROJECTS REMOVED.
-    </div>
-    {% endif %}
 </div>
 {% endif %}
 
@@ -66,26 +71,50 @@
         <div style="background:var(--bg-alt); border:1px solid var(--border); padding:24px;">
             <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;">
                 <div>
-                    <div style="font-size:11px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">Cleanup Optimization</div>
+                    <div
+                        style="font-size:11px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">
+                        Cleanup Optimization</div>
                     <div style="font-size:13px; color:var(--text-dim); line-height:1.4; max-width:600px;">
-                        Remove unnecessary database entries including sessions with zero prompts and projects with no active sessions. This helps keep the dashboard clean and fast.
+                        Remove unnecessary database entries including sessions with zero prompts and projects with no
+                        active sessions. This helps keep the dashboard clean and fast.
                     </div>
                 </div>
             </div>
-            
-            <form method="post" action="/config/cleanup" style="margin:0;">
-                <button type="submit" class="btn-worker" onclick="return confirm('Are you sure you want to clean up the database?')" 
-                        style="background:#111; border:1px solid var(--border); color:#fff; padding:12px 24px; font-family:'IBM Plex Mono'; font-size:11px; font-weight:700; cursor:pointer; border-radius:0; letter-spacing:0.05em; transition:all 0.2s;">
-                    ◈ RUN DATABASE CLEANUP
-                </button>
-            </form>
+
+            <button type="button" class="btn-worker" onclick="runDatabaseCleanup()"
+                style="background:#111; border:1px solid var(--border); color:#fff; padding:12px 24px; font-family:'IBM Plex Mono'; font-size:11px; font-weight:700; cursor:pointer; border-radius:0; letter-spacing:0.05em; transition:all 0.2s;">
+                ◈ RUN DATABASE CLEANUP
+            </button>
+        </div>
+    </div>
+
+    <!-- Log Cleanup -->
+    <div class="section">
+        <div class="config-section-label">◈ Log Cleanup</div>
+        <div style="background:var(--bg-alt); border:1px solid var(--border); padding:24px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;">
+                <div>
+                    <div
+                        style="font-size:11px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">
+                        Log Rotation
+                    </div>
+                    <div style="font-size:13px; color:var(--text-dim); line-height:1.4; max-width:600px;">
+                        Remove log files older than 3 days from the logs directory to reclaim disk space.
+                    </div>
+                </div>
+            </div>
+
+            <button type="button" class="btn-worker" onclick="runLogCleanup()"
+                style="background:#111; border:1px solid var(--border); color:#fff; padding:12px 24px; font-family:'IBM Plex Mono'; font-size:11px; font-weight:700; cursor:pointer; border-radius:0; letter-spacing:0.05em; transition:all 0.2s;">
+                ◈ RUN LOG CLEANUP
+            </button>
         </div>
     </div>
 
     <form method="post" action="/config" id="config-form">
 
-    <!-- Features -->
-    <div class="section">
+        <!-- Features -->
+        <!-- <div class="section">
         <div class="config-section-label">◈ Feature Intelligence</div>
         <div class="toggle-row">
             <div class="toggle-info">
@@ -103,10 +132,10 @@
                 </label>
             </div>
         </div>
-    </div>
+    </div> -->
 
-    <!-- Provider -->
-    <div class="section">
+        <!-- Provider -->
+        <!-- <div class="section">
         <div class="config-section-label">◎ LLM Infrastructure</div>
         <div class="field-grid">
             <div class="field-group">
@@ -130,10 +159,10 @@
                 <input type="text" name="max_tokens" class="field-input" value="{{ endpoint.max_tokens if endpoint.max_tokens is not none else '4000' }}">
             </div>
         </div>
-    </div>
+    </div> -->
 
-    <!-- System -->
-    <div class="section">
+        <!-- System -->
+        <!-- <div class="section">
         <div class="config-section-label">▤ Network & Runtime</div>
         <div style="display:flex; gap:32px; align-items:flex-start;">
             <div class="field-group" style="width: 240px;">
@@ -145,160 +174,323 @@
                 <div style="font-size:11px; color:var(--text-dim); margin-top:4px;">Port changes require a full process recycle to take effect.</div>
             </div>
         </div>
-    </div>
+    </div> -->
 
-    <!-- Worker Management -->
-    <div class="section">
-        <div class="config-section-label">◈ Worker Management</div>
+        <!-- Worker Management -->
+        <div class="section">
+            <div class="config-section-label">◈ Worker Management</div>
 
-        <!-- Worker Status Display -->
-        <div style="background:var(--bg-alt); border:1px solid var(--border); padding:24px; margin-bottom:20px;">
-            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
-                <div>
-                    <div style="font-size:11px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">LLM Worker Status</div>
-                    <div class="worker-running-status" style="font-size:24px; font-weight:600; color:var(--text);">
-                        {% if worker_status and worker_status.get('running', False) %}
+            <!-- Worker Status Display -->
+            <div style="background:var(--bg-alt); border:1px solid var(--border); padding:24px; margin-bottom:20px;">
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
+                    <div>
+                        <div
+                            style="font-size:11px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">
+                            LLM Worker Status</div>
+                        <div class="worker-running-status" style="font-size:24px; font-weight:600; color:var(--text);">
+                            {% if worker_status and worker_status.get('running', False) %}
                             <span style="color:#fe4c02;">● Running</span>
-                        {% else %}
+                            {% else %}
                             <span style="color:var(--red);">● Stopped</span>
-                        {% endif %}
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:24px;">
+                        <div style="text-align:center;">
+                            <div data-worker-status="pending_tasks"
+                                style="font-size:24px; font-weight:700; color:var(--text);">{{
+                                worker_status.get('pending_tasks', 0) if worker_status else 0 }}</div>
+                            <div
+                                style="font-size:10px; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">
+                                Pending</div>
+                        </div>
+                        <div style="text-align:center;">
+                            <div data-worker-status="running_tasks"
+                                style="font-size:24px; font-weight:700; color:var(--text);">{{
+                                worker_status.get('running_tasks', 0) if worker_status else 0 }}</div>
+                            <div
+                                style="font-size:10px; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">
+                                Active</div>
+                        </div>
                     </div>
                 </div>
-                <div style="display:flex; gap:24px;">
-                    <div style="text-align:center;">
-                        <div data-worker-status="pending_tasks" style="font-size:24px; font-weight:700; color:var(--text);">{{ worker_status.get('pending_tasks', 0) if worker_status else 0 }}</div>
-                        <div style="font-size:10px; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Pending</div>
-                    </div>
-                    <div style="text-align:center;">
-                        <div data-worker-status="running_tasks" style="font-size:24px; font-weight:700; color:var(--text);">{{ worker_status.get('running_tasks', 0) if worker_status else 0 }}</div>
-                        <div style="font-size:10px; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Active</div>
-                    </div>
+
+                <!-- Status Indicators -->
+                <div style="display:flex; gap:12px; flex-wrap:wrap;">
+                    {% if worker_status and worker_status.get('thread_alive', False) %}
+                    <span class="badge" style="color:var(--accent); border-color:var(--accent);">Thread Active</span>
+                    {% else %}
+                    <span class="badge" style="color:var(--text-dim); border-color:var(--border);">Thread
+                        Inactive</span>
+                    {% endif %}
+
+                    {% if worker_status and worker_status.get('shutdown_requested', False) %}
+                    <span class="badge" style="color:var(--amber); border-color:var(--amber);">Shutdown Pending</span>
+                    {% else %}
+                    <span class="badge" style="color:var(--accent); border-color:var(--accent);">Active</span>
+                    {% endif %}
+
+                    {% if worker_status and worker_status.get('worker_exited', False) %}
+                    <span class="badge" style="color:var(--red); border-color:var(--red);">Exited</span>
+                    {% endif %}
                 </div>
             </div>
 
-            <!-- Status Indicators -->
-            <div style="display:flex; gap:12px; flex-wrap:wrap;">
-                {% if worker_status and worker_status.get('thread_alive', False) %}
-                <span class="badge" style="color:var(--accent); border-color:var(--accent);">Thread Active</span>
-                {% else %}
-                <span class="badge" style="color:var(--text-dim); border-color:var(--border);">Thread Inactive</span>
-                {% endif %}
-
-                {% if worker_status and worker_status.get('shutdown_requested', False) %}
-                <span class="badge" style="color:var(--amber); border-color:var(--amber);">Shutdown Pending</span>
-                {% else %}
-                <span class="badge" style="color:var(--accent); border-color:var(--accent);">Active</span>
-                {% endif %}
-
-                {% if worker_status and worker_status.get('worker_exited', False) %}
-                <span class="badge" style="color:var(--red); border-color:var(--red);">Exited</span>
-                {% endif %}
+            <!-- Worker Control Buttons -->
+            <div style="display:flex; gap:12px; align-items:center;">
+                <button type="button" class="btn-worker" onclick="workerAction('reset')"
+                    style="background:var(--bg-alt); border:1px solid var(--border); color:var(--text); padding:10px 20px; font-family:'IBM Plex Mono'; font-size:11px; font-weight:700; cursor:pointer; border-radius:0;">
+                    ↻ RESET WORKER
+                </button>
+                <button type="button" class="btn-worker" onclick="workerAction('restart')"
+                    style="background:var(--bg-alt); border:1px solid var(--border); color:var(--text); padding:10px 20px; font-family:'IBM Plex Mono'; font-size:11px; font-weight:700; cursor:pointer; border-radius:0;">
+                    ⚡ RESTART
+                </button>
+                <button type="button" class="btn-worker btn-danger" onclick="workerAction('shutdown')"
+                    style="background:var(--red); border:1px solid var(--red); color:white; padding:10px 20px; font-family:'IBM Plex Mono'; font-size:11px; font-weight:700; cursor:pointer; border-radius:0;">
+                    ⚠ SHUTDOWN
+                </button>
             </div>
         </div>
 
-        <!-- Worker Control Buttons -->
-        <div style="display:flex; gap:12px; align-items:center;">
-            <button type="button" class="btn-worker" onclick="workerAction('reset')" style="background:var(--bg-alt); border:1px solid var(--border); color:var(--text); padding:10px 20px; font-family:'IBM Plex Mono'; font-size:11px; font-weight:700; cursor:pointer; border-radius:0;">
-                ↻ RESET WORKER
-            </button>
-            <button type="button" class="btn-worker" onclick="workerAction('restart')" style="background:var(--bg-alt); border:1px solid var(--border); color:var(--text); padding:10px 20px; font-family:'IBM Plex Mono'; font-size:11px; font-weight:700; cursor:pointer; border-radius:0;">
-                ⚡ RESTART
-            </button>
-            <button type="button" class="btn-worker btn-danger" onclick="workerAction('shutdown')" style="background:var(--red); border:1px solid var(--red); color:white; padding:10px 20px; font-family:'IBM Plex Mono'; font-size:11px; font-weight:700; cursor:pointer; border-radius:0;">
-                ⚠ SHUTDOWN
-            </button>
+        <!-- Actions -->
+        <div class="section"
+            style="display: flex; justify-content: flex-end; margin-top: 24px; border-top: 1px solid var(--border); padding-top: 32px;">
+            <button type="submit" class="btn-save">SAVE SYSTEM CHANGES ↗</button>
         </div>
-    </div>
 
-    <!-- Actions -->
-    <div class="section" style="display: flex; justify-content: flex-end; margin-top: 24px; border-top: 1px solid var(--border); padding-top: 32px;">
-        <button type="submit" class="btn-save">SAVE SYSTEM CHANGES ↗</button>
-    </div>
-
-</form>
+    </form>
 </div>
+
+<!-- Custom Modal -->
+<div id="cleanupModal"
+    style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">
+    <div
+        style="background:var(--bg-surface); border:1px solid var(--border); width:100%; max-width:630px; box-shadow:var(--shadow-md); animation:fadeIn 0.2s;">
+        <div id="modalHeader" style="padding:36px 36px 0;"></div>
+        <div id="modalBody" style="padding:18px 36px 36px; color:var(--text); font-size:21px; line-height:1.6;">
+        </div>
+        <div id="modalFooter" style="padding:0 36px 36px; display:flex; gap:12px; justify-content:flex-end;">
+        </div>
+    </div>
+</div>
+
+<style>
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+            transform: translateY(-15px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+</style>
 
 {% endblock %}
 
 {% block scripts %}
 <script>
-function syncToggle(cbId, hiddenId) {
-    var cb     = document.getElementById(cbId);
-    var hidden = document.getElementById(hiddenId);
-    if (hidden) hidden.value = cb.checked ? '1' : '0';
-}
-
-function workerAction(action) {
-    // Confirm shutdown action
-    if (action === 'shutdown') {
-        if (!confirm('Are you sure you want to shutdown the worker? This will stop all background processing.')) {
-            return;
-        }
+    function syncToggle(cbId, hiddenId) {
+        var cb = document.getElementById(cbId);
+        var hidden = document.getElementById(hiddenId);
+        if (hidden) hidden.value = cb.checked ? '1' : '0';
     }
 
-    // Show loading state
-    const buttons = document.querySelectorAll('.btn-worker');
-    buttons.forEach(btn => {
-        btn.disabled = true;
-        btn.style.opacity = '0.5';
-    });
-
-    // Send request to worker endpoint
-    fetch(`/worker/${action}`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
+    function workerAction(action) {
+        // Confirm shutdown action
+        if (action === 'shutdown') {
+            if (!confirm('Are you sure you want to shutdown the worker? This will stop all background processing.')) {
+                return;
+            }
         }
-    })
-    .then(response => response.json())
-    .then(data => {
-        // Show success message
-        alert(`Worker ${action} completed successfully`);
 
-        // Reload page to show updated status
-        setTimeout(() => {
-            window.location.reload();
-        }, 1000);
-    })
-    .catch(error => {
-        console.error('Worker action failed:', error);
-        alert(`Worker ${action} failed: ${error.message}`);
-
-        // Reset button states
+        // Show loading state
+        const buttons = document.querySelectorAll('.btn-worker');
         buttons.forEach(btn => {
-            btn.disabled = false;
-            btn.style.opacity = '1';
+            btn.disabled = true;
+            btn.style.opacity = '0.5';
         });
-    });
-}
 
-// Auto-refresh worker status every 10 seconds
-setInterval(() => {
-    fetch('/worker/status')
-        .then(response => response.json())
-        .then(data => {
-            // Update page elements with new status
-            const statusElements = document.querySelectorAll('[data-worker-status]');
-            statusElements.forEach(el => {
-                const field = el.getAttribute('data-worker-status');
-                if (data[field] !== undefined) {
-                    el.textContent = data[field];
-                }
-            });
-
-            // Update running status display
-            const runningDisplay = document.querySelector('.worker-running-status');
-            if (runningDisplay) {
-                if (data.running) {
-                    runningDisplay.innerHTML = '<span style="color:#fe4c02;">● Running</span>';
-                } else {
-                    runningDisplay.innerHTML = '<span style="color:var(--red);">● Stopped</span>';
-                }
+        // Send request to worker endpoint
+        fetch(`/worker/${action}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
             }
         })
-        .catch(error => {
-            console.log('Worker status refresh failed (worker may be unavailable):', error);
-        });
-}, 10000);
+            .then(response => response.json())
+            .then(data => {
+                // Show success message
+                alert(`Worker ${action} completed successfully`);
+
+                // Reload page to show updated status
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1000);
+            })
+            .catch(error => {
+                console.error('Worker action failed:', error);
+                alert(`Worker ${action} failed: ${error.message}`);
+
+                // Reset button states
+                buttons.forEach(btn => {
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                });
+            });
+    }
+
+    // ── Modal helpers ──
+    function showModal(title, bodyHtml, buttonsHtml) {
+        const modal = document.getElementById('cleanupModal');
+        document.getElementById('modalHeader').innerHTML = '<div style="font-size:16px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">' + title + '</div>';
+        document.getElementById('modalBody').innerHTML = bodyHtml;
+        document.getElementById('modalFooter').innerHTML = buttonsHtml;
+        modal.style.display = 'flex';
+    }
+
+    function closeModal() {
+        document.getElementById('cleanupModal').style.display = 'none';
+    }
+
+    function modalAlert(type, message) {
+        var color = type === 'error' ? 'var(--red)' : 'var(--green)';
+        var icon = type === 'error' ? '&#9888;' : '&#10003;';
+        var body = '<div style="font-family:IBM Plex Mono,monospace; font-size:16px; font-weight:700;">' +
+            icon + ' ' + message.toUpperCase() + '</div>';
+        var buttons = '<button onclick="closeModal()" class="btn-worker" style="background:var(--bg-alt); border:1px solid var(--border); color:var(--text); padding:8px 16px; font-family:IBM Plex Mono,monospace; font-size:13px; font-weight:700; cursor:pointer; border-radius:0;">CLOSE</button>';
+        showModal(type === 'error' ? 'Error' : 'Done', body, buttons);
+    }
+
+    function btnStyle(type) {
+        if (type === 'primary') {
+            return 'background:#111; border:1px solid var(--border); color:#fff;';
+        } else if (type === 'danger') {
+            return 'background:var(--red); border:1px solid var(--red); color:#fff;';
+        }
+        return 'background:var(--bg-alt); border:1px solid var(--border); color:var(--text);'
+    }
+
+    function runLogCleanup() {
+        fetch('/config/logcleanup_preview')
+            .then(function (response) {
+                if (!response.ok) { throw new Error('Server error: ' + response.statusText); }
+                return response.json();
+            })
+            .then(function (data) {
+                var count = data.count || 0;
+                if (count === 0) {
+                    modalAlert('error', 'No log files older than 3 days found.');
+                    return;
+                }
+                var body = '<p style="margin:0;">You have <strong>' + count + '</strong> log file(s) older than 3 days.</p>' +
+                    '<p style="margin:8px 0 0; color:var(--text-dim); font-size:15px;">Proceed with deletion?</p>';
+                var buttons =
+                    '<button id="dlg-cancel" class="btn-worker" onclick="closeModal()" style="' + btnStyle() + ' padding:8px 16px; font-family:IBM Plex Mono,monospace; font-size:13px; font-weight:700; cursor:pointer; border-radius:0;">CANCEL</button>' +
+                    '<button id="dlg-ok" class="btn-worker" onclick="doLogCleanup()" style="' + btnStyle('danger') + ' padding:8px 24px; font-family:IBM Plex Mono,monospace; font-size:13px; font-weight:700; cursor:pointer; border-radius:0;">DELETE</button>';
+                showModal('Log Cleanup', body, buttons);
+            })
+            .catch(function (error) {
+                console.error('Failed to fetch log count:', error);
+                modalAlert('error', 'Failed to check logs: ' + error.message);
+            });
+    }
+
+    function doLogCleanup() {
+        closeModal();
+        fetch('/config/logcleanup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        })
+            .then(function (response) { return response.json(); })
+            .then(function (result) {
+                modalAlert('success', 'Deleted ' + result.deleted + ' log file(s).');
+            })
+            .catch(function (error) {
+                console.error('Log cleanup failed:', error);
+                modalAlert('error', 'Log cleanup failed: ' + error.message);
+            });
+    }
+
+    function runDatabaseCleanup() {
+        fetch('/config/cleanup_preview')
+            .then(function (response) {
+                if (!response.ok) {
+                    return response.json().then(function (err) {
+                        throw new Error('Server error: ' + (err.detail || response.statusText));
+                    });
+                }
+                return response.json();
+            })
+            .then(function (data) {
+                if (data.session_count === undefined || data.project_count === undefined) {
+                    throw new Error('Unexpected response: ' + JSON.stringify(data));
+                }
+                if (data.session_count === 0 && data.project_count === 0) {
+                    modalAlert('error', 'No empty sessions or projects found.');
+                    return;
+                }
+                var body = '<p style="margin:0;">This will delete <strong>' + data.project_count + '</strong> empty project(s) and <strong>' + data.session_count + '</strong> empty session(s).</p>';
+                var buttons =
+                    '<button id="dlg-cancel" class="btn-worker" onclick="closeModal()" style="' + btnStyle() + ' padding:8px 16px; font-family:IBM Plex Mono,monospace; font-size:13px; font-weight:700; cursor:pointer; border-radius:0;">CANCEL</button>' +
+                    '<button id="dlg-ok" class="btn-worker" onclick="doDatabaseCleanup()" style="' + btnStyle('danger') + ' padding:8px 24px; font-family:IBM Plex Mono,monospace; font-size:13px; font-weight:700; cursor:pointer; border-radius:0;">DELETE</button>';
+                showModal('Database Cleanup', body, buttons);
+            })
+            .catch(function (error) {
+                console.error('Failed to fetch cleanup preview:', error);
+                modalAlert('error', 'Failed to check cleanup preview: ' + error.message);
+            });
+    }
+
+    function doDatabaseCleanup() {
+        closeModal();
+        fetch('/config/cleanup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        })
+            .then(function (response) { return response.json(); })
+            .then(function (result) {
+                var body = '<p style="margin:0; font-family:IBM Plex Mono,monospace; font-size:16px; font-weight:700;">&#10003; DATABASE CLEANUP COMPLETE</p>' +
+                    '<p style="margin:4px 0 0; color:var(--text-dim); font-size:15px;">' + result.projects_deleted + ' project(s) and ' + result.sessions_deleted + ' session(s) removed.</p>';
+                var buttons = '<button class="btn-worker" onclick="closeModal()" style="' + btnStyle() + ' padding:8px 16px; font-family:IBM Plex Mono,monospace; font-size:13px; font-weight:700; cursor:pointer; border-radius:0;">CLOSE</button>';
+                showModal('Cleanup Complete', body, buttons);
+            })
+            .catch(function (error) {
+                console.error('Database cleanup failed:', error);
+                modalAlert('error', 'Database cleanup failed: ' + error.message);
+            });
+    }
+
+    // Auto-refresh worker status every 10 seconds
+    setInterval(() => {
+        fetch('/worker/status')
+            .then(response => response.json())
+            .then(data => {
+                // Update page elements with new status
+                const statusElements = document.querySelectorAll('[data-worker-status]');
+                statusElements.forEach(el => {
+                    const field = el.getAttribute('data-worker-status');
+                    if (data[field] !== undefined) {
+                        el.textContent = data[field];
+                    }
+                });
+
+                // Update running status display
+                const runningDisplay = document.querySelector('.worker-running-status');
+                if (runningDisplay) {
+                    if (data.running) {
+                        runningDisplay.innerHTML = '<span style="color:#fe4c02;">● Running</span>';
+                    } else {
+                        runningDisplay.innerHTML = '<span style="color:var(--red);">● Stopped</span>';
+                    }
+                }
+            })
+            .catch(error => {
+                console.log('Worker status refresh failed (worker may be unavailable):', error);
+            });
+    }, 10000);
 </script>
 {% endblock %}

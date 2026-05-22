@@ -50,7 +50,7 @@
 <!-- Pagination -->
 {% if pg.pages > 1 %}
 <div class="pagination">
-    <span class="pg-info">Insights {{ ((pg.page-1)*15)+1 }}–{{ [pg.page*15, pg.total]|min }} of {{ pg.total }}</span>
+    <span class="pg-info">Insights {{ ((pg.page-1)*pg.per_page)+1 }}–{{ [pg.page*pg.per_page, pg.total]|min }} of {{ pg.total }}</span>
     <div class="pg-btns">
         {% set base = '/observations?search='~search~'&type_filter='~type_filter~'&date_from='~date_from~'&date_to='~date_to %}
         <a href="{{ base }}&page={{ pg.page-1 }}" class="pg-btn {% if pg.page<=1 %}disabled{% endif %}">← PREV</a>

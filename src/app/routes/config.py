@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 import logging
 
 from ..routers.dependencies import templates
@@ -35,13 +35,27 @@ def config_page(request: Request):
     return templates.TemplateResponse(request=request, name="config/config.html", context=ctx)
 
 
-@router.post("/config/cleanup", response_class=HTMLResponse)
-def database_cleanup(request: Request):
+@router.get("/config/cleanup_preview", response_class=JSONResponse)
+def database_cleanup_preview(request: Request):
+    stats = svc.preview_database_cleanup()
+    return stats
+
+
+@router.post("/config/cleanup", response_class=JSONResponse)
+async def database_cleanup(request: Request):
     stats = svc.run_database_cleanup()
-    ctx = svc.get_config_context()
-    ctx["cleanup_stats"] = stats
-    ctx["worker_status"] = get_worker_status()
-    return templates.TemplateResponse(request=request, name="config/config.html", context=ctx)
+    return stats
+
+
+@router.get("/config/logcleanup_preview", response_class=JSONResponse)
+def log_cleanup_preview(request: Request):
+    return {"count": svc.count_old_log_files()}
+
+
+@router.post("/config/logcleanup", response_class=JSONResponse)
+async def log_cleanup(request: Request):
+    deleted = svc.run_log_cleanup()
+    return {"deleted": deleted}
 
 
 @router.post("/config", response_class=HTMLResponse)
