@@ -72,7 +72,7 @@ def setup() -> None:
         config_file = get_config_file()
         if not config_file.exists():
             default_config = {
-                "version": "0.1.26",
+                "version": "0.1.27",
                 "created_at": get_now_ist_iso(),
                 "settings": {
                     "log_level": "INFO",
@@ -176,7 +176,15 @@ def stop() -> None:
         )
         from src.db.writers import DatabaseWriter
         from src.integrations.claude.reader import get_claude_dir, read_jsonl_file, normalize_project_name
+        from src.db.schema import migrate_schema
         MCP_OBS_TOOL = "mcp__plugin_claude-telemetry_cloudbyte__record_observation"
+
+        # Run migrations before writing — handles mid-session plugin updates
+        try:
+            _db_mgr = get_db_manager()
+            migrate_schema(_db_mgr.get_connection())
+        except Exception as _me:
+            logger.warning(f"Migration check failed in stop(): {_me}")
 
         # Read hook data from stdin
         hook_data = {}
@@ -225,6 +233,32 @@ def stop() -> None:
                     logger.debug(f"Loaded subagent events from: {os.path.basename(subagent_file)}")
                 except Exception as exc:
                     logger.warning(f"Failed reading subagent file {subagent_file}: {exc}")
+
+        # Scan events for session title records (ai-title and custom-title)
+        # Always overwrites when found (latest wins), preserves when not found (COALESCE)
+        ai_title = None
+        custom_title = None
+        for event in events:
+            if event.get("type") == "ai-title":
+                ai_title = event.get("aiTitle")
+            elif event.get("type") == "custom-title":
+                custom_title = event.get("customTitle")
+
+        if ai_title or custom_title:
+            try:
+                _title_conn = get_db_connection()
+                _title_cursor = _title_conn.cursor()
+                _title_cursor.execute(
+                    """UPDATE SESSION
+                       SET ai_title     = COALESCE(?, ai_title),
+                           custom_title = COALESCE(?, custom_title)
+                       WHERE session_id = ?""",
+                    (ai_title, custom_title, session_id),
+                )
+                _title_conn.commit()
+                logger.debug(f"Session titles updated — ai: {ai_title!r}, custom: {custom_title!r}")
+            except Exception as _te:
+                logger.warning(f"Could not update session titles: {_te}")
 
         pairs = extract_prompt_response_pairs(events)
 
@@ -338,8 +372,9 @@ def stop() -> None:
 
                             cursor.execute("""
                                 INSERT INTO USER_PROMPT (
-                                    prompt_id, session_id, uuid, parent_uuid, prompt, timestamp
-                                ) VALUES (?, ?, ?, ?, ?, ?)
+                                    prompt_id, session_id, uuid, parent_uuid, prompt, timestamp,
+                                    entrypoint, claude_version, git_branch, permission_mode
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """, (
                                 new_prompt_id,
                                 session_id,
@@ -347,6 +382,10 @@ def stop() -> None:
                                 prompt_rec.get("parentUuid"),
                                 prompt_text,
                                 to_ist(prompt_rec.get("timestamp")),
+                                prompt_rec.get("entrypoint"),
+                                prompt_rec.get("version"),
+                                prompt_rec.get("gitBranch"),
+                                prompt_rec.get("permissionMode"),
                             ))
                             conn.commit()
                             insert_success = True
@@ -372,16 +411,25 @@ def stop() -> None:
             try:
                 conn = get_db_connection()
                 cursor = conn.cursor()
+                _prompt_rec = most_recent_pair.get("prompt_rec", {})
                 cursor.execute(
                     """UPDATE USER_PROMPT
                        SET jsonl_prompt_id = ?,
                            timestamp = ?,
-                           parent_uuid = COALESCE(parent_uuid, ?)
+                           parent_uuid = COALESCE(parent_uuid, ?),
+                           entrypoint = ?,
+                           claude_version = ?,
+                           git_branch = ?,
+                           permission_mode = ?
                        WHERE prompt_id = ?""",
                     (
                         jsonl_prompt_id,
-                        to_ist(most_recent_pair.get("prompt_rec", {}).get("timestamp")),
-                        most_recent_pair.get("prompt_rec", {}).get("parentUuid"),
+                        to_ist(_prompt_rec.get("timestamp")),
+                        _prompt_rec.get("parentUuid"),
+                        _prompt_rec.get("entrypoint"),
+                        _prompt_rec.get("version"),
+                        _prompt_rec.get("gitBranch"),
+                        _prompt_rec.get("permissionMode"),
                         db_prompt_id,
                     )
                 )

@@ -22,10 +22,12 @@ from pathlib import Path
 from typing import Any
 
 # ── Add src to path for imports ───────────────────────────
-plugin_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(plugin_root))
-
-from src.common.paths import get_logs_dir
+def get_logs_dir() -> Path:
+    """Return the CloudByte logs directory (~/.cloudbyte/logs)."""
+    cloudbyte_dir = Path.home() / ".cloudbyte"
+    logs_dir = cloudbyte_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    return logs_dir
 
 
 # ── Constants ──────────────────────────────────────────────────────────────────

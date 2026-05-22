@@ -77,6 +77,8 @@ def create_tables(conn: sqlite3.Connection) -> None:
         cwd TEXT,
         jsonl_file TEXT,
         created_at DATETIME,
+        ai_title TEXT,
+        custom_title TEXT,
         FOREIGN KEY (project_id) REFERENCES PROJECT(project_id)
     );
     """)
@@ -98,6 +100,10 @@ def create_tables(conn: sqlite3.Connection) -> None:
     # ---------------- USER_PROMPT ----------------
     # prompt_id      : stable auto-gen UUID — URL key, never changes
     # jsonl_prompt_id: real ID from Claude Code JSONL — stored by stop() hook
+    # entrypoint     : client used for this prompt (claude-vscode, claude-terminal, etc.)
+    # claude_version : Claude Code version at time of prompt
+    # git_branch     : active git branch at time of prompt
+    # permission_mode: permission mode active for this prompt (default, auto, plan, etc.)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS USER_PROMPT (
         prompt_id TEXT PRIMARY KEY,
@@ -107,6 +113,10 @@ def create_tables(conn: sqlite3.Connection) -> None:
         prompt TEXT,
         timestamp DATETIME,
         jsonl_prompt_id TEXT,
+        entrypoint TEXT,
+        claude_version TEXT,
+        git_branch TEXT,
+        permission_mode TEXT,
         FOREIGN KEY (session_id) REFERENCES SESSION(session_id)
     );
     """)
@@ -275,12 +285,34 @@ def migrate_schema(conn: sqlite3.Connection) -> None:
     cursor = conn.cursor()
     cursor.execute("PRAGMA table_info(USER_PROMPT)")
     columns = [row[1] for row in cursor.fetchall()]
+
     if "jsonl_prompt_id" not in columns:
         cursor.execute("ALTER TABLE USER_PROMPT ADD COLUMN jsonl_prompt_id TEXT")
-        conn.commit()
         logger.info("Migration: added jsonl_prompt_id column to USER_PROMPT")
-    else:
-        logger.debug("Migration: jsonl_prompt_id column already exists, skipping")
+    if "entrypoint" not in columns:
+        cursor.execute("ALTER TABLE USER_PROMPT ADD COLUMN entrypoint TEXT")
+        logger.info("Migration: added entrypoint column to USER_PROMPT")
+    if "claude_version" not in columns:
+        cursor.execute("ALTER TABLE USER_PROMPT ADD COLUMN claude_version TEXT")
+        logger.info("Migration: added claude_version column to USER_PROMPT")
+    if "git_branch" not in columns:
+        cursor.execute("ALTER TABLE USER_PROMPT ADD COLUMN git_branch TEXT")
+        logger.info("Migration: added git_branch column to USER_PROMPT")
+    if "permission_mode" not in columns:
+        cursor.execute("ALTER TABLE USER_PROMPT ADD COLUMN permission_mode TEXT")
+        logger.info("Migration: added permission_mode column to USER_PROMPT")
+
+    cursor.execute("PRAGMA table_info(SESSION)")
+    session_columns = [row[1] for row in cursor.fetchall()]
+
+    if "ai_title" not in session_columns:
+        cursor.execute("ALTER TABLE SESSION ADD COLUMN ai_title TEXT")
+        logger.info("Migration: added ai_title column to SESSION")
+    if "custom_title" not in session_columns:
+        cursor.execute("ALTER TABLE SESSION ADD COLUMN custom_title TEXT")
+        logger.info("Migration: added custom_title column to SESSION")
+
+    conn.commit()
 
 def create_indexes(conn: sqlite3.Connection) -> None:
     """

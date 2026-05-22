@@ -16,6 +16,20 @@ from src.common.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _to_list(value: Any) -> list:
+    """Normalize a value to a list — handles both native lists and JSON-encoded strings."""
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, list):
+                return parsed
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return []
+
+
 def save_observation(
     session_id: str,
     prompt_id: str,
@@ -35,11 +49,11 @@ def save_observation(
     try:
         obs_id = str(uuid.uuid4())
 
-        # Convert lists to JSON strings
-        facts = json.dumps(obs_data.get("facts", []))
-        concepts = json.dumps(obs_data.get("concepts", []))
-        files_read = json.dumps(obs_data.get("files_read", []))
-        files_modified = json.dumps(obs_data.get("files_modified", []))
+        # Normalize to list first — Claude sometimes passes arrays as JSON strings
+        facts = json.dumps(_to_list(obs_data.get("facts", [])))
+        concepts = json.dumps(_to_list(obs_data.get("concepts", [])))
+        files_read = json.dumps(_to_list(obs_data.get("files_read", [])))
+        files_modified = json.dumps(_to_list(obs_data.get("files_modified", [])))
 
         # Generate text field from other fields
         text_parts = [f"**{obs_data.get('title', '')}**"]
