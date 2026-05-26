@@ -298,112 +298,103 @@ def stop() -> None:
         prompt_text = _fix_text(most_recent_pair.get("prompt", ""))
         logger.info(f"Most recent pair: prompt_id={jsonl_prompt_id}, prompt=\"{prompt_text[:50]}\"")
 
-        # Find the matching prompt_id in the database (by content and session_id)
+        # Normalize whitespace: collapse all runs of whitespace (including \n, \r, \t) to a
+        # single space. Used for Python-side comparison so both DB text and JSONL text go
+        # through the same re.sub — SQL REPLACE can't collapse consecutive spaces reliably.
+        import re as _re
+
+        def _norm(text: str) -> str:
+            return _re.sub(r'\s+', ' ', (text or '').strip().lower())
+
+        prompt_text_norm = _norm(prompt_text)
+
+        # Find the matching prompt_id in the database (by content and session_id).
+        # Fetch recent unresponded prompts and compare in Python so both sides use
+        # identical whitespace normalization.
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Try exact match first — only unresponded rows.
-        # Rows already linked to a response belong to a previous turn
-        # (same text submitted again) — never touch those.
         cursor.execute("""
-            SELECT p.prompt_id FROM USER_PROMPT p
+            SELECT p.prompt_id, p.prompt FROM USER_PROMPT p
             LEFT JOIN RESPONSE r ON r.prompt_id = p.prompt_id
-            WHERE p.session_id = ? AND LOWER(TRIM(p.prompt)) = LOWER(TRIM(?))
-            AND r.message_id IS NULL
-            ORDER BY p.timestamp DESC LIMIT 1
-        """, (session_id, prompt_text))
+            WHERE p.session_id = ? AND r.message_id IS NULL
+            ORDER BY p.timestamp DESC LIMIT 30
+        """, (session_id,))
+        candidates = cursor.fetchall()
 
-        result = cursor.fetchone()
         db_prompt_id = None
         prompt_created = False
 
-        if result:
-            db_prompt_id = result[0]
-            logger.info(f"Found DB prompt_id: {db_prompt_id} (JSONL has: {jsonl_prompt_id})")
-        else:
-            # Try fuzzy match - search for prompts that contain the text or are contained within it
-            logger.info(f"Exact match not found for: \"{prompt_text[:50]}\", trying fuzzy match...")
+        # Pass 1 — normalized exact match
+        for cand_id, cand_text in candidates:
+            if _norm(cand_text) == prompt_text_norm:
+                db_prompt_id = cand_id
+                logger.info(f"Found DB prompt_id (norm-exact): {db_prompt_id} (JSONL has: {jsonl_prompt_id})")
+                break
 
-            # Try: prompt_text is a substring of DB prompt (unresponded only)
-            cursor.execute("""
-                SELECT p.prompt_id FROM USER_PROMPT p
-                LEFT JOIN RESPONSE r ON r.prompt_id = p.prompt_id
-                WHERE p.session_id = ? AND INSTR(LOWER(p.prompt), LOWER(?)) > 0
-                AND r.message_id IS NULL
-                ORDER BY p.timestamp DESC LIMIT 1
-            """, (session_id, prompt_text))
-            result = cursor.fetchone()
+        if not db_prompt_id:
+            logger.info(f"Normalized exact match not found for: \"{prompt_text[:50]}\", trying fuzzy match...")
+            # Pass 2 — fuzzy: one normalized text is a substring of the other
+            for cand_id, cand_text in candidates:
+                cand_norm = _norm(cand_text)
+                if prompt_text_norm in cand_norm or cand_norm in prompt_text_norm:
+                    db_prompt_id = cand_id
+                    logger.info(f"Fuzzy match found: {db_prompt_id}")
+                    break
 
-            if result:
-                db_prompt_id = result[0]
-                logger.info(f"Fuzzy match found (substring): {db_prompt_id}")
-            else:
-                # Try: DB prompt is a substring of prompt_text (unresponded only)
-                cursor.execute("""
-                    SELECT p.prompt_id, p.prompt FROM USER_PROMPT p
-                    LEFT JOIN RESPONSE r ON r.prompt_id = p.prompt_id
-                    WHERE p.session_id = ? AND INSTR(LOWER(?), LOWER(p.prompt)) > 0
-                    AND r.message_id IS NULL
-                    ORDER BY p.timestamp DESC LIMIT 1
-                """, (session_id, prompt_text))
-                result = cursor.fetchone()
+        if not db_prompt_id:
+            # No match found - create the prompt in the database with retry logic
+            logger.warning(f"No matching prompt found in DB, creating new record for: \"{prompt_text[:50]}\"")
 
-                if result:
-                    db_prompt_id = result[0]
-                    logger.info(f"Fuzzy match found (superstring): {db_prompt_id}")
-                else:
-                    # No match found - create the prompt in the database with retry logic
-                    logger.warning(f"No matching prompt found in DB, creating new record for: \"{prompt_text[:50]}\"")
+            prompt_rec = most_recent_pair.get("prompt_rec", {})
+            new_prompt_id = jsonl_prompt_id  # Use JSONL's prompt_id
 
-                    prompt_rec = most_recent_pair.get("prompt_rec", {})
-                    new_prompt_id = jsonl_prompt_id  # Use JSONL's prompt_id
+            # Retry logic for INSERT
+            import time
+            max_retries = 10
+            retry_delay = 0.3
+            insert_success = False
 
-                    # Retry logic for INSERT
-                    import time
-                    max_retries = 10
-                    retry_delay = 0.3
-                    insert_success = False
+            for attempt in range(max_retries):
+                try:
+                    # Get fresh connection for each attempt
+                    conn = get_db_connection()
+                    cursor = conn.cursor()
 
-                    for attempt in range(max_retries):
-                        try:
-                            # Get fresh connection for each attempt
-                            conn = get_db_connection()
-                            cursor = conn.cursor()
+                    cursor.execute("""
+                        INSERT INTO USER_PROMPT (
+                            prompt_id, session_id, uuid, parent_uuid, prompt, timestamp,
+                            entrypoint, claude_version, git_branch, permission_mode
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        new_prompt_id,
+                        session_id,
+                        prompt_rec.get("uuid", str(uuid.uuid4())),
+                        prompt_rec.get("parentUuid"),
+                        prompt_text,
+                        to_ist(prompt_rec.get("timestamp")),
+                        prompt_rec.get("entrypoint"),
+                        prompt_rec.get("version"),
+                        prompt_rec.get("gitBranch"),
+                        prompt_rec.get("permissionMode"),
+                    ))
+                    conn.commit()
+                    insert_success = True
+                    break
+                except Exception as e:
+                    if "database is locked" in str(e) and attempt < max_retries - 1:
+                        if attempt == 0:
+                            logger.warning(f"Database locked on prompt insert, retrying (up to {max_retries} attempts)")
+                        time.sleep(retry_delay)
+                        continue
+                    else:
+                        logger.error(f"Failed to insert prompt after {max_retries} attempts: {e}")
+                        # Fall through to use jsonl_prompt_id anyway
+                        break
 
-                            cursor.execute("""
-                                INSERT INTO USER_PROMPT (
-                                    prompt_id, session_id, uuid, parent_uuid, prompt, timestamp,
-                                    entrypoint, claude_version, git_branch, permission_mode
-                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            """, (
-                                new_prompt_id,
-                                session_id,
-                                prompt_rec.get("uuid", str(uuid.uuid4())),
-                                prompt_rec.get("parentUuid"),
-                                prompt_text,
-                                to_ist(prompt_rec.get("timestamp")),
-                                prompt_rec.get("entrypoint"),
-                                prompt_rec.get("version"),
-                                prompt_rec.get("gitBranch"),
-                                prompt_rec.get("permissionMode"),
-                            ))
-                            conn.commit()
-                            insert_success = True
-                            break
-                        except Exception as e:
-                            if "database is locked" in str(e) and attempt < max_retries - 1:
-                                if attempt == 0:
-                                    logger.warning(f"Database locked on prompt insert, retrying (up to {max_retries} attempts)")
-                                time.sleep(retry_delay)
-                                continue
-                            else:
-                                logger.error(f"Failed to insert prompt after {max_retries} attempts: {e}")
-                                # Fall through to use jsonl_prompt_id anyway
-                                break
-
-                    db_prompt_id = new_prompt_id
-                    prompt_created = True
-                    logger.info(f"Created new prompt record: {db_prompt_id}")
+            db_prompt_id = new_prompt_id
+            prompt_created = True
+            logger.info(f"Created new prompt record: {db_prompt_id}")
 
         if not prompt_created:
             # Store real JSONL ID in jsonl_prompt_id column.
