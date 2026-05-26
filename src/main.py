@@ -38,6 +38,7 @@ from src.handlers.session_end import handle_session_end
 from src.observations.writer import save_observation
 import json as _json
 import glob as _glob
+from ftfy import fix_text as _fix_text
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -294,7 +295,7 @@ def stop() -> None:
         # Get only the MOST RECENT prompt/response pair (excluding hook output)
         most_recent_pair = filtered_pairs[-1]
         jsonl_prompt_id = most_recent_pair["prompt_id"]
-        prompt_text = most_recent_pair.get("prompt", "")
+        prompt_text = _fix_text(most_recent_pair.get("prompt", ""))
         logger.info(f"Most recent pair: prompt_id={jsonl_prompt_id}, prompt=\"{prompt_text[:50]}\"")
 
         # Find the matching prompt_id in the database (by content and session_id)
