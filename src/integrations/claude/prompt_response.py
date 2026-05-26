@@ -327,7 +327,10 @@ def extract_prompt_response_pairs(events: List[Dict[str, Any]]) -> List[Dict[str
         if not merged["text"]:
             continue
         stop_reason = merged.get("stop_reason", "")
-        if stop_reason not in ("end_turn", "tool_use"):
+        # Allow null/empty stop_reason: Claude Code omits stop_reason when a user
+        # queues the next message while the current response is still streaming.
+        # Only reject explicitly invalid stop reasons.
+        if stop_reason and stop_reason not in ("end_turn", "tool_use"):
             continue
         sample_rec = msg_id_to_records[mid][0]
         pid = find_prompt_id(sample_rec, by_uuid)
