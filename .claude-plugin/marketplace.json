@@ -1,5 +1,6 @@
 {
   "name": "claude-telemetry",
+  "description": "Claude Telemetry - Observability stack for Claude — captures prompts, responses, tool usage, tokens, and observations across sessions.",
   "owner": {
     "name": "CloudByte-AI"
   },
