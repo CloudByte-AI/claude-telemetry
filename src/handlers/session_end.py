@@ -91,6 +91,26 @@ def handle_session_end():
         else:
             logger.warning("Config file not found, using default settings")
 
+        # ── Fallback: recover any missed stop-hook pairs ─────────────────────
+        # Covers the case where the user denied a tool / interrupted on the
+        # last turn of the session, preventing the stop hook from firing.
+        try:
+            from src.db.manager import get_db_connection
+            _conn = get_db_connection()
+            _row = _conn.cursor().execute(
+                "SELECT cwd FROM SESSION WHERE session_id = ? LIMIT 1", (session_id,)
+            ).fetchone()
+            if _row and _row[0]:
+                from src.core.recovery import process_missed_pairs
+                _counts = process_missed_pairs(session_id, _row[0])
+                _total = _counts.get("pass1", 0) + _counts.get("pass2", 0)
+                if _total > 0:
+                    logger.info(
+                        f"SessionEnd recovery: pass1={_counts.get('pass1',0)} pass2={_counts.get('pass2',0)}"
+                    )
+        except Exception as _re:
+            logger.warning(f"SessionEnd missed-pair recovery failed: {_re}")
+
         # Fetch all observations for this session (for logging only)
         observations = get_all_observations(session_id)
         logger.info(f"Found {len(observations)} observations for session {session_id}")

@@ -104,6 +104,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
     # claude_version : Claude Code version at time of prompt
     # git_branch     : active git branch at time of prompt
     # permission_mode: permission mode active for this prompt (default, auto, plan, etc.)
+    # interrupt_reason: NULL = normal, 'tool_use' = user denied tool, 'request' = user hit ESC
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS USER_PROMPT (
         prompt_id TEXT PRIMARY KEY,
@@ -117,6 +118,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
         claude_version TEXT,
         git_branch TEXT,
         permission_mode TEXT,
+        interrupt_reason TEXT,
         FOREIGN KEY (session_id) REFERENCES SESSION(session_id)
     );
     """)
@@ -301,6 +303,9 @@ def migrate_schema(conn: sqlite3.Connection) -> None:
     if "permission_mode" not in columns:
         cursor.execute("ALTER TABLE USER_PROMPT ADD COLUMN permission_mode TEXT")
         logger.info("Migration: added permission_mode column to USER_PROMPT")
+    if "interrupt_reason" not in columns:
+        cursor.execute("ALTER TABLE USER_PROMPT ADD COLUMN interrupt_reason TEXT")
+        logger.info("Migration: added interrupt_reason column to USER_PROMPT")
 
     cursor.execute("PRAGMA table_info(SESSION)")
     session_columns = [row[1] for row in cursor.fetchall()]

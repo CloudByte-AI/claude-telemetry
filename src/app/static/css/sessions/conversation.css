@@ -118,6 +118,12 @@
     background: rgba(0, 180, 255, 0.06);
 }
 
+.tl-icon.interrupt {
+    border-color: rgba(255, 60, 60, 0.4);
+    background: rgba(255, 60, 60, 0.06);
+    color: #ff3c3c;
+}
+
 .tl-body {
     flex: 1;
     min-width: 0;
@@ -150,6 +156,10 @@
 
 .tl-label.tool {
     color: var(--amber);
+}
+
+.tl-label.interrupt {
+    color: #ff3c3c;
 }
 
 .tl-label.resp {

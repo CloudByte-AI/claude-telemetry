@@ -5,17 +5,15 @@ Called when the user submits a prompt.
 Stores the prompt in the USER_PROMPT and RAW_LOG tables.
 Also reminds Claude to emit obs blocks in its response.
 
-FIXES APPLIED:
-  1. Race condition fix — polls transcript with retries + text verification
-     so we never grab a previous session's promptId.
-  2. parent_uuid fix — also read from transcript (not hook stdin) alongside promptId.
-  3. Removed dead imports: normalize_project_name, uuid (were imported but never used).
+prompt_id is always a generated UUID at insert time.
+The stop hook reads from JSONL and updates jsonl_prompt_id on the stored record.
+Prompts containing non-ASCII characters (emojis, special symbols) are deferred
+entirely to the stop hook to avoid text representation mismatches.
 """
 
 import json
 import os
 import sys
-import time
 from pathlib import Path
 
 from ftfy import fix_text
@@ -213,142 +211,6 @@ OBS_REMINDER = (
 
 
 # ---------------------------------------------------------------------------
-# FIX 1 + FIX 2: Extract BOTH promptId AND parentUuid from transcript
-#                with retry loop to beat the race condition.
-# ---------------------------------------------------------------------------
-
-def extract_ids_from_transcript(
-    transcript_path: str,
-    prompt_text: str,
-    max_retries: int = 30,
-    base_delay_ms: int = 150,
-) -> dict:
-    """
-    Extract promptId AND parentUuid from the JSONL transcript file.
-
-    WHY RETRIES ARE NEEDED (race condition):
-        The UserPromptSubmit hook fires BEFORE Claude finishes writing the
-        current user-message entry to the JSONL file.  Without retrying we
-        would read the file too early, miss the current entry, and return the
-        PREVIOUS message's promptId by mistake.
-
-    STRATEGY:
-        1. Poll the transcript file up to `max_retries` times with an
-           exponentially growing delay (60ms, 120ms, 180ms … capped at 500ms).
-           Total worst-case wait ≈ 3-4 seconds — acceptable, never misleading.
-        2. For each candidate user-message entry found (scanning in reverse),
-           verify that the entry's text actually contains the current prompt
-           text (first 80 chars match) before accepting its promptId.
-           This guarantees we never return a stale/previous promptId.
-
-    Args:
-        transcript_path : Path to the JSONL transcript file.
-        prompt_text     : The filtered user prompt text (used for verification).
-        max_retries     : Maximum number of read attempts.
-        base_delay_ms   : Base sleep time between retries in milliseconds.
-
-    Returns:
-        dict with keys:
-            "prompt_id"   → str  (empty string if not found)
-            "parent_uuid" → str | None
-    """
-    NOT_FOUND = {"prompt_id": "", "parent_uuid": None}
-
-    if not transcript_path:
-        logger.debug("No transcript path provided, skipping promptId extraction")
-        return NOT_FOUND
-
-    transcript = Path(transcript_path)
-
-    # Normalise the snippet we use for matching (strip whitespace, lowercase)
-    match_snippet = prompt_text.strip()[:80].lower() if prompt_text else ""
-
-    for attempt in range(1, max_retries + 1):
-
-        # ── wait before each attempt (including the first, tiny initial wait) ──
-        # First attempt: 60ms  — gives Claude time to flush the entry.
-        # Subsequent attempts grow linearly, capped at 500ms.
-        sleep_ms = min(base_delay_ms * attempt, 500)
-        time.sleep(sleep_ms / 1000.0)
-
-        if not transcript.exists():
-            logger.debug(
-                f"Attempt {attempt}/{max_retries}: transcript not found yet: {transcript_path}"
-            )
-            continue
-
-        try:
-            with open(transcript, "r", encoding="utf-8") as f:
-                lines = f.readlines()
-
-            # Scan in reverse — the most-recent user message is near the end
-            for raw_line in reversed(lines):
-                raw_line = raw_line.strip()
-                if not raw_line:
-                    continue
-
-                try:
-                    event = json.loads(raw_line)
-                except json.JSONDecodeError:
-                    continue
-
-                if event.get("type") != "user":
-                    continue
-
-                if event.get("isMeta"):
-                    continue  # skip synthetic resume messages — never return their ID
-
-                prompt_id = event.get("promptId") or event.get("prompt_id")
-                if not prompt_id:
-                    continue  # user entry without an id — skip
-
-                # ── Text verification — never return a stale promptId ────────
-                # Build the text of this transcript entry so we can compare
-                # it against the current prompt.
-                if match_snippet:
-                    content_items = (
-                        event.get("message", {}).get("content", [])
-                        if isinstance(event.get("message"), dict)
-                        else []
-                    )
-                    entry_text = " ".join(
-                        item.get("text", "")
-                        for item in content_items
-                        if isinstance(item, dict) and item.get("type") == "text"
-                    ).strip().lower()
-
-                    if match_snippet not in entry_text:
-                        # Text mismatch — skip this entry and keep scanning older ones.
-                        # Do NOT break — on session resume the current entry may not
-                        # be written yet, so older entries with matching text exist.
-                        logger.debug(
-                            f"Attempt {attempt}/{max_retries}: "
-                            f"promptId {prompt_id} text mismatch, skipping"
-                        )
-                        continue
-
-                # ── Match confirmed ──────────────────────────────────────────
-                parent_uuid = event.get("parentUuid") or event.get("parent_uuid")
-                logger.info(
-                    f"Attempt {attempt}/{max_retries}: "
-                    f"Found promptId={prompt_id}, parentUuid={parent_uuid}"
-                )
-                return {"prompt_id": prompt_id, "parent_uuid": parent_uuid}
-
-        except Exception as e:
-            logger.warning(
-                f"Attempt {attempt}/{max_retries}: error reading transcript: {e}"
-            )
-
-    # All retries exhausted
-    logger.warning(
-        f"Could not find current promptId in transcript after {max_retries} attempts. "
-        f"Prompt will be stored without a promptId."
-    )
-    return NOT_FOUND
-
-
-# ---------------------------------------------------------------------------
 # Text / content helpers
 # ---------------------------------------------------------------------------
 
@@ -404,6 +266,11 @@ def filter_system_messages(content: str) -> str:
     )
 
     return content.strip()
+
+
+def _has_special_chars(text: str) -> bool:
+    """Return True if text contains emojis or non-ASCII special characters."""
+    return any(ord(c) > 127 for c in text)
 
 
 def extract_user_text_from_hook_data(hook_data: dict) -> str:
@@ -514,9 +381,6 @@ def handle_user_prompt():
             or hook_data.get("sessionId")
             or os.environ.get("CLAUDE_SESSION_ID")
         )
-        transcript_path = (
-            hook_data.get("transcript_path") or hook_data.get("transcriptPath")
-        )
         cwd = (
             hook_data.get("cwd")
             or hook_data.get("directory")
@@ -530,6 +394,21 @@ def handle_user_prompt():
         if session_id:
             retry_pending_tasks(session_id)
 
+        # ── Fallback: recover any missed stop-hook pairs ─────────────────────
+        # Covers mid-session tool denial / interrupt where stop hook didn't fire.
+        # Runs before storing the new prompt so the previous turn is recovered first.
+        if session_id and cwd:
+            try:
+                from src.core.recovery import process_missed_pairs
+                _counts = process_missed_pairs(session_id, cwd)
+                _total = _counts.get("pass1", 0) + _counts.get("pass2", 0)
+                if _total > 0:
+                    logger.info(
+                        f"UserPromptSubmit recovery: pass1={_counts.get('pass1',0)} pass2={_counts.get('pass2',0)}"
+                    )
+            except Exception as _re:
+                logger.warning(f"UserPromptSubmit missed-pair recovery failed: {_re}")
+
         # ── Extract clean prompt text (filter system messages) ───────────────
         prompt_text = fix_text(extract_user_text_from_hook_data(hook_data))
 
@@ -538,35 +417,32 @@ def handle_user_prompt():
             print(json.dumps({"status": "error", "message": "No prompt content"}))
             return
 
-        # ── FIX 1 + FIX 2: Read promptId AND parentUuid from transcript ──────
-        # The hook stdin does NOT contain these fields.  We poll the transcript
-        # file with retries to guarantee we get the CURRENT message's IDs and
-        # never a stale/previous one.
+        # ── Defer prompts with emojis / special characters ───────────────────
+        # Hook text and JSONL canonical text can differ when non-ASCII chars are
+        # present (different unicode normalisation, ftfy transforms, etc.).
+        # Skip the DB insert here; the stop hook reads directly from JSONL and
+        # will insert the prompt once with the correct promptId.
+        if _has_special_chars(prompt_text):
+            logger.info(
+                f"Prompt contains non-ASCII/emoji characters — deferring DB insert to stop hook "
+                f"(length={len(prompt_text)}, preview={prompt_text[:50]!r})"
+            )
+            if session_id and cwd:
+                ensure_session_initialized(session_id, cwd)
+            print(json.dumps({
+                "status": "deferred",
+                "prompt_id": None,
+                "hookSpecificOutput": {
+                    "hookEventName": "UserPromptSubmit",
+                    "additionalContext": OBS_REMINDER,
+                },
+            }))
+            return
+
+        # prompt_id is always None here — a UUID is generated by process_user_prompt.
+        # The stop hook reads from JSONL and updates jsonl_prompt_id on the stored record.
         prompt_id = None
         parent_uuid = None
-
-        if transcript_path:
-            logger.info("Reading promptId + parentUuid from transcript (with retries)...")
-            ids = extract_ids_from_transcript(
-                transcript_path=transcript_path,
-                prompt_text=prompt_text,
-                max_retries=10,     # up to ~1 second total wait
-                base_delay_ms=100,  # 100ms, 200ms, 300ms… capped at 500ms
-            )
-            prompt_id = ids["prompt_id"] or None
-            parent_uuid = ids["parent_uuid"]
-
-            if prompt_id:
-                logger.info(f"Resolved promptId={prompt_id}, parentUuid={parent_uuid}")
-            else:
-                logger.warning(
-                    "promptId could not be resolved from transcript. "
-                    "Prompt will be stored without one."
-                )
-        else:
-            logger.warning(
-                "No transcript_path in hook data — cannot resolve promptId or parentUuid."
-            )
         
         # ── Ensure session record exists in DB ───────────────────────────────
         if session_id and cwd:

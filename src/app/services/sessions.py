@@ -55,15 +55,21 @@ def get_session_detail_context(session_id: str) -> dict | None:
         tool_tok_agg = sq.get_prompt_tool_tokens_agg(pid)
 
         total_tool_count += len(tool_list)
+        pd = dict(p)
         turns.append({
-            "index":           i + 1,
-            "prompt":          p["prompt"],
-            "timestamp":       p["timestamp"],
-            "prompt_id":       pid,
-            "tool_list":       tool_list,
-            "response":        dict(response_row)    if response_row    else None,
-            "tokens":          dict(tokens_row)      if tokens_row      else None,
-            "tool_tokens_agg": dict(tool_tok_agg)    if tool_tok_agg    else None,
+            "index":            i + 1,
+            "prompt":           pd.get("prompt"),
+            "timestamp":        pd.get("timestamp"),
+            "prompt_id":        pid,
+            "tool_list":        tool_list,
+            "response":         dict(response_row) if response_row else None,
+            "tokens":           dict(tokens_row)   if tokens_row   else None,
+            "tool_tokens_agg":  dict(tool_tok_agg) if tool_tok_agg else None,
+            "interrupt_reason": pd.get("interrupt_reason"),
+            "entrypoint":       pd.get("entrypoint"),
+            "claude_version":   pd.get("claude_version"),
+            "git_branch":       pd.get("git_branch"),
+            "permission_mode":  pd.get("permission_mode"),
         })
 
     turns.reverse()

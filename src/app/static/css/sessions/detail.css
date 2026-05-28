@@ -97,6 +97,54 @@
     }
 }
 
+/* ── Session Titles ── */
+.session-titles {
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.session-custom-title {
+    font-size: 17px;
+    font-weight: 500;
+    color: var(--text);
+    line-height: 1.3;
+}
+
+.session-ai-title {
+    font-size: 13px;
+    color: var(--text-dim);
+    font-style: italic;
+}
+
+/* ── Interrupt Badge ── */
+.interrupt-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    border: 1px solid;
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.interrupt-badge.interrupt-tool_use {
+    color: #ff3c3c;
+    background: rgba(255, 60, 60, 0.06);
+    border-color: rgba(255, 60, 60, 0.25);
+}
+
+.interrupt-badge.interrupt-request {
+    color: #fe8c00;
+    background: rgba(254, 140, 0, 0.06);
+    border-color: rgba(254, 140, 0, 0.25);
+}
+
 .tp-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);

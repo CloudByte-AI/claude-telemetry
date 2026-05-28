@@ -73,7 +73,7 @@ def setup() -> None:
         config_file = get_config_file()
         if not config_file.exists():
             default_config = {
-                "version": "0.1.28",
+                "version": "0.1.29",
                 "created_at": get_now_ist_iso(),
                 "settings": {
                     "log_level": "INFO",
@@ -364,8 +364,9 @@ def stop() -> None:
                     cursor.execute("""
                         INSERT INTO USER_PROMPT (
                             prompt_id, session_id, uuid, parent_uuid, prompt, timestamp,
-                            entrypoint, claude_version, git_branch, permission_mode
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            entrypoint, claude_version, git_branch, permission_mode,
+                            jsonl_prompt_id
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         new_prompt_id,
                         session_id,
@@ -377,6 +378,7 @@ def stop() -> None:
                         prompt_rec.get("version"),
                         prompt_rec.get("gitBranch"),
                         prompt_rec.get("permissionMode"),
+                        new_prompt_id,  # jsonl_prompt_id = same as prompt_id in fallback
                     ))
                     conn.commit()
                     insert_success = True
