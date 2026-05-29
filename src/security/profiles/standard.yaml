@@ -1,0 +1,92 @@
+# Standard security profile — recommended for most developers.
+# Philosophy: high confidence detections only. Avoids patterns that
+# produce excessive noise in normal developer code.
+#
+# NOT in standard (moved to strict):
+#   - KeywordDetector    : catches "api_key = getenv(...)" — too noisy in dev code
+#   - INLINE_PASSWORD    : catches "password = config.value" — too many legitimate uses
+#   - BEARER_TOKEN       : catches every test/mock Authorization header
+#   - HexHighEntropy 3.0 : catches UUIDs, MD5 hashes in comments at this threshold
+#
+# The detectors: section controls BOTH detect-secrets library detectors AND
+# built-in custom patterns (AI keys, DB strings, payment keys, etc.).
+plan: standard
+enabled: true
+scope: both
+
+# ── Shared defaults ──────────────────────────────────────────────────────────
+
+detectors:
+  # ── detect-secrets library detectors ─────────────────────────────────────
+  AWSKeyDetector: true
+  ArtifactoryDetector: true
+  AzureStorageKeyDetector: true
+  BasicAuthDetector: true           # http://user:pass@host — unambiguous
+  CloudantDetector: true
+  DiscordBotTokenDetector: true
+  GitHubTokenDetector: true
+  GitLabTokenDetector: true
+  IbmCloudIamDetector: false
+  IbmCosHmacDetector: false
+  IpPublicDetector: false           # too many FPs in code — opt-in only
+  JwtTokenDetector: true
+  KeywordDetector: false            # catches variable assignments — noisy in dev code
+  MailchimpDetector: true
+  NpmDetector: true
+  OpenAIDetector: true
+  PrivateKeyDetector: true
+  PypiTokenDetector: true
+  SendGridDetector: true
+  SlackDetector: true
+  SoftlayerDetector: false
+  SquareOAuthDetector: true
+  StripeDetector: true
+  TelegramBotTokenDetector: true
+  TwilioKeyDetector: true
+
+  # ── Built-in custom pattern controls ────────────────────────────────────
+  ANTHROPIC_KEY: true
+  GCP_API_KEY: true
+  GROQ_API_KEY: true
+  HUGGING_FACE_TOKEN: true
+  REPLICATE_TOKEN: true
+  COHERE_API_KEY: true
+  MISTRAL_API_KEY: true
+  DIGITAL_OCEAN_TOKEN: true
+  CLOUDFLARE_API_TOKEN: true
+  MAPBOX_TOKEN: true
+  RAZORPAY_KEY: true
+  PAYU_KEY: true
+  SENTRY_DSN: true
+  PYPI_TOKEN: true
+  DB_CONNECTION: true               # mongodb://, postgres://, etc. with embedded credentials
+  JDBC_CONNECTION: true
+  FIREBASE_URL: true
+  INLINE_PASSWORD: false            # catches "password = getenv(...)" — noisy in dev code
+  BEARER_TOKEN: false               # catches test/mock auth headers — noisy in dev code
+
+# Entropy: base64 only at standard threshold.
+# Hex entropy disabled — at 3.5 it still catches UUIDs and test hashes frequently.
+# Enable in strict for maximum coverage.
+entropy:
+  enabled: true
+  hex_limit: 3.5                    # raised from 3.0 — fewer FPs on UUIDs and hex constants
+  base64_limit: 4.5
+
+pii:
+  email: false
+  phone: false
+
+custom_patterns: []
+keyword_blocklist: []
+
+# ── Optional per-scan-point overrides ────────────────────────────────────────
+# Uncomment to apply different settings per scan point.
+
+# prompt:
+#   pii:
+#     email: true          # stricter PII checks on prompts
+
+# response:
+#   entropy:
+#     enabled: false       # skip entropy on Claude's responses to reduce noise

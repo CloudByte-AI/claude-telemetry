@@ -1,0 +1,96 @@
+# Strict security profile — maximum protection. Every detector on.
+# All PII types, tightest entropy thresholds.
+#
+# Includes detectors intentionally excluded from standard due to noise:
+#   - KeywordDetector    : catches "api_key = value" style assignments
+#   - INLINE_PASSWORD    : catches password = "..." patterns
+#   - BEARER_TOKEN       : catches all Authorization: Bearer headers
+#   - HexHighEntropy 2.5 : catches aggressively, including hash-looking values
+#
+# The detectors: section controls BOTH detect-secrets library detectors AND
+# built-in custom patterns (AI keys, DB strings, payment keys, etc.).
+plan: strict
+enabled: true
+scope: both
+
+# ── Shared defaults ──────────────────────────────────────────────────────────
+
+detectors:
+  # ── detect-secrets library detectors ─────────────────────────────────────
+  AWSKeyDetector: true
+  ArtifactoryDetector: true
+  AzureStorageKeyDetector: true
+  BasicAuthDetector: true
+  CloudantDetector: true
+  DiscordBotTokenDetector: true
+  GitHubTokenDetector: true
+  GitLabTokenDetector: true
+  IbmCloudIamDetector: true
+  IbmCosHmacDetector: true
+  IpPublicDetector: false       # still off even in strict — too many FPs in code
+  JwtTokenDetector: true
+  KeywordDetector: true
+  MailchimpDetector: true
+  NpmDetector: true
+  OpenAIDetector: true
+  PrivateKeyDetector: true
+  PypiTokenDetector: true
+  SendGridDetector: true
+  SlackDetector: true
+  SoftlayerDetector: true
+  SquareOAuthDetector: true
+  StripeDetector: true
+  TelegramBotTokenDetector: true
+  TwilioKeyDetector: true
+
+  # ── Built-in custom pattern controls ─────────────────────────────────────
+  ANTHROPIC_KEY: true
+  GCP_API_KEY: true
+  GROQ_API_KEY: true
+  HUGGING_FACE_TOKEN: true
+  REPLICATE_TOKEN: true
+  COHERE_API_KEY: true
+  MISTRAL_API_KEY: true
+  DIGITAL_OCEAN_TOKEN: true
+  CLOUDFLARE_API_TOKEN: true
+  MAPBOX_TOKEN: true
+  RAZORPAY_KEY: true
+  PAYU_KEY: true
+  SENTRY_DSN: true
+  PYPI_TOKEN: true
+  DB_CONNECTION: true
+  JDBC_CONNECTION: true
+  FIREBASE_URL: true
+  INLINE_PASSWORD: true
+  BEARER_TOKEN: true
+
+entropy:
+  enabled: true
+  hex_limit: 2.5
+  base64_limit: 4.0
+
+pii:
+  email: true
+  phone: true
+
+custom_patterns: []
+keyword_blocklist: []
+
+# ── Per-scan-point: prompts get max strictness, responses relax entropy ──────
+prompt:
+  entropy:
+    enabled: true
+    hex_limit: 2.5
+    base64_limit: 4.0
+  pii:
+    email: true
+    phone: true
+
+response:
+  entropy:
+    enabled: true
+    hex_limit: 3.0       # looser — Claude's own code output has more variable-like strings
+    base64_limit: 4.5
+  pii:
+    email: true
+    phone: false         # phone numbers appear legitimately in Claude responses

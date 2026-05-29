@@ -417,6 +417,72 @@ def handle_user_prompt():
             print(json.dumps({"status": "error", "message": "No prompt content"}))
             return
 
+        # ── Security scan — runs before any DB write ─────────────────────────
+        # If scanning is enabled and a finding is detected, the prompt is
+        # blocked immediately. process_user_prompt() is never called so the
+        # raw secret is never written to USER_PROMPT. All findings are logged
+        # to SECURITY_SCAN_EVENT with the masked version of the prompt.
+        try:
+            # Ensure SECURITY_SCAN_EVENT table exists before writing.
+            # migrate_schema() only runs in stop() by default — run it here
+            # too so existing installs don't miss the first scan events.
+            try:
+                from src.db.schema import migrate_schema
+                from src.db.manager import get_db_manager
+                migrate_schema(get_db_manager().get_connection())
+            except Exception as _me:
+                logger.debug(f"Security migration check skipped: {_me}")
+
+            from src.security.config import load_security_config
+            from src.security.scanner import scan_text
+            from src.security.masker import mask_text
+            from src.security.db_writer import write_finding
+
+            _sec_cfg = load_security_config(cwd=cwd)
+            if _sec_cfg.enabled and prompt_text:
+                _sec_result = scan_text(prompt_text, _sec_cfg.prompt_config)
+                if _sec_result.findings:
+                    _masked = mask_text(prompt_text, _sec_result.findings)
+                    _sec_result.masked_text = _masked
+                    write_finding(
+                        session_id=session_id or "unknown",
+                        scan_target="prompt",
+                        result=_sec_result,
+                        blocked=True,
+                        masked_text=_masked,
+                    )
+                    logger.info(
+                        f"Security scan: {len(_sec_result.findings)} finding(s) — blocking prompt "
+                        f"[{_sec_result.scan_strategy}, {_sec_result.scan_ms}ms]"
+                    )
+                    _finding_lines = "\n".join(
+                        f"  • {f.detector} [{f.severity}] — {f.detector_src}"
+                        for f in _sec_result.findings
+                    )
+                    _reason = (
+                        f"⚠️  Sensitive data detected and masked automatically!\n\n"
+                        f"Detected:\n{_finding_lines}\n\n"
+                        f"📊 Scanned {_sec_result.line_count} lines in {_sec_result.scan_ms}ms"
+                        f" [strategy: {_sec_result.scan_strategy}]\n\n"
+                        f"✅ Your prompt has been sanitized. Copy the masked version below to resubmit:\n\n"
+                        f"{_masked}"
+                    )
+                    _system_msg = (
+                        f"⚠️ {len(_sec_result.findings)} sensitive item(s) detected and blocked."
+                        f" Scanned {_sec_result.line_count} lines in {_sec_result.scan_ms}ms."
+                        f" Event logged to telemetry."
+                    )
+                    print(json.dumps({
+                        "decision": "block",
+                        "suppressOriginalPrompt": True,
+                        "reason": _reason,
+                        "systemMessage": _system_msg,
+                    }))
+                    return
+        except Exception as _sec_err:
+            # Scan failure must never block the user — log and continue
+            logger.warning(f"Security scan error (non-fatal, prompt proceeding): {_sec_err}")
+
         # ── Defer prompts with emojis / special characters ───────────────────
         # Hook text and JSONL canonical text can differ when non-ASCII chars are
         # present (different unicode normalisation, ftfy transforms, etc.).

@@ -1,0 +1,68 @@
+# Minimal security profile — basic cloud key + critical token protection only.
+# No PII scanning. Prompts only. Catches the most critical credentials.
+#
+# The detectors: section controls BOTH detect-secrets library detectors AND
+# built-in custom patterns (AI keys, DB strings, payment keys, etc.).
+plan: minimal
+enabled: true
+scope: prompt_only
+
+detectors:
+  # ── detect-secrets library detectors ─────────────────────────────────────
+  AWSKeyDetector: true
+  ArtifactoryDetector: false
+  AzureStorageKeyDetector: false
+  BasicAuthDetector: false
+  CloudantDetector: false
+  DiscordBotTokenDetector: false
+  GitHubTokenDetector: true
+  GitLabTokenDetector: true
+  IbmCloudIamDetector: false
+  IbmCosHmacDetector: false
+  IpPublicDetector: false
+  JwtTokenDetector: true
+  KeywordDetector: false
+  MailchimpDetector: false
+  NpmDetector: false
+  OpenAIDetector: true
+  PrivateKeyDetector: true
+  PypiTokenDetector: false
+  SendGridDetector: false
+  SlackDetector: false
+  SoftlayerDetector: false
+  SquareOAuthDetector: false
+  StripeDetector: true
+  TelegramBotTokenDetector: false
+  TwilioKeyDetector: false
+
+  # ── Built-in custom pattern controls ────────────────────────────────────
+  # Minimal: only the most critical AI + payment keys on; everything else off
+  ANTHROPIC_KEY: true
+  GCP_API_KEY: true             # top-3 cloud provider, AIza key is distinctive
+  GROQ_API_KEY: false
+  HUGGING_FACE_TOKEN: false
+  REPLICATE_TOKEN: false
+  COHERE_API_KEY: false
+  MISTRAL_API_KEY: false
+  DIGITAL_OCEAN_TOKEN: false
+  CLOUDFLARE_API_TOKEN: false
+  MAPBOX_TOKEN: false
+  RAZORPAY_KEY: true
+  PAYU_KEY: false
+  SENTRY_DSN: false
+  PYPI_TOKEN: false
+  DB_CONNECTION: false
+  JDBC_CONNECTION: false
+  FIREBASE_URL: false
+  INLINE_PASSWORD: false
+  BEARER_TOKEN: false
+
+entropy:
+  enabled: false
+
+pii:
+  email: false
+  phone: false
+
+custom_patterns: []
+keyword_blocklist: []

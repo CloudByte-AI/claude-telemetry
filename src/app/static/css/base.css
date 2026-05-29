@@ -59,6 +59,14 @@
     --shadow-md:   rgba(0, 0, 0, 0.5) 0px 4px 12px;
 }
 
+/* ── Global custom scrollbars — replaces browser default on all elements ── */
+::-webkit-scrollbar              { width: 5px; height: 5px; }
+::-webkit-scrollbar-track        { background: transparent; }
+::-webkit-scrollbar-thumb        { background: var(--border-alt); }
+::-webkit-scrollbar-thumb:hover  { background: var(--text-dim); }
+::-webkit-scrollbar-corner       { background: transparent; }
+*  { scrollbar-width: thin; scrollbar-color: var(--border-alt) transparent; }
+
 /* ── Base ── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -107,7 +115,17 @@ body {
 }
 .logo-mark span { color: var(--accent); }
 
-.sidebar-nav { padding: 20px 10px; flex: 1; overflow-y: auto; }
+.sidebar-nav {
+    padding: 20px 10px;
+    flex: 1;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+}
+.sidebar-nav::-webkit-scrollbar       { width: 4px; }
+.sidebar-nav::-webkit-scrollbar-track { background: transparent; }
+.sidebar-nav::-webkit-scrollbar-thumb { background: var(--border); border-radius: 0; }
+.sidebar-nav::-webkit-scrollbar-thumb:hover { background: var(--border-alt); }
 
 .nav-group { margin-bottom: 24px; }
 .nav-label {

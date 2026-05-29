@@ -1,0 +1,319 @@
+{% extends "base/index.html" %}
+{% block title %}Security Reports — CloudByte{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/css/security/events.css?v=5.6">
+{% endblock %}
+
+{% block content %}
+
+<!-- ── Header ───────────────────────────────────────────── -->
+<div class="er-head">
+    <div class="er-head-left">
+        <span class="er-eyebrow">◈ Security Audit Log</span>
+        <h1 class="er-title">Threat Report</h1>
+        {% if stats and stats.total %}
+        <span class="er-subtitle">{{ stats.total }} event{{ 's' if stats.total != 1 else '' }} · {{ period }} window</span>
+        {% else %}
+        <span class="er-subtitle">No events recorded</span>
+        {% endif %}
+    </div>
+    <div class="er-head-right">
+        <nav class="er-period-nav">
+            <a href="/security/events?period=today" class="er-pn {% if period == 'today' %}er-pn-on{% endif %}">Today</a>
+            <a href="/security/events?period=7d"    class="er-pn {% if period == '7d'    %}er-pn-on{% endif %}">7d</a>
+            <a href="/security/events?period=30d"   class="er-pn {% if period == '30d'   %}er-pn-on{% endif %}">30d</a>
+            <a href="/security/events?period=all"   class="er-pn {% if period == 'all'   %}er-pn-on{% endif %}">All</a>
+        </nav>
+        <a href="/security" class="er-back">← Settings</a>
+    </div>
+</div>
+
+{% if not stats or not stats.total %}
+<!-- ── Empty state ──────────────────────────────────────── -->
+<div class="er-empty">
+    <div class="er-empty-icon">
+        <svg viewBox="0 0 80 80" fill="none" width="56" height="56">
+            <path d="M40 8L12 20v22c0 17.6 12 33 28 37.6C56 74.8 68 59.6 68 42V20L40 8z"
+                  stroke="currentColor" stroke-width="1.5" fill="currentColor" fill-opacity="0.04"/>
+            <path d="M28 40l8 8 16-16" stroke="currentColor" stroke-width="2" stroke-linecap="square"/>
+        </svg>
+    </div>
+    <div class="er-empty-title">No security events in this period</div>
+    <div class="er-empty-desc">
+        Events appear here when scanning blocks a prompt or detects a secret in a response.
+        Try a different time period or <a href="/security" class="er-empty-link">configure scanning</a>.
+    </div>
+</div>
+
+{% else %}
+
+<!-- ── Security Terminal: Status + Briefing ──────────────── -->
+<div class="er-briefing">
+    <div class="er-term-bar">
+        <div class="er-term-wdots">
+            <span class="er-wdot er-wdot-r"></span>
+            <span class="er-wdot er-wdot-y"></span>
+            <span class="er-wdot er-wdot-g"></span>
+        </div>
+        <span class="er-term-title">cloudbyte-security</span>
+        <span class="er-term-period">{{ period }}</span>
+    </div>
+    <div class="er-term-body" data-period="{{ period }}">
+        <div class="er-term-prompt">
+            <span class="er-term-ps">›</span>
+            <span class="er-term-cmd" id="er-term-cmd"></span><span class="er-term-cursor" id="er-term-cursor">▋</span>
+        </div>
+        <div class="er-term-output" id="er-term-output">
+
+            <div class="er-term-posture er-term-fade">
+                <span class="er-term-posture-key">POSTURE</span>
+                <span class="er-term-posture-bar">{% for i in range(posture_level) %}<span class="er-posture-fill-{{ posture_level }}">■</span>{% endfor %}{% for i in range(5 - posture_level) %}<span class="er-posture-empty">□</span>{% endfor %}</span>
+                <span class="er-term-posture-name er-posture-text-{{ posture_level }}">{{ posture_label }}</span>
+            </div>
+
+            <div class="er-term-stat er-term-fade">
+                <span class="er-term-stat-key">TOTAL SCANS</span>
+                <span class="er-term-stat-val">{{ stats.total | default(0) }}</span>
+                <span class="er-term-stat-sub">{{ period }} window</span>
+            </div>
+            <div class="er-term-stat er-term-fade">
+                <span class="er-term-stat-key">BLOCKED</span>
+                <span class="er-term-stat-val er-term-stat-red">{{ stats.blocked | default(0) }}</span>
+                <span class="er-term-stat-sub">prompts stopped</span>
+            </div>
+            <div class="er-term-stat er-term-fade">
+                <span class="er-term-stat-key">RESP FINDINGS</span>
+                <span class="er-term-stat-val er-term-stat-amber">{{ stats.response_hits | default(0) }}</span>
+                <span class="er-term-stat-sub">detected in replies</span>
+            </div>
+            <div class="er-term-stat er-term-fade">
+                <span class="er-term-stat-key">BLOCK RATE</span>
+                <span class="er-term-stat-val">{{ stats.blocked_pct | default(0) }}%</span>
+                <span class="er-term-stat-sub">of all scans</span>
+            </div>
+
+            {% if security_insights %}
+            <div class="er-term-sep er-term-fade"></div>
+
+            {% for item in security_insights %}
+            <div class="er-term-line er-term-line-{{ item.level }} er-term-fade">
+                <span class="er-term-tag">[{{ item.tag }}]</span>
+                <span class="er-term-line-text">{{ item.text | safe }}</span>
+            </div>
+            {% endfor %}
+
+            <div class="er-term-done er-term-fade">
+                <span class="er-term-ps">›</span>
+                <span>{{ security_insights | length }} insight{{ 's' if security_insights | length != 1 else '' }} · {{ period }} window · done</span>
+            </div>
+            {% endif %}
+
+        </div>
+    </div>
+</div>
+
+<!-- ── Top grid: threats + sparkline ─────────────────────── -->
+<div class="er-top-grid">
+
+    <!-- Threat breakdown -->
+    <div class="er-panel">
+        <div class="er-panel-title">Top Threats · {{ period }}</div>
+        {% if threat_breakdown %}
+        <div class="er-threats">
+            {% for item in threat_breakdown %}
+            <div class="er-threat-row">
+                <div class="er-threat-name">{{ item.display_name }}</div>
+                <div class="er-threat-track">
+                    <div class="er-threat-fill" style="--er-w: {{ item.pct }}%"></div>
+                </div>
+                <div class="er-threat-count">{{ item.count }}</div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="er-panel-empty">No findings in this period.</div>
+        {% endif %}
+    </div>
+
+    <!-- Activity bar chart -->
+    <div class="er-panel">
+        <div class="er-panel-title">
+            Activity · {{ period }}
+            <span class="er-chart-legend">
+                <span class="er-leg er-leg-b"></span>Blocked
+                <span class="er-leg er-leg-d"></span>Detected
+            </span>
+        </div>
+        {% if chart_data %}
+        <div id="er-activity-chart" data-chart='{{ chart_data | tojson }}'></div>
+        {% else %}
+        <div class="er-panel-empty">No activity data for this period.</div>
+        {% endif %}
+    </div>
+
+</div>
+
+
+<!-- ── Tabs ────────────────────────────────────────────────── -->
+<div class="er-tabs">
+    <button class="er-tab er-tab-on" data-tab="all" onclick="switchTab('all', this)">
+        All
+        <span class="er-tab-n">{{ events | length }}</span>
+    </button>
+    <button class="er-tab" data-tab="blocked" onclick="switchTab('blocked', this)">
+        Blocked Prompts
+        <span class="er-tab-n er-tab-n-red">{{ blocked_count }}</span>
+    </button>
+    <button class="er-tab" data-tab="detected" onclick="switchTab('detected', this)">
+        Detected in Response
+        <span class="er-tab-n er-tab-n-amber">{{ detected_count }}</span>
+    </button>
+</div>
+
+<!-- ── Event list ─────────────────────────────────────────── -->
+{% if events %}
+
+<div class="er-list">
+
+    <!-- Column header -->
+    <div class="er-list-head">
+        <div>STATUS</div>
+        <div>TARGET</div>
+        <div>DETECTORS</div>
+        <div class="er-th-r">HITS</div>
+        <div>TIME</div>
+        <div class="er-th-r">MS</div>
+        <div></div>
+    </div>
+
+    <div id="er-tab-empty" class="er-tab-empty" style="display:none;">No events in this category.</div>
+
+    {% for ev in events %}
+    <div class="er-event {% if ev.blocked %}er-event-blocked{% else %}er-event-detected{% endif %}"
+         id="evt-{{ ev.event_id }}"
+         data-blocked="{{ '1' if ev.blocked else '0' }}">
+
+        <!-- Row -->
+        <div class="er-row" onclick="toggleEvent('{{ ev.event_id }}')">
+            <div>
+                <span class="er-badge {% if ev.blocked %}er-badge-blocked{% else %}er-badge-detected{% endif %}">
+                    {{ ev.status_label }}
+                </span>
+            </div>
+            <div>
+                <span class="er-target {% if ev.scan_target == 'prompt' %}er-target-prompt{% else %}er-target-resp{% endif %}">
+                    {{ ev.scan_target }}
+                </span>
+            </div>
+            <div class="er-dets">
+                {% for name in ev.top_detectors %}
+                <span class="er-det">{{ name }}</span>
+                {% endfor %}
+                {% if ev.extra_count > 0 %}
+                <span class="er-det er-det-more">+{{ ev.extra_count }}</span>
+                {% endif %}
+            </div>
+            <div class="er-th-r">
+                <span class="er-hits">{{ ev.finding_count }}</span>
+            </div>
+            <div>
+                <span class="er-time" title="{{ ev.timestamp }}">{{ ev.time_ago }}</span>
+            </div>
+            <div class="er-th-r">
+                <span class="er-ms">{{ ev.scan_ms }}ms</span>
+            </div>
+            <div class="er-chev-wrap">
+                <span class="er-chev" id="chev-{{ ev.event_id }}">▼</span>
+            </div>
+        </div>
+
+        <!-- Expanded detail -->
+        <div class="er-detail" id="det-{{ ev.event_id }}" style="display:none;">
+            <div class="er-detail-grid">
+
+                <!-- Findings -->
+                <div>
+                    <div class="er-detail-heading">◈ Detections</div>
+                    {% if ev.findings_parsed %}
+                    {% for f in ev.findings_parsed %}
+                    <div class="er-finding">
+                        <div class="er-finding-left">
+                            <span class="er-finding-name">{{ f.detector | replace('_', ' ') | title }}</span>
+                            <span class="er-sev er-sev-{{ (f.severity | default('HIGH')) | lower }}">{{ f.severity | default('HIGH') }}</span>
+                        </div>
+                        <code class="er-masked-val">{{ f.masked_value }}</code>
+                        {% if f.line_number %}<span class="er-lineno">L{{ f.line_number }}</span>{% endif %}
+                    </div>
+                    {% endfor %}
+                    {% else %}
+                    <div class="er-detail-empty">No finding details stored.</div>
+                    {% endif %}
+                </div>
+
+                <!-- Masked content -->
+                <div>
+                    {% if ev.masked_text %}
+                    <div class="er-detail-heading">◈ Masked {{ ev.scan_target | capitalize }}</div>
+                    <div class="er-masked-note">Secrets replaced · Safe to read</div>
+                    <pre class="er-pre">{{ ev.masked_text | truncate(1000, True, '\n…') }}</pre>
+                    {% endif %}
+                </div>
+
+            </div>
+
+            <!-- Audit strip -->
+            <div class="er-audit">
+                <span class="er-audit-k">SHA-256</span>
+                <span class="er-audit-v">{{ ev.hash_short or '—' }}</span>
+                <span class="er-audit-sep">·</span>
+                <span class="er-audit-k">STRATEGY</span>
+                <span class="er-audit-v">{{ (ev.scan_strategy or 'full') | upper }}</span>
+                <span class="er-audit-sep">·</span>
+                <span class="er-audit-k">SCAN TIME</span>
+                <span class="er-audit-v">{{ ev.scan_ms }}ms</span>
+                <span class="er-audit-sep">·</span>
+                <span class="er-audit-k">LOGGED</span>
+                <span class="er-audit-v">{{ ev.timestamp[:19] | replace('T', ' ') if ev.timestamp else '—' }}</span>
+            </div>
+        </div>
+
+    </div>
+    {% endfor %}
+
+</div>
+
+<!-- Pagination -->
+{% if page > 1 or has_more %}
+<div class="er-pagination">
+    <span class="er-pg-info">Page {{ page }} · {{ events | length }} event{{ 's' if events | length != 1 else '' }}</span>
+    <div class="er-pg-btns">
+        {% if page > 1 %}
+        <a href="?period={{ period }}{% if scan_target %}&target={{ scan_target }}{% endif %}{% if blocked_only %}&blocked=1{% endif %}&page={{ page - 1 }}"
+           class="er-pg-btn">← Prev</a>
+        {% endif %}
+        {% if has_more %}
+        <a href="?period={{ period }}{% if scan_target %}&target={{ scan_target }}{% endif %}{% if blocked_only %}&blocked=1{% endif %}&page={{ page + 1 }}"
+           class="er-pg-btn">Next →</a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+{% else %}
+<div class="er-list-empty">
+    {% if scan_target or blocked_only %}
+    No events match this filter. <a href="/security/events?period={{ period }}" class="er-empty-link">Clear filter</a>
+    {% else %}
+    No events recorded in this period.
+    {% endif %}
+</div>
+{% endif %}
+
+{% endif %}{# end if stats.total #}
+
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/security/events.js?v=1.3"></script>
+{% endblock %}

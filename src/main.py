@@ -73,7 +73,7 @@ def setup() -> None:
         config_file = get_config_file()
         if not config_file.exists():
             default_config = {
-                "version": "0.1.29",
+                "version": "0.1.30",
                 "created_at": get_now_ist_iso(),
                 "settings": {
                     "log_level": "INFO",
@@ -594,6 +594,47 @@ def stop() -> None:
             except Exception as obs_error:
                 # Don't fail the stop hook if observation queuing fails
                 logger.warning(f"Observation queue failed (will retry on next prompt): {obs_error}")
+
+        # ── Response security scan ────────────────────────────────────────────
+        # Runs after all DB writes. Response is never blocked — findings are
+        # logged to SECURITY_SCAN_EVENT with masked text and surfaced as a
+        # UI notice via systemMessage.
+        try:
+            from src.security.config import load_security_config
+            from src.security.scanner import scan_text
+            from src.security.masker import mask_text as _mask_response
+            from src.security.db_writer import write_finding
+
+            _sec_cfg = load_security_config(cwd=cwd)
+            if _sec_cfg.enabled and _sec_cfg.scope == "both":
+                _response_text = most_recent_pair.get("response", "")
+                if _response_text:
+                    _sec_result = scan_text(_response_text, _sec_cfg.response_config)
+                    if _sec_result.findings:
+                        _masked_response = _mask_response(_response_text, _sec_result.findings)
+                        write_finding(
+                            session_id=session_id,
+                            scan_target="response",
+                            result=_sec_result,
+                            blocked=False,
+                            masked_text=_masked_response,
+                        )
+                        logger.info(
+                            f"Response scan: {len(_sec_result.findings)} finding(s) logged"
+                            f" [{_sec_result.scan_strategy}, {_sec_result.scan_ms}ms]"
+                        )
+                        _summary = ", ".join(f.detector for f in _sec_result.findings[:3])
+                        if len(_sec_result.findings) > 3:
+                            _summary += f" +{len(_sec_result.findings) - 3} more"
+                        print(_json.dumps({
+                            "systemMessage": (
+                                f"⚠️ Security: {len(_sec_result.findings)} sensitive item(s) detected"
+                                f" in Claude's response ({_summary})."
+                                f" Event logged to telemetry."
+                            )
+                        }))
+        except Exception as _sec_err:
+            logger.warning(f"Response security scan error (non-fatal): {_sec_err}")
 
         # Close database connection
         from src.db.manager import close_db

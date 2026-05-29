@@ -1,0 +1,609 @@
+{% extends "base/index.html" %}
+{% block title %}Security Scanning — CloudByte{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/css/security/security.css?v=4.1">
+{% endblock %}
+
+{% block content %}
+
+<form method="post" action="/security" id="security-form">
+
+{% if not enabled %}
+<!-- ═══════════════════════════════════════════════
+     DISABLED — Hero
+════════════════════════════════════════════════ -->
+<div class="sec-hero">
+    <div class="sec-hero-glow"></div>
+
+    <div class="sec-hero-inner">
+
+        <div class="sec-hero-icon">
+            <div class="sec-hero-icon-ring"></div>
+            <svg viewBox="0 0 56 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M28 3L5 12v16c0 14 9.2 26.8 23 30.4C41.8 54.8 51 42 51 28V12L28 3z"
+                      stroke="currentColor" stroke-width="1.6" fill="none"/>
+                <path d="M28 3L5 12v16c0 14 9.2 26.8 23 30.4C41.8 54.8 51 42 51 28V12L28 3z"
+                      fill="currentColor" opacity="0.07"/>
+                <path d="M19 31l7 7 12-12" stroke="currentColor" stroke-width="2.2"
+                      stroke-linecap="square"/>
+            </svg>
+        </div>
+
+        <div class="sec-hero-eyebrow">Security Scanning</div>
+
+        <h1 class="sec-hero-headline">
+            Every secret stays<br>yours.
+        </h1>
+
+        <p class="sec-hero-body">
+            Every prompt is scanned before Claude sees it.
+            Any API keys, tokens, or credentials found are blocked before Claude ever reads them.
+        </p>
+
+        <div class="sec-hero-checks">
+            <div class="sec-hero-check">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+                    <path d="M3 8l4 4 6-6" stroke-linecap="square"/>
+                </svg>
+                43 credential types detected automatically
+            </div>
+            <div class="sec-hero-check sec-hero-check-highlight">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+                    <path d="M3 8l4 4 6-6" stroke-linecap="square"/>
+                </svg>
+                Create your own detector for any secret. Just paste examples.
+            </div>
+            <div class="sec-hero-check">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+                    <path d="M3 8l4 4 6-6" stroke-linecap="square"/>
+                </svg>
+                Secrets are masked, never stored as plain text
+            </div>
+            <div class="sec-hero-check">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+                    <path d="M3 8l4 4 6-6" stroke-linecap="square"/>
+                </svg>
+                Runs entirely locally. Nothing leaves your machine.
+            </div>
+        </div>
+
+        <button type="button" class="sec-hero-cta" onclick="enableFeature()">
+            Enable Security Scanning
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15">
+                <path d="M4 10h12M10 4l6 6-6 6" stroke-linecap="square"/>
+            </svg>
+        </button>
+
+        <div class="sec-hero-tags">
+            <span class="sht">AWS Keys</span>
+            <span class="sht">GitHub Tokens</span>
+            <span class="sht">OpenAI Keys</span>
+            <span class="sht">Stripe</span>
+            <span class="sht">Razorpay</span>
+            <span class="sht">DB Connections</span>
+            <span class="sht">JWT Tokens</span>
+            <span class="sht">Private Keys</span>
+            <span class="sht">Slack</span>
+            <span class="sht sht-more">+34 more</span>
+        </div>
+
+    </div>
+
+    <!-- Preset picker (revealed after CTA) -->
+    <div class="sec-onboard" id="sec-onboard" style="display:none;">
+        <div class="sec-onboard-label">Choose your protection level</div>
+        <p class="sec-onboard-hint">Each preset is a starting point. Customise any detector freely after you activate.</p>
+        <div class="sec-preset-cards">
+
+            <div class="sec-preset-card" data-preset="minimal" onclick="choosePreset('minimal')">
+                <div class="spc-header">
+                    <span class="spc-icon">◇</span>
+                    <div class="spc-tier">Basic</div>
+                </div>
+                <div class="spc-name">Minimal</div>
+                <div class="spc-desc">Critical cloud keys only. Low noise. Good if you want essential coverage without interruptions.</div>
+                <div class="spc-specs">
+                    <span>9 detectors</span>
+                    <span class="spc-sep">·</span>
+                    <span>Prompts only</span>
+                    <span class="spc-sep">·</span>
+                    <span>No PII</span>
+                </div>
+            </div>
+
+            <div class="sec-preset-card sec-preset-featured" data-preset="standard" onclick="choosePreset('standard')">
+                <div class="spc-header">
+                    <span class="spc-icon spc-icon-accent">◈</span>
+                    <div class="spc-tier spc-tier-accent">Recommended</div>
+                </div>
+                <div class="spc-name">Standard</div>
+                <div class="spc-desc">All major API keys, AI platform keys, and database connections. Balanced for daily use.</div>
+                <div class="spc-specs">
+                    <span>37 detectors</span>
+                    <span class="spc-sep">·</span>
+                    <span>Prompts + Responses</span>
+                </div>
+            </div>
+
+            <div class="sec-preset-card" data-preset="strict" onclick="choosePreset('strict')">
+                <div class="spc-header">
+                    <span class="spc-icon spc-icon-full">◆</span>
+                    <div class="spc-tier">Maximum</div>
+                </div>
+                <div class="spc-name">Strict</div>
+                <div class="spc-desc">Everything on. Tightest entropy thresholds. Full PII coverage including email and phone.</div>
+                <div class="spc-specs">
+                    <span>43 detectors</span>
+                    <span class="spc-sep">·</span>
+                    <span>All PII on</span>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+</div>
+
+{% else %}
+<!-- ═══════════════════════════════════════════════
+     ENABLED — Security Control Panel
+════════════════════════════════════════════════ -->
+
+{% if save_message %}
+<div class="sec-toast {% if save_success %}sec-toast-ok{% else %}sec-toast-err{% endif %}">
+    {% if save_success %}✓{% else %}✗{% endif %} {{ save_message }}
+</div>
+{% endif %}
+
+<!-- ── Status bar ────────────────────────────────── -->
+<div class="sc-status-bar sec-status">
+    <div class="sc-status-left sec-status-left">
+        <div class="sc-pulse-wrap">
+            <span class="sec-status-dot sc-pulse-dot"></span>
+            <span class="sc-pulse-ring"></span>
+        </div>
+        <span class="sc-status-label sec-status-label">Scanning Active</span>
+        <span class="sc-plan-pill sec-status-plan">
+            {{ plan | upper }}{% if plan_modified %} · MODIFIED{% endif %}
+        </span>
+        <span class="sc-separator">·</span>
+        {% set ns = namespace(total_on=0) %}
+        {% for group in grouped_detectors %}{% for det in group.detectors %}{% if det.enabled %}{% set ns.total_on = ns.total_on + 1 %}{% endif %}{% endfor %}{% endfor %}
+        <span class="sc-coverage-count">
+            {{ ns.total_on + (pii_detectors | selectattr('enabled') | list | length) }} detectors active
+        </span>
+        {% if stats and stats.total > 0 %}
+        <a href="/security/events" class="sec-status-events">{{ stats.total }} events →</a>
+        {% endif %}
+    </div>
+    <button type="button" class="sec-status-disable" onclick="disableFeature()">Disable</button>
+</div>
+
+<!-- ── Plan selector ─────────────────────────────── -->
+<div class="sc-plan-selector">
+    <div class="sc-plan-label">
+        <span>Protection Level</span>
+        <span class="sc-plan-hint">Each preset is a starting point. Adjust any detector freely.</span>
+    </div>
+    <div class="sc-plan-cards">
+        <button type="button"
+                class="sps-btn sc-plan-card {% if plan == 'minimal' %}sps-active sc-pc-is-saved{% endif %}"
+                data-plan="minimal"
+                onclick="applyPreset('minimal')">
+            <div class="sc-pc-top">
+                <span class="sc-pc-icon">◇</span>
+                <span class="sc-pc-tier">Basic</span>
+            </div>
+            <div class="sc-pc-name">Minimal</div>
+            <div class="sc-pc-specs">9 detectors · Prompts only</div>
+            <div class="sc-pc-status-row">
+                <span class="sc-pc-active-badge">◈ Active plan</span>
+                <span class="sc-pc-pending-badge">↑ Will apply on save</span>
+                <span class="sc-pc-current-badge">Currently saved</span>
+            </div>
+        </button>
+        <button type="button"
+                class="sps-btn sc-plan-card {% if plan == 'standard' %}sps-active sc-pc-is-saved{% endif %}"
+                data-plan="standard"
+                onclick="applyPreset('standard')">
+            <div class="sc-pc-top">
+                <span class="sc-pc-icon sc-pc-icon-accent">◈</span>
+                <span class="sc-pc-tier sc-pc-tier-accent">Recommended</span>
+            </div>
+            <div class="sc-pc-name">Standard</div>
+            <div class="sc-pc-specs">37 detectors · Prompts + Responses</div>
+            <div class="sc-pc-status-row">
+                <span class="sc-pc-active-badge">◈ Active plan</span>
+                <span class="sc-pc-pending-badge">↑ Will apply on save</span>
+                <span class="sc-pc-current-badge">Currently saved</span>
+            </div>
+        </button>
+        <button type="button"
+                class="sps-btn sc-plan-card {% if plan == 'strict' %}sps-active sc-pc-is-saved{% endif %}"
+                data-plan="strict"
+                onclick="applyPreset('strict')">
+            <div class="sc-pc-top">
+                <span class="sc-pc-icon sc-pc-icon-full">◆</span>
+                <span class="sc-pc-tier">Maximum</span>
+            </div>
+            <div class="sc-pc-name">Strict</div>
+            <div class="sc-pc-specs">43 detectors · All PII on</div>
+            <div class="sc-pc-status-row">
+                <span class="sc-pc-active-badge">◈ Active plan</span>
+                <span class="sc-pc-pending-badge">↑ Will apply on save</span>
+                <span class="sc-pc-current-badge">Currently saved</span>
+            </div>
+        </button>
+    </div>
+</div>
+
+<!-- ── Coverage overview ─────────────────────────── -->
+<div class="sc-coverage-bar">
+    {% for group in grouped_detectors %}
+    {% set on_count = group.detectors | selectattr('enabled') | list | length %}
+    {% set total = group.detectors | length %}
+    <div class="sc-cov-cell {% if on_count == total %}sc-cov-full{% elif on_count == 0 %}sc-cov-zero{% else %}sc-cov-partial{% endif %}">
+        <div class="sc-cov-name">{{ group.category | replace(' & ', '/') | truncate(14, True, '') }}</div>
+        <div class="sc-cov-num">{{ on_count }}/{{ total }}</div>
+    </div>
+    {% endfor %}
+    {% set pii_on = pii_detectors | selectattr('enabled') | list | length %}
+    <div class="sc-cov-cell {% if pii_on == (pii_detectors | length) %}sc-cov-full{% elif pii_on == 0 %}sc-cov-zero{% else %}sc-cov-partial{% endif %}">
+        <div class="sc-cov-name">PII</div>
+        <div class="sc-cov-num">{{ pii_on }}/{{ pii_detectors | length }}</div>
+    </div>
+</div>
+
+<!-- ── Detectors ─────────────────────────────────── -->
+<div class="sc-detectors">
+    <div class="sc-det-header">
+        <span class="sc-det-title">Detectors</span>
+        <span class="sc-det-hint">Hover to inspect · click to toggle</span>
+    </div>
+
+    {% for group in grouped_detectors %}
+    {% set on_count = group.detectors | selectattr('enabled') | list | length %}
+    <div class="cat-group sc-det-group">
+        <div class="cat-group-header sc-det-group-hdr">
+            <span class="cat-group-name">{{ group.category }}</span>
+            <span class="cat-group-count">{{ on_count }}/{{ group.detectors | length }}</span>
+        </div>
+        <div class="cat-chips sc-chip-grid">
+            {% for det in group.detectors %}
+            <button type="button"
+                    class="det-chip {% if det.enabled %}det-on{% else %}det-off{% endif %}"
+                    data-key="{{ det.key }}"
+                    data-name="{{ det.name }}"
+                    data-desc="{{ det.description }}"
+                    data-example="{{ det.example }}"
+                    data-on="{{ '1' if det.enabled else '0' }}"
+                    onmouseenter="showTooltip(this)"
+                    onmouseleave="scheduleHideTooltip()"
+                    onclick="toggleChip(this)">
+                {{ det.name | replace(' API Key','') | replace(' Token','') | replace(' Key','') | replace(' Access','') | replace(' Secret','') | truncate(20, True, '') }}
+                <input type="hidden" name="det_{{ det.key }}" id="det_{{ det.key }}"
+                       value="{{ '1' if det.enabled else '0' }}">
+            </button>
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+
+    <!-- PII -->
+    <div class="cat-group sc-det-group">
+        <div class="cat-group-header sc-det-group-hdr">
+            {% set pii_on = pii_detectors | selectattr('enabled') | list | length %}
+            <span class="cat-group-name">Privacy (PII)</span>
+            <span class="cat-group-count">{{ pii_on }}/{{ pii_detectors | length }}</span>
+        </div>
+        <div class="cat-chips sc-chip-grid">
+            {% for det in pii_detectors %}
+            <button type="button"
+                    class="det-chip {% if det.enabled %}det-on{% else %}det-off{% endif %}"
+                    data-pii="{{ det.key }}"
+                    data-name="{{ det.name }}"
+                    data-desc="{{ det.description }}"
+                    data-example="{{ det.example }}"
+                    data-on="{{ '1' if det.enabled else '0' }}"
+                    onmouseenter="showTooltip(this)"
+                    onmouseleave="scheduleHideTooltip()"
+                    onclick="toggleChip(this)">
+                {{ det.name }}
+                <input type="hidden" name="pii_{{ det.key }}" id="pii_{{ det.key }}"
+                       value="{{ '1' if det.enabled else '0' }}">
+            </button>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<!-- ── Custom Detectors — full width (grows safely) ── -->
+<div class="sc-custom-full sec-section-dark sc-card">
+    <div class="sc-card-hdr">
+        <div>
+            <div class="sec-section-label">Your Own Detectors</div>
+            <div class="sc-card-desc">Detect any secret not on the built-in list. Paste examples, no code needed.</div>
+        </div>
+        <button type="button" class="sec-add-btn" onclick="openPatternModal()">+ Create</button>
+    </div>
+
+    {% if custom_patterns %}
+    <div class="cpl-list">
+        {% for p in custom_patterns %}
+        <div class="cpl-row" data-pattern='{{ p | tojson }}'>
+            <div class="cpl-indicator {% if p.get('examples') %}cpl-ind-ex{% else %}cpl-ind-rx{% endif %}"></div>
+            <div class="cpl-info">
+                <div class="cpl-name">{{ p.name }}</div>
+                <div class="cpl-meta">
+                    {% if p.get('pattern') %}
+                    <code class="cpl-pattern">{{ p.pattern | truncate(55, True, '…') }}</code>
+                    {% elif p.get('examples') %}
+                    <span class="cpl-ex-note">auto-generated · {{ p.examples | length }} example{{ 's' if p.examples | length != 1 else '' }}</span>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="cpl-right">
+                <span class="cpl-type">{{ 'examples' if p.get('examples') else 'regex' }}</span>
+                <span class="cpl-sev badge-sev-{{ (p.severity | default('HIGH')) | lower }}">{{ p.severity | default('HIGH') }}</span>
+                <button type="button" class="cpl-edit" onclick="editPattern(this)" title="Edit">✎</button>
+                <button type="button" class="cpl-del" onclick="removePattern('{{ p.name }}')">×</button>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="cpl-empty">
+        <div class="cpl-empty-text">
+            No custom detectors yet. Create one for any secret format not already covered.
+            <button type="button" class="cpl-empty-cta" onclick="openPatternModal()">Create your first →</button>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- ── Scan Scope — full width, horizontal 2-option selector ── -->
+<div class="sc-card sc-card-muted sc-scope-section">
+    <div class="sc-card-hdr sc-card-hdr-compact">
+        <span class="sec-section-label">Scan Scope</span>
+        <span class="sc-card-desc-inline">Choose what gets scanned</span>
+    </div>
+    <div class="sc-scope-horizontal">
+        <label class="scope-card {% if scope == 'prompt_only' %}scope-card-active{% endif %}">
+            <input type="radio" name="scope" value="prompt_only"
+                   {% if scope == 'prompt_only' %}checked{% endif %}
+                   onchange="updateScope(this)">
+            <div class="scope-card-check">{% if scope == 'prompt_only' %}●{% else %}○{% endif %}</div>
+            <div class="scope-card-body">
+                <div class="scope-card-name-wrap">
+                    <div class="scope-card-name">Prompts only</div>
+                    <span class="scope-selected-badge">
+                        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" width="9" height="9">
+                            <path d="M2 6l3 3 5-5" stroke-linecap="square"/>
+                        </svg>
+                        Selected
+                    </span>
+                </div>
+                <div class="scope-card-desc">
+                    Secrets found in your prompt are <strong>blocked</strong> before Claude reads them.
+                    You receive a masked version to safely resubmit.
+                </div>
+            </div>
+        </label>
+        <label class="scope-card {% if scope == 'both' %}scope-card-active{% endif %}">
+            <input type="radio" name="scope" value="both"
+                   {% if scope == 'both' %}checked{% endif %}
+                   onchange="updateScope(this)">
+            <div class="scope-card-check">{% if scope == 'both' %}●{% else %}○{% endif %}</div>
+            <div class="scope-card-body">
+                <div class="scope-card-name-wrap">
+                    <div class="scope-card-name">Prompts + Responses</div>
+                    <span class="scope-selected-badge">
+                        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" width="9" height="9">
+                            <path d="M2 6l3 3 5-5" stroke-linecap="square"/>
+                        </svg>
+                        Selected
+                    </span>
+                </div>
+                <div class="scope-card-desc">
+                    Prompts blocked as above. Claude's responses are also scanned and you're
+                    <strong>warned</strong> if anything sensitive appears in the reply.
+                </div>
+            </div>
+        </label>
+    </div>
+    <input type="hidden" name="scope" id="scope-hidden" value="{{ scope }}">
+</div>
+
+<!-- ── Entropy + Keywords — 2 equal columns ──────────────── -->
+<div class="sc-settings-2col">
+
+    <!-- Entropy Detection -->
+    <div class="sc-card sc-card-muted">
+        <div class="sc-card-hdr sc-card-hdr-compact">
+            <span class="sec-section-label">Entropy Detection</span>
+        </div>
+        <div class="sc-card-desc" style="margin-bottom:14px;">Catches unknown key formats by measuring randomness. Lower = more sensitive.</div>
+        <input type="hidden" name="entropy_enabled" value="1">
+        <div class="ent-grid" id="entropy-fields">
+            <div class="ent-field">
+                <label class="ent-label">Hex</label>
+                <div class="ent-stepper">
+                    <button type="button" class="ent-step" onclick="stepEntropy('hex_limit', -0.1)">−</button>
+                    <input type="text" name="hex_limit" id="hex_limit" class="ent-val"
+                           value="{{ entropy.hex_limit | default(3.5) }}" readonly>
+                    <button type="button" class="ent-step" onclick="stepEntropy('hex_limit', 0.1)">+</button>
+                </div>
+                <div class="ent-hint">Rec: 3.5</div>
+            </div>
+            <div class="ent-field">
+                <label class="ent-label">Base64</label>
+                <div class="ent-stepper">
+                    <button type="button" class="ent-step" onclick="stepEntropy('base64_limit', -0.1)">−</button>
+                    <input type="text" name="base64_limit" id="base64_limit" class="ent-val"
+                           value="{{ entropy.base64_limit | default(4.5) }}" readonly>
+                    <button type="button" class="ent-step" onclick="stepEntropy('base64_limit', 0.1)">+</button>
+                </div>
+                <div class="ent-hint">Rec: 4.5</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Keyword Blocklist -->
+    <div class="sc-card sc-card-muted">
+        <div class="sc-card-hdr sc-card-hdr-compact">
+            <span class="sec-section-label">Keyword Blocklist</span>
+        </div>
+        <div class="sc-card-desc" style="margin-bottom:12px;">Block prompts containing specific words or topics, regardless of whether they contain a credential.</div>
+        <div class="kw-wrap">
+            <div class="kw-tags" id="kw-tags"></div>
+            <input type="hidden" name="keyword_blocklist" id="kw-hidden" value="{{ keyword_blocklist | join(',') }}">
+            <div class="kw-row">
+                <input type="text" id="kw-input" class="kw-input" placeholder="Add keyword, press Enter…"
+                       onkeydown="handleKwKey(event)">
+                <button type="button" class="kw-add" onclick="addKeyword()">Add</button>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- ── Save bar ──────────────────────────────────── -->
+<div class="sec-save-bar sc-save-bar">
+    <div class="sc-save-left">
+        <span class="sc-save-icon">◈</span>
+        <span class="sec-save-note">Changes apply on your next Claude prompt.</span>
+    </div>
+    <div class="sec-save-actions">
+        <button type="button" class="sec-reset-btn" onclick="applyPreset(document.getElementById('plan-input').value)">↺ Reset to preset</button>
+        <button type="submit" class="sec-save-btn" id="save-btn">Save Changes</button>
+    </div>
+</div>
+
+{% endif %}
+
+<!-- Hidden inputs — always present regardless of enabled state -->
+<input type="hidden" name="enabled" id="enabled-input" value="{{ '1' if enabled else '0' }}">
+<input type="hidden" name="plan"    id="plan-input"    value="{{ plan }}">
+
+</form>
+
+<!-- ═══ Detector Tooltip ═════════════════════════ -->
+<div id="det-tooltip" class="det-tooltip"
+     onmouseenter="cancelHideTooltip()"
+     onmouseleave="scheduleHideTooltip()">
+    <div class="dtt-name" id="dtt-name"></div>
+    <div class="dtt-desc" id="dtt-desc"></div>
+    <div class="dtt-example" id="dtt-example"></div>
+    <button type="button" class="dtt-toggle" id="dtt-toggle" onclick="tooltipToggle()"></button>
+</div>
+
+<!-- ═══ Pattern Builder Modal ════════════════════ -->
+<div id="pattern-modal-backdrop" class="pm-backdrop">
+    <div class="pm-box">
+        <div class="pm-head">
+            <div class="pm-title" id="pm-modal-title">Create Detector</div>
+            <button type="button" class="pm-close" onclick="closePatternModal()">×</button>
+        </div>
+        <div class="pm-body">
+
+            <div class="pm-row2">
+                <div class="pm-field">
+                    <label class="pm-label">Name</label>
+                    <input type="text" id="pm-name" class="pm-input" placeholder="e.g. Your Secret Token">
+                </div>
+                <div class="pm-field" style="max-width:130px;">
+                    <label class="pm-label">Severity</label>
+                    <select id="pm-severity" class="pm-select">
+                        <option value="HIGH">High</option>
+                        <option value="MEDIUM">Medium</option>
+                        <option value="LOW">Low</option>
+                    </select>
+                </div>
+            </div>
+
+            <div id="pm-error" class="pm-error" style="display:none;"></div>
+
+            <div class="pm-tabs">
+                <button type="button" class="pm-tab pm-tab-active" onclick="switchPmTab('examples',this)">Build from Examples</button>
+                <button type="button" class="pm-tab" onclick="switchPmTab('regex',this)">Write Regex</button>
+            </div>
+
+            <div id="pm-panel-examples" class="pm-panel pm-panel-active">
+                <div class="pm-field">
+                    <label class="pm-label">
+                        Example keys
+                        <span class="pm-label-hint">(provide 2–5 for best accuracy)</span>
+                    </label>
+                    <div class="pm-examples-list" id="pm-examples-list">
+                        <div class="pm-ex-row">
+                            <input type="text" placeholder="Paste an example key…">
+                            <button type="button" onclick="removeExRow(this)">×</button>
+                        </div>
+                        <div class="pm-ex-row">
+                            <input type="text" placeholder="Another example…">
+                            <button type="button" onclick="removeExRow(this)">×</button>
+                        </div>
+                    </div>
+                    <button type="button" id="pm-add-ex" class="pm-add-ex" onclick="addExRow()">+ Add example</button>
+                </div>
+
+                <div class="pm-generate-row">
+                    <button type="button" id="pm-gen-btn" class="pm-gen-btn" onclick="generatePattern()">Generate Pattern</button>
+                </div>
+
+                <div id="pm-result" class="pm-result" style="display:none;">
+                    <div class="pm-result-badges">
+                        <span id="pm-conf" class="pmr-badge"></span>
+                        <span id="pm-fp"   class="pmr-badge"></span>
+                        <span id="pm-val"  class="pmr-meta"></span>
+                    </div>
+                    <div class="pm-result-label">Generated pattern</div>
+                    <div id="pm-pattern-str" class="pm-pattern-str"></div>
+                    <div id="pm-alts-block" class="pm-alts-block" style="display:none;">
+                        <div class="pm-alts-header">
+                            <span class="pm-alts-label">Alternatives</span>
+                            <button type="button" class="pm-alts-reset" id="pm-alts-reset"
+                                    onclick="resetToGenerated()" style="display:none;">← Back to generated</button>
+                        </div>
+                        <div id="pm-alts"></div>
+                    </div>
+                    <div id="pm-warnings" class="pm-warnings"></div>
+                </div>
+            </div>
+
+            <div id="pm-panel-regex" class="pm-panel">
+                <div class="pm-field">
+                    <label class="pm-label">Regular expression</label>
+                    <input type="text" id="pm-regex-val" class="pm-input"
+                           placeholder="e.g. (?&lt;![a-zA-Z0-9])MYCO_[a-zA-Z0-9]{16}">
+                </div>
+                <div class="pm-regex-hint">
+                    Tested with Python's <code>re.finditer()</code> — use lookbehind/lookahead to avoid partial matches.
+                </div>
+            </div>
+
+        </div>
+        <div class="pm-foot">
+            <button type="button" class="pm-cancel" onclick="closePatternModal()">Cancel</button>
+            <button type="button" id="pm-save" class="pm-save" onclick="savePattern()" disabled>Save Pattern</button>
+        </div>
+    </div>
+</div>
+
+<!-- ═══ Confirm Dialog ════════════════════════════ -->
+<div id="sec-confirm-modal" class="sec-confirm-overlay">
+    <div class="sec-confirm-box">
+        <div id="sec-confirm-msg" class="sec-confirm-msg"></div>
+        <div class="sec-confirm-btns">
+            <button type="button" class="sec-confirm-cancel" onclick="closeConfirm()">Cancel</button>
+            <button type="button" id="sec-confirm-ok" class="sec-confirm-ok">Confirm</button>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/security/security.js?v=2.5"></script>
+{% endblock %}

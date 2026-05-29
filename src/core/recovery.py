@@ -362,7 +362,8 @@ def _recover_interrupted_prompt(
                     "timestamp": to_ist(merged["timestamp"]),
                 })
 
-        # ── Write tool calls ──────────────────────────────────────────────────
+        # ── Write tool calls + tool tokens ───────────────────────────────────
+        usage = merged.get("usage", {})
         for tool_use in merged["tool_uses"]:
             tool_id = tool_use.get("id")
             if not tool_id:
@@ -370,26 +371,38 @@ def _recover_interrupted_prompt(
             cursor.execute(
                 "SELECT 1 FROM TOOL WHERE tool_id = ? LIMIT 1", (tool_id,)
             )
-            if cursor.fetchone():
-                continue  # already written
+            already_exists = cursor.fetchone()
+            if not already_exists:
+                tool_output = _find_tool_output(events, tool_id)
+                tool_input = tool_use.get("input", {})
+                writer.write_tool({
+                    "tool_id": tool_id,
+                    "prompt_id": db_prompt_id,
+                    "uuid": merged["uuid"],
+                    "parent_uuid": merged["parent_uuid"],
+                    "tool_name": tool_use.get("name", ""),
+                    "model": merged["model"],
+                    "input_json": json.dumps(tool_input) if isinstance(tool_input, dict) else str(tool_input),
+                    "output_json": tool_output,
+                    "timestamp": to_ist(merged["timestamp"]),
+                })
 
-            tool_output = _find_tool_output(events, tool_id)
-            tool_input = tool_use.get("input", {})
-
-            writer.write_tool({
-                "tool_id": tool_id,
-                "prompt_id": db_prompt_id,
-                "uuid": merged["uuid"],
-                "parent_uuid": merged["parent_uuid"],
-                "tool_name": tool_use.get("name", ""),
-                "model": merged["model"],
-                "input_json": json.dumps(tool_input) if isinstance(tool_input, dict) else str(tool_input),
-                "output_json": tool_output,
-                "timestamp": to_ist(merged["timestamp"]),
-            })
+            # Write tool tokens (use the assistant message's usage for each tool)
+            if usage:
+                cursor.execute(
+                    "SELECT 1 FROM TOOL_TOKENS WHERE tool_id = ? LIMIT 1", (tool_id,)
+                )
+                if not cursor.fetchone():
+                    writer.write_tool_tokens({
+                        "id": str(_uuid_mod.uuid4()),
+                        "tool_id": tool_id,
+                        "input_tokens": usage.get("input_tokens", 0),
+                        "cache_creation_tokens": usage.get("cache_creation_input_tokens", 0),
+                        "cache_read_tokens": usage.get("cache_read_input_tokens", 0),
+                        "output_tokens": usage.get("output_tokens", 0),
+                    })
 
         # ── Write IO token usage ──────────────────────────────────────────────
-        usage = merged.get("usage", {})
         if usage:
             cursor.execute(
                 """

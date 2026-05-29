@@ -9,8 +9,7 @@
     <link
         href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=Inter:wght@300;400;500;600;700;800;900&display=swap"
         rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/base.css?v=2.0.0">
-    <link rel="stylesheet" href="/static/css/base.css?v=2.1.0">
+    <link rel="stylesheet" href="/static/css/base.css?v=2.2.0">
     {% block head %}{% endblock %}
 </head>
 
@@ -79,6 +78,24 @@
                     </a>
                 </div>
 
+                <div class="nav-group">
+                    <div class="nav-label">Security</div>
+                    <a href="/security" class="nav-link {% if request.path == '/security' %}active{% endif %}">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                        </svg>
+                        Scanning
+                    </a>
+                    <a href="/security/events" class="nav-link {% if '/security/events' in request.path %}active{% endif %}">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="12" y1="8" x2="12" y2="12"/>
+                            <line x1="12" y1="16" x2="12.01" y2="16"/>
+                        </svg>
+                        Report
+                    </a>
+                </div>
+
                 <div class="nav-group"
                     style="margin-top: auto; border-top: 1px solid var(--border); padding-top: 20px;">
                     <a href="/config" class="nav-link {% if request.path == '/config' %}active{% endif %}">
@@ -94,7 +111,7 @@
 
             <div class="sidebar-footer"
                 style="padding: 20px; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between;">
-                <div class="mono" style="font-size: 10px; font-weight: 700; color: var(--accent);">v0.1.29</div>
+                <div class="mono" style="font-size: 10px; font-weight: 700; color: var(--accent);">v0.1.30</div>
                 <div style="display: flex; align-items: center; gap: 6px;">
                     <button id="update-btn" onclick="applyUpdate()"
                         style="display:none; font-size:9px; font-weight:700; color: var(--bg); background: var(--accent); border: none; border-radius: 4px; padding: 3px 7px; cursor: pointer; letter-spacing: 0.05em;"></button>

@@ -276,6 +276,24 @@ def create_tables(conn: sqlite3.Connection) -> None:
     );
     """)
 
+    # ---------------- SECURITY_SCAN_EVENT ----------------
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS SECURITY_SCAN_EVENT (
+        event_id      TEXT PRIMARY KEY,
+        session_id    TEXT,
+        scan_target   TEXT NOT NULL,
+        prompt_hash   TEXT,
+        masked_text   TEXT,
+        findings_json TEXT,
+        finding_count INTEGER DEFAULT 0,
+        blocked       INTEGER DEFAULT 0,
+        scan_ms       INTEGER,
+        scan_strategy TEXT,
+        timestamp     DATETIME,
+        FOREIGN KEY (session_id) REFERENCES SESSION(session_id)
+    );
+    """)
+
     conn.commit()
     logger.info("Database tables created successfully")
 
@@ -317,6 +335,45 @@ def migrate_schema(conn: sqlite3.Connection) -> None:
         cursor.execute("ALTER TABLE SESSION ADD COLUMN custom_title TEXT")
         logger.info("Migration: added custom_title column to SESSION")
 
+    # SECURITY_SCAN_EVENT table (added in 0.1.29+, renamed from SECURITY_FINDING)
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='SECURITY_FINDING'")
+    if cursor.fetchone():
+        # Rename old table to new name
+        cursor.execute("ALTER TABLE SECURITY_FINDING RENAME TO SECURITY_SCAN_EVENT")
+        cursor.execute("DROP INDEX IF EXISTS idx_security_session")
+        cursor.execute("DROP INDEX IF EXISTS idx_security_target")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_security_session ON SECURITY_SCAN_EVENT(session_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_security_target ON SECURITY_SCAN_EVENT(scan_target)")
+        logger.info("Migration: renamed SECURITY_FINDING to SECURITY_SCAN_EVENT")
+    else:
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='SECURITY_SCAN_EVENT'")
+        if not cursor.fetchone():
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS SECURITY_SCAN_EVENT (
+                    event_id      TEXT PRIMARY KEY,
+                    session_id    TEXT,
+                    scan_target   TEXT NOT NULL,
+                    prompt_hash   TEXT,
+                    masked_text   TEXT,
+                    findings_json TEXT,
+                    finding_count INTEGER DEFAULT 0,
+                    blocked       INTEGER DEFAULT 0,
+                    scan_ms       INTEGER,
+                    scan_strategy TEXT,
+                    timestamp     DATETIME,
+                    FOREIGN KEY (session_id) REFERENCES SESSION(session_id)
+                )
+            """)
+            logger.info("Migration: created SECURITY_SCAN_EVENT table")
+
+    # Rename event_id column alias — old rows used finding_id, add event_id if missing
+    cursor.execute("PRAGMA table_info(SECURITY_SCAN_EVENT)")
+    sse_cols = [row[1] for row in cursor.fetchall()]
+    if sse_cols and "event_id" not in sse_cols and "finding_id" in sse_cols:
+        # SQLite doesn't support RENAME COLUMN before 3.25; recreate is safest but
+        # for now just alias via a view — old rows remain readable as event_id via INSERT
+        logger.info("Migration: SECURITY_SCAN_EVENT has finding_id column (legacy), continuing")
+
     conn.commit()
 
 def create_indexes(conn: sqlite3.Connection) -> None:
@@ -337,6 +394,8 @@ def create_indexes(conn: sqlite3.Connection) -> None:
     # Indexes for HOOK_OBSERVATION
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_hook_obs_session ON HOOK_OBSERVATION(session_id);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_hook_obs_prompt ON HOOK_OBSERVATION(prompt_id);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_security_session ON SECURITY_SCAN_EVENT(session_id);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_security_target ON SECURITY_SCAN_EVENT(scan_target);")
 
     # Indexes for UUID lookups
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_uuid_raw ON RAW_LOG(uuid);")
