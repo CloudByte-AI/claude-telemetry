@@ -115,8 +115,10 @@ The plugin includes an MCP server (`cloudbyte-obs`) that provides the following 
 | Tool | Description |
 |------|-------------|
 | `record_observation` | Record technical observations about work done (type, title, subtitle, narrative, facts, concepts, files) |
+| `search_memory` | Search past hook observations semantically with ChromaDB, or by metadata filters such as type, files, concepts, and facts |
+| `get_recent_memory` | Fetch recent hook observations from the active project without requiring vector indexing |
 
-This tool is called automatically after responses where tools were used or meaningful changes were made. Observations are stored in the `HOOK_OBSERVATION` table for later analysis.
+`record_observation` is called automatically after responses where tools were used or meaningful changes were made. Observations are stored in the `HOOK_OBSERVATION` table for later analysis and indexed into ChromaDB in the background for runtime memory search.
 
 ---
 

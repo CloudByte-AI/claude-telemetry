@@ -17,6 +17,7 @@ CLOUDBYTE_DIR = ".cloudbyte"
 DATA_SUBDIR = "data"
 LOGS_SUBDIR = "logs"
 DB_FILENAME = "cloudbyte.db"
+CHROMA_SUBDIR = "chroma"
 
 
 def get_home_dir() -> Path:
@@ -60,6 +61,17 @@ def get_logs_dir() -> Path:
         Path: The logs directory path
     """
     return get_cloudbyte_dir() / LOGS_SUBDIR
+
+
+def get_chroma_dir() -> Path:
+    """
+    Get the ChromaDB persistence directory.
+    Typically: C:\\Users\\<username>\\.cloudbyte\\chroma
+
+    Returns:
+        Path: The ChromaDB directory path
+    """
+    return get_cloudbyte_dir() / CHROMA_SUBDIR
 
 
 def get_db_path(db_name: Optional[str] = None) -> Path:
@@ -106,6 +118,7 @@ def ensure_directories() -> None:
         get_cloudbyte_dir(),
         get_data_dir(),
         get_logs_dir(),
+        get_chroma_dir(),
     ]
 
     for directory in directories:

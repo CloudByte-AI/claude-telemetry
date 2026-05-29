@@ -21,6 +21,10 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 # ── Add src to path for imports ───────────────────────────
 def get_logs_dir() -> Path:
     """Return the CloudByte logs directory (~/.cloudbyte/logs)."""
@@ -156,7 +160,53 @@ _TOOLS: list = [
                 },
             },
         },
-    }
+    },
+    {
+        "name": "search_memory",
+        "description": (
+            "Search CloudByte runtime memory from past HOOK_OBSERVATION records. "
+            "Use query for semantic ChromaDB vector search over title, subtitle, and narrative. "
+            "Omit query for metadata-only search by type, files, concepts, facts, project, session, or date. "
+            "Active project is used by default."
+        ),
+        "_meta": {"anthropic/alwaysLoad": True},
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Optional semantic search query."},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10},
+                "types": {"type": "array", "items": {"type": "string"}},
+                "files_read": {"type": "array", "items": {"type": "string"}},
+                "files_modified": {"type": "array", "items": {"type": "string"}},
+                "concepts": {"type": "array", "items": {"type": "string"}},
+                "facts": {"type": "array", "items": {"type": "string"}},
+                "project_path": {"type": "string"},
+                "session_id": {"type": "string"},
+                "include_global_fallback": {"type": "boolean", "default": False},
+                "days": {"type": "integer", "minimum": 1},
+                "min_score": {"type": "number"},
+            },
+        },
+    },
+    {
+        "name": "get_recent_memory",
+        "description": (
+            "Return recent CloudByte runtime memory from HOOK_OBSERVATION. "
+            "Reads SQLite source of truth and does not require ChromaDB indexing."
+        ),
+        "_meta": {"anthropic/alwaysLoad": True},
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10},
+                "types": {"type": "array", "items": {"type": "string"}},
+                "project_path": {"type": "string"},
+                "session_id": {"type": "string"},
+                "include_global_fallback": {"type": "boolean", "default": False},
+                "days": {"type": "integer", "minimum": 1},
+            },
+        },
+    },
 ]
 
 
@@ -221,6 +271,24 @@ def _dispatch(req: dict) -> None:
                 )}],
                 "isError": False,
             })
+        elif name == "search_memory":
+            from src.mcp.memory import search_memory
+
+            _log.info("search_memory called")
+            result = search_memory(args)
+            _reply_ok(id_, {
+                "content": [{"type": "text", "text": json.dumps(result, indent=2)}],
+                "isError": False,
+            })
+        elif name == "get_recent_memory":
+            from src.mcp.memory import recent_memory
+
+            _log.info("get_recent_memory called")
+            result = recent_memory(args)
+            _reply_ok(id_, {
+                "content": [{"type": "text", "text": json.dumps(result, indent=2)}],
+                "isError": False,
+            })
         else:
             _log.warning(f"Unknown tool called: {name}")
             _reply_err(id_, -32601, f"Unknown tool: {name}")
@@ -272,13 +340,17 @@ def main() -> None:
             if not line:
                 continue
 
+            req = None
             try:
-                _dispatch(json.loads(line))
+                req = json.loads(line)
+                _dispatch(req)
             except json.JSONDecodeError:
                 _log.warning(f"Malformed JSON: {line[:100]}")
                 pass
             except Exception as exc:
                 _log.error(f"Dispatch error: {exc}", exc_info=True)
+                if isinstance(req, dict) and req.get("id") is not None:
+                    _reply_err(req.get("id"), -32603, f"Internal error: {exc}")
                 sys.stderr.write(f"[{_SERVER_NAME}] unhandled error: {exc}\n")
                 sys.stderr.flush()
 

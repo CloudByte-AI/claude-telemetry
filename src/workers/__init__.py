@@ -9,6 +9,7 @@ from .task_queue import Task, TaskQueue
 from .llm_client import (
     queue_observation_task,
     queue_summary_task,
+    queue_memory_index_task,
     ensure_worker_running,
     request_worker_shutdown,
     get_worker_status,
@@ -21,6 +22,7 @@ __all__ = [
     "LLMWorker",
     "queue_observation_task",
     "queue_summary_task",
+    "queue_memory_index_task",
     "ensure_worker_running",
     "request_worker_shutdown",
     "get_worker_status",

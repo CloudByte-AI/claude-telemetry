@@ -122,7 +122,7 @@ class StatusResponse(BaseModel):
 
 
 class QueueTaskRequest(BaseModel):
-    task_type: str = Field(..., description="Type of task: 'observation' or 'summary'")
+    task_type: str = Field(..., description="Type of task: 'observation', 'summary', or 'memory_index'")
     session_id: str = Field(..., description="Session ID")
     prompt_id: Optional[str] = Field(None, description="Prompt ID (for observation tasks)")
     priority: int = Field(0, description="Task priority (higher = more important)")
@@ -227,6 +227,8 @@ async def restart_worker():
                             _process_observation(task)
                         elif task.task_type == "summary":
                             _process_summary(task)
+                        elif task.task_type == "memory_index":
+                            _process_memory_index(task)
                         else:
                             logger.error(f"Unknown task type: {task.task_type}")
                             _worker_state.task_queue.update_status(task.id, "failed", "Unknown task type")
@@ -282,10 +284,10 @@ async def queue_task(request: QueueTaskRequest):
         raise HTTPException(status_code=503, detail="Worker is shutting down")
 
     # Validate task type
-    if request.task_type not in ("observation", "summary"):
+    if request.task_type not in ("observation", "summary", "memory_index"):
         raise HTTPException(
             status_code=400,
-            detail="Invalid task_type. Must be 'observation' or 'summary'"
+            detail="Invalid task_type. Must be 'observation', 'summary', or 'memory_index'"
         )
 
     # Ensure task queue is initialized
@@ -529,6 +531,8 @@ async def start_worker_processing():
                             _process_observation(task)
                         elif task.task_type == "summary":
                             _process_summary(task)
+                        elif task.task_type == "memory_index":
+                            _process_memory_index(task)
                         else:
                             logger.error(f"Unknown task type: {task.task_type}")
                             _worker_state.task_queue.update_status(task.id, "failed", "Unknown task type")
@@ -641,6 +645,22 @@ def _process_summary(task: Task):
 
     except Exception as e:
         logger.error(f"Error processing summary task: {e}", exc_info=True)
+        raise
+
+
+def _process_memory_index(task: Task):
+    """Process ChromaDB memory indexing task."""
+    from src.common.logging import get_logger
+    logger = get_logger(__name__)
+
+    try:
+        from src.workers.memory_indexer import process_memory_index_task
+
+        result = process_memory_index_task(task.payload, session_id=task.session_id)
+        logger.info(f"Memory index task result: {result}")
+        _worker_state.task_queue.update_status(task.id, "completed")
+    except Exception as e:
+        logger.error(f"Error processing memory index task: {e}", exc_info=True)
         raise
 
 

@@ -114,8 +114,8 @@ class WorkerHTTPRequestHandler(BaseHTTPRequestHandler):
                 self._send_json_error(400, "Missing required fields: task_type, session_id")
                 return
 
-            if task_type not in ("observation", "summary"):
-                self._send_json_error(400, "Invalid task_type. Must be 'observation' or 'summary'")
+            if task_type not in ("observation", "summary", "memory_index"):
+                self._send_json_error(400, "Invalid task_type. Must be 'observation', 'summary', or 'memory_index'")
                 return
 
             # Create task
@@ -359,6 +359,8 @@ class LLMWorker:
                             self._process_observation(task)
                         elif task.task_type == "summary":
                             self._process_summary(task)
+                        elif task.task_type == "memory_index":
+                            self._process_memory_index(task)
                         else:
                             logger.error(f"Unknown task type: {task.task_type}")
                             self.task_queue.update_status(task.id, "failed", "Unknown task type")
@@ -444,6 +446,18 @@ class LLMWorker:
 
         except Exception as e:
             logger.error(f"Error processing summary task: {e}", exc_info=True)
+            raise
+
+    def _process_memory_index(self, task: Task):
+        """Process ChromaDB memory indexing task."""
+        try:
+            from src.workers.memory_indexer import process_memory_index_task
+
+            result = process_memory_index_task(task.payload, session_id=task.session_id)
+            logger.info(f"Memory index task result: {result}")
+            self.task_queue.update_status(task.id, "completed")
+        except Exception as e:
+            logger.error(f"Error processing memory index task: {e}", exc_info=True)
             raise
 
     def _run_main_loop(self):

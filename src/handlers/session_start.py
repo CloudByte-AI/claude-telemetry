@@ -75,6 +75,11 @@ def retry_pending_tasks(session_id: str):
 OBS_INSTRUCTION = (
     "MEMORY SYSTEM ACTIVE.\n\n"
     "You have a tool called mcp__plugin_claude-telemetry_cloudbyte__record_observation.\n\n"
+    "You also have runtime memory tools:\n"
+    "- mcp__plugin_claude-telemetry_cloudbyte__search_memory: search past observations semantically or by metadata.\n"
+    "- mcp__plugin_claude-telemetry_cloudbyte__get_recent_memory: fetch recent project memory.\n"
+    "Use these when past project context would materially help. Prefer active-project memory. "
+    "Do not use them for trivial one-turn tasks.\n\n"
     "RULE: After completing work with tools (Read, Write, Bash, Glob, Grep, etc.), "
     "call mcp__plugin_claude-telemetry_cloudbyte__record_observation BEFORE writing "
     "your final response to the user.\n\n"
@@ -137,7 +142,11 @@ def _ensure_mcp_permission() -> None:
     """
     import json as _json
 
-    MCP_TOOL = "mcp__plugin_claude-telemetry_cloudbyte__record_observation"
+    MCP_TOOLS = [
+        "mcp__plugin_claude-telemetry_cloudbyte__record_observation",
+        "mcp__plugin_claude-telemetry_cloudbyte__search_memory",
+        "mcp__plugin_claude-telemetry_cloudbyte__get_recent_memory",
+    ]
     user_settings = Path.home() / ".claude" / "settings.json"
 
     try:
@@ -178,15 +187,17 @@ def _ensure_mcp_permission() -> None:
             settings["permissions"] = {}
         if "allow" not in settings["permissions"]:
             settings["permissions"]["allow"] = []
-        if MCP_TOOL not in settings["permissions"]["allow"]:
-            settings["permissions"]["allow"].append(MCP_TOOL)
-            changed = True
+        for mcp_tool in MCP_TOOLS:
+            if mcp_tool not in settings["permissions"]["allow"]:
+                settings["permissions"]["allow"].append(mcp_tool)
+                changed = True
 
         if "allowedTools" not in settings:
             settings["allowedTools"] = []
-        if MCP_TOOL not in settings["allowedTools"]:
-            settings["allowedTools"].append(MCP_TOOL)
-            changed = True
+        for mcp_tool in MCP_TOOLS:
+            if mcp_tool not in settings["allowedTools"]:
+                settings["allowedTools"].append(mcp_tool)
+                changed = True
 
         if changed:
             user_settings.write_text(
@@ -262,6 +273,20 @@ def handle_session_start():
                 worker_started = ensure_worker_running()
                 if worker_started:
                     logger.info("LLM worker started successfully")
+                    try:
+                        from src.workers.llm_client import queue_memory_index_task
+
+                        result = queue_memory_index_task(
+                            session_id=session_id or "memory-backfill",
+                            payload={"mode": "backfill", "limit": 1000},
+                            priority=-10,
+                        )
+                        if result.get("status") == "queued":
+                            logger.info(f"Memory backfill task queued: {result.get('task_id')}")
+                        else:
+                            logger.debug(f"Memory backfill not queued: {result.get('message')}")
+                    except Exception as e:
+                        logger.debug(f"Could not queue memory backfill: {e}")
                 else:
                     logger.warning("LLM worker failed to start")
             except ImportError:

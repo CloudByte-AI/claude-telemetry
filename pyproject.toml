@@ -5,6 +5,7 @@ description = "CloudByte - Claude Code Plugin for unified memory and sync system
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "chromadb>=1.0.0",
     "fastapi>=0.135.3",
     "jinja2>=3.1.6",
     "python-multipart>=0.0.26",
@@ -15,6 +16,7 @@ dependencies = [
     "psutil>=5.9.0",
     "markdown>=3.7",
     "ftfy>=6.3.1",
+    "sentence-transformers>=5.0.0",
 ]
 
 [project.optional-dependencies]

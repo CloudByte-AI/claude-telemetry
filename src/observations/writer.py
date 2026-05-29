@@ -101,6 +101,19 @@ def save_observation(
         conn.commit()
         cursor.close()
 
+        try:
+            from src.workers.llm_client import queue_memory_index_task
+
+            result = queue_memory_index_task(
+                session_id=session_id,
+                observation_id=obs_id,
+                priority=-5,
+            )
+            if result.get("status") != "queued":
+                logger.debug(f"Memory index task not queued: {result.get('message', 'unknown error')}")
+        except Exception as queue_error:
+            logger.debug(f"Failed to queue memory index task: {queue_error}")
+
         return obs_id
 
     except Exception as e:

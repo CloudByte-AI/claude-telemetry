@@ -411,6 +411,52 @@ def queue_summary_task(
         return {"status": "error", "message": error_msg}
 
 
+def queue_memory_index_task(
+    session_id: str,
+    observation_id: Optional[str] = None,
+    payload: Optional[Dict[str, Any]] = None,
+    priority: int = -5,
+) -> Dict[str, Any]:
+    """
+    Queue a ChromaDB memory indexing task.
+
+    Args:
+        session_id: Session identifier, or a sentinel value for backfill tasks
+        observation_id: Optional HOOK_OBSERVATION id to index
+        payload: Additional task payload
+        priority: Task priority. Indexing is intentionally lower priority.
+
+    Returns:
+        dict: Worker queue response.
+    """
+    if not ensure_worker_running():
+        return {"status": "error", "message": "Failed to start worker"}
+
+    port = get_worker_port()
+    url = f"http://localhost:{port}/worker/queue"
+
+    data_payload = dict(payload or {})
+    if observation_id:
+        data_payload["observation_id"] = observation_id
+
+    data = {
+        "task_type": "memory_index",
+        "session_id": session_id,
+        "priority": priority,
+        "payload": data_payload,
+    }
+
+    response = _http_post(url, data)
+
+    if response and response.get("status") == "queued":
+        logger.info(f"Memory index task queued: {response['task_id']}")
+        return response
+
+    error_msg = response.get("message", "Unknown error") if response else "No response from worker"
+    logger.error(f"Failed to queue memory index task: {error_msg}")
+    return {"status": "error", "message": error_msg}
+
+
 def request_worker_shutdown() -> bool:
     """
     Request worker to shut down gracefully.
