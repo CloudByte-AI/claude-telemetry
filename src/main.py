@@ -35,6 +35,7 @@ from src.common.file_io import read_json, write_json
 from src.handlers.session_start import handle_session_start, _ensure_mcp_permission
 from src.handlers.user_prompt import handle_user_prompt
 from src.handlers.session_end import handle_session_end
+from src.handlers.permission_request import handle_permission_request
 from src.observations.writer import save_observation
 import json as _json
 import glob as _glob
@@ -79,6 +80,8 @@ def setup() -> None:
                     "log_level": "INFO",
                     "enable_observations": True,
                     "enable_summaries": True,
+                    "alert_sound": "",  # Path to a WAV file for permission alerts. Leave empty to use platform default.
+                    "alert_sound_name": "chime",  # Built-in sound name to use if alert_sound is empty. Options: "chime", "soft", "urgent".
                 },
                 "worker": {
                     "enabled": True,
@@ -157,6 +160,15 @@ def observation() -> None:
     setup_logging(log_to_file=True, log_to_console=False)
     logger.debug("Observation generation hook - LLM integration ready but not yet triggered")
     # TODO: Implement observation generation timing and logic
+
+
+def permission_request() -> None:
+    """
+    PermissionRequest hook - Called when Claude is about to ask the user
+    to approve a tool/command permission.
+    Plays an alert sound so the user notices the pending dialog.
+    """
+    handle_permission_request()
 
 
 def stop() -> None:
@@ -674,6 +686,7 @@ def main():
         "observation": observation,
         "stop": stop,
         "session_end": session_end,
+        "permission_request": permission_request,
     }
 
     handler = handlers.get(command)

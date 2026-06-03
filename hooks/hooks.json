@@ -58,6 +58,18 @@
           }
         ]
       }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --python 3.12  --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.main permission_request",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }

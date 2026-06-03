@@ -111,7 +111,7 @@
         </div>
     </div>
 
-    <form method="post" action="/config" id="config-form">
+    <form method="post" action="/config" id="config-form" enctype="multipart/form-data">
 
         <!-- Features -->
         <!-- <div class="section">
@@ -253,6 +253,94 @@
             </div>
         </div>
 
+        <!-- Alert Sound -->
+        <div class="section">
+            <div class="config-section-label">◈ Alert Sound</div>
+            <div style="background:var(--bg-alt); border:1px solid var(--border); padding:24px;">
+                <div style="font-size:11px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px;">Active Alert Sound</div>
+                <div style="font-size:13px; color:var(--text-dim); line-height:1.5; margin-bottom:24px; max-width:600px;">
+                    Choose which sound plays when Claude requests a permission. Preview any option before saving.
+                    Custom files are converted to WAV in your browser — no server-side tools required.
+                </div>
+
+                <!-- Hidden field submitted with the form -->
+                <input type="hidden" name="sound_source" id="sound-source-input" value="{{ sound_source }}">
+
+                <!-- Radio Cards -->
+                <div id="sound-cards" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:12px; margin-bottom:24px;">
+
+                    {% for card in [('chime','Chime','A bright, melodic alert'),('soft','Soft','A gentle, subtle tone'),('urgent','Urgent','An attention-grabbing alert')] %}
+                    <div class="sound-card {% if sound_source == card[0] %}sound-card--active{% endif %}"
+                         data-sound="{{ card[0] }}"
+                         onclick="selectSoundCard('{{ card[0] }}')"
+                         style="border:2px solid {% if sound_source == card[0] %}#fe4c02{% else %}var(--border){% endif %};
+                                background:{% if sound_source == card[0] %}rgba(254,76,2,0.06){% else %}var(--bg-surface){% endif %};
+                                padding:16px; cursor:pointer; transition:all 0.15s; position:relative; user-select:none;">
+                        <div style="font-size:11px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:4px;">{{ card[0] | upper }}</div>
+                        <div style="font-size:14px; font-weight:600; color:var(--text); margin-bottom:2px;">{{ card[1] }}</div>
+                        <div style="font-size:12px; color:var(--text-dim); margin-bottom:12px;">{{ card[2] }}</div>
+                        <button type="button"
+                                onclick="event.stopPropagation(); previewBuiltin('{{ card[0] }}')"
+                                class="sound-preview-btn"
+                                data-builtin="{{ card[0] }}"
+                                style="font-family:'IBM Plex Mono'; font-size:10px; font-weight:700; letter-spacing:0.05em;
+                                       background:transparent; border:1px solid var(--border); color:var(--text-dim);
+                                       padding:5px 10px; cursor:pointer; border-radius:0; transition:all 0.15s;">
+                            ▶ PREVIEW
+                        </button>
+                        {% if sound_source == card[0] %}
+                        <div style="position:absolute; top:10px; right:10px; width:8px; height:8px; background:#fe4c02; border-radius:50%;"></div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+
+                    <!-- Custom upload card -->
+                    <div class="sound-card {% if sound_source == 'custom' %}sound-card--active{% endif %}"
+                         data-sound="custom"
+                         onclick="selectSoundCard('custom')"
+                         style="border:2px solid {% if sound_source == 'custom' %}#fe4c02{% else %}var(--border){% endif %};
+                                background:{% if sound_source == 'custom' %}rgba(254,76,2,0.06){% else %}var(--bg-surface){% endif %};
+                                padding:16px; cursor:pointer; transition:all 0.15s; position:relative; user-select:none;">
+                        <div style="font-size:11px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:4px;">CUSTOM</div>
+                        <div style="font-size:14px; font-weight:600; color:var(--text); margin-bottom:2px;">Your File</div>
+                        <div style="font-size:12px; color:var(--text-dim); margin-bottom:12px;">
+                            {% if custom_sound_exists %}{{ custom_sound_filename or 'custom_alert.wav' }}{% else %}No file uploaded yet{% endif %}
+                        </div>
+                        <button type="button"
+                                onclick="event.stopPropagation(); previewCustom()"
+                                id="preview-custom-btn"
+                                {% if not custom_sound_exists %}disabled{% endif %}
+                                style="font-family:'IBM Plex Mono'; font-size:10px; font-weight:700; letter-spacing:0.05em;
+                                       background:transparent; border:1px solid var(--border); color:var(--text-dim);
+                                       padding:5px 10px; cursor:pointer; border-radius:0; transition:all 0.15s;
+                                       {% if not custom_sound_exists %}opacity:0.35; cursor:not-allowed;{% endif %}">
+                            ▶ PREVIEW
+                        </button>
+                        {% if sound_source == 'custom' %}
+                        <div style="position:absolute; top:10px; right:10px; width:8px; height:8px; background:#fe4c02; border-radius:50%;"></div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Upload area — shown only when Custom card is selected -->
+                <div id="custom-upload-area"
+                     style="{% if sound_source != 'custom' %}display:none;{% endif %}
+                            border:1px solid var(--border); background:var(--bg-surface); padding:20px; margin-bottom:8px; transition:all 0.2s;">
+                    <div style="font-size:11px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:10px;">
+                        Upload Sound File
+                    </div>
+                    <input type="file" name="custom_alert_file" id="custom-alert-upload"
+                           accept=".mp3,.wav,audio/mpeg,audio/wav"
+                           style="display:block; width:100%; padding:10px; border:1px solid var(--border);
+                                  background:var(--bg-alt); color:var(--text); font-family:'IBM Plex Mono'; font-size:13px; box-sizing:border-box;">
+                    <div id="upload-feedback" style="margin-top:8px; font-size:12px; color:var(--text-dim); min-height:18px; font-family:'IBM Plex Mono';"></div>
+                    <div style="margin-top:8px; font-size:11px; color:var(--text-dim);">
+                        MP3 or WAV · max 10 MB · trimmed to 3 s · converted in browser
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Actions -->
         <div class="section"
             style="display: flex; justify-content: flex-end; margin-top: 24px; border-top: 1px solid var(--border); padding-top: 32px;">
@@ -260,6 +348,16 @@
         </div>
 
     </form>
+</div>
+
+<!-- Loading Overlay -->
+<div id="loading-overlay"
+    style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:10000; align-items:center; justify-content:center;">
+    <div style="text-align:center; color:#fff;">
+        <div style="font-size:48px; margin-bottom:16px;">⏳</div>
+        <div style="font-family:'IBM Plex Mono'; font-size:16px; font-weight:700; letter-spacing:0.05em;">UPLOADING SOUND...</div>
+        <div style="font-family:'IBM Plex Mono'; font-size:11px; margin-top:8px; opacity:0.8;">Saving your custom alert</div>
+    </div>
 </div>
 
 <!-- Custom Modal -->
@@ -493,4 +591,5 @@
             });
     }, 10000);
 </script>
+<script src="/static/js/config/config.js"></script>
 {% endblock %}

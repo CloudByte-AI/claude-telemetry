@@ -1,6 +1,7 @@
 """Business logic for the configuration page."""
 
 from ..queries.config import load_config, save_config, config_exists
+from src.common.paths import get_cloudbyte_dir, get_logs_dir
 
 PLACEHOLDER_KEYS = {"enter_your_api_key_here", "YOUR_GEMINI_API_KEY", ""}
 
@@ -27,6 +28,15 @@ def get_config_context() -> dict:
         and not key_set
     )
 
+    # Derive which sound source is currently active for the radio UI
+    _custom_path = settings.get("alert_sound", "")
+    _sound_source = "custom" if _custom_path else (settings.get("alert_sound_name") or "chime")
+    # Does a saved custom file actually exist on disk?
+    _custom_exists = bool(_custom_path)
+    if not _custom_exists:
+        from src.common.paths import get_cloudbyte_dir
+        _custom_exists = (get_cloudbyte_dir() / "sounds" / "custom_alerts" / "custom_alert.wav").exists()
+
     return {
         "active":          "config",
         "config":          cfg,
@@ -36,6 +46,9 @@ def get_config_context() -> dict:
         "worker":          worker,
         "api_key_set":     key_set,
         "feature_warning": feature_warning,
+        "sound_source":    _sound_source,
+        "custom_sound_exists": _custom_exists,
+        "custom_sound_filename": _custom_path.replace("\\", "/").split("/")[-1] if _custom_path else "",
     }
 
 
@@ -73,6 +86,22 @@ def update_config(form: dict) -> tuple[bool, str]:
         if new_port:
             cfg["worker"]["port"] = _int(new_port, cfg["worker"].get("port", 8765))
 
+        # ── Custom Alert Sound ────────────────────────────────────────────────
+        # sound_source is the single source of truth:
+        #   "chime" | "soft" | "urgent"  → clear alert_sound, set alert_sound_name
+        #   "custom"                      → set alert_sound to uploaded file path
+        sound_source = form.get("sound_source", "").strip().lower()
+
+        if sound_source in ("chime", "soft", "urgent"):
+            cfg["settings"]["alert_sound"] = ""                  # clear custom
+            cfg["settings"]["alert_sound_name"] = sound_source
+        elif sound_source == "custom":
+            # Route already wrote the file and set _alert_sound_path
+            if form.get("_alert_sound_path"):
+                cfg["settings"]["alert_sound"] = form["_alert_sound_path"]
+                # Keep alert_sound_name in case user switches back later
+            # If no new file was uploaded, keep existing alert_sound as-is
+
         save_config(cfg)
 
         # Check if we should add a warning about features + missing key
@@ -107,7 +136,7 @@ def _int(val, default: int) -> int:
 def count_old_log_files() -> int:
     """Return the number of log files older than 3 days."""
     import time
-    from common.paths import get_logs_dir
+    from src.common.paths import get_logs_dir
 
     logs_dir = get_logs_dir()
     if not logs_dir.exists():
@@ -123,7 +152,7 @@ def count_old_log_files() -> int:
 def run_log_cleanup() -> int:
     """Delete log files older than 3 days and return the number deleted."""
     import time
-    from common.paths import get_logs_dir
+    from src.common.paths import get_logs_dir
 
     logs_dir = get_logs_dir()
     if not logs_dir.exists():
@@ -147,7 +176,7 @@ def preview_database_cleanup() -> dict:
     Returns counts and details without deleting anything.
     """
     from ..routers.db import q
-    from common.logging import get_cloudbyte_logger
+    from src.common.logging import get_cloudbyte_logger
 
     logger = get_cloudbyte_logger(__name__)
     logger.info("Previewing database cleanup")
@@ -174,7 +203,7 @@ def run_database_cleanup() -> dict:
     Returns a summary of deleted items.
     """
     from ..routers.db import cmd, q
-    from common.logging import get_cloudbyte_logger
+    from src.common.logging import get_cloudbyte_logger
     
     logger = get_cloudbyte_logger(__name__)
     logger.info("Starting database cleanup process")
