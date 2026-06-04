@@ -80,6 +80,7 @@ def setup() -> None:
                     "log_level": "INFO",
                     "enable_observations": True,
                     "enable_summaries": True,
+                    "audio_enabled": True,  # Enable/disable audio alerts for permission requests
                     "alert_sound": "",  # Path to a WAV file for permission alerts. Leave empty to use platform default.
                     "alert_sound_name": "chime",  # Built-in sound name to use if alert_sound is empty. Options: "chime", "soft", "urgent".
                 },

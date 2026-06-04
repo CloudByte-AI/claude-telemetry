@@ -2,6 +2,10 @@
 
 from ..queries.config import load_config, save_config, config_exists
 from src.common.paths import get_cloudbyte_dir, get_logs_dir
+from src.common.logging import get_cloudbyte_logger
+import yaml
+import os
+from pathlib import Path
 
 PLACEHOLDER_KEYS = {"enter_your_api_key_here", "YOUR_GEMINI_API_KEY", ""}
 
@@ -29,13 +33,43 @@ def get_config_context() -> dict:
     )
 
     # Derive which sound source is currently active for the radio UI
-    _custom_path = settings.get("alert_sound", "")
-    _sound_source = "custom" if _custom_path else (settings.get("alert_sound_name") or "chime")
-    # Does a saved custom file actually exist on disk?
-    _custom_exists = bool(_custom_path)
-    if not _custom_exists:
+    # Read from audio profile YAML (same source as permission handler)
+    _custom_path = ""
+    _sound_source = "chime"
+    _custom_exists = False
+
+    try:
         from src.common.paths import get_cloudbyte_dir
-        _custom_exists = (get_cloudbyte_dir() / "sounds" / "custom_alerts" / "custom_alert.wav").exists()
+        audio_profile_path = get_cloudbyte_dir() / "audio_profile.yaml"
+        if audio_profile_path.exists():
+            with open(audio_profile_path, encoding='utf-8') as f:
+                audio_profile = yaml.safe_load(f) or {}
+
+            sound_type = audio_profile.get('sound_type', 'default')
+            sound_value = audio_profile.get('sound', '')
+
+            if sound_type == "custom" and sound_value:
+                _custom_path = sound_value
+                _sound_source = "custom"
+            elif sound_type in ("chime", "soft", "urgent"):
+                _sound_source = sound_type
+            else:
+                _sound_source = "chime"  # fallback
+
+            # Check if custom file exists
+            _custom_exists = bool(_custom_path) and Path(_custom_path).exists()
+    except Exception as e:
+        logger.debug(f"Could not read audio profile YAML: {e}")
+        # Fallback to legacy config.json behavior
+        _custom_path = settings.get("alert_sound", "")
+        _sound_source = "custom" if _custom_path else (settings.get("alert_sound_name") or "chime")
+        _custom_exists = bool(_custom_path)
+        if not _custom_exists:
+            from src.common.paths import get_cloudbyte_dir
+            _custom_exists = (get_cloudbyte_dir() / "sounds" / "custom_alerts" / "custom_alert.wav").exists()
+
+    # Get audio alerts enabled status (default to True for backward compatibility)
+    _audio_enabled = settings.get("audio_enabled", True)
 
     return {
         "active":          "config",
@@ -49,6 +83,7 @@ def get_config_context() -> dict:
         "sound_source":    _sound_source,
         "custom_sound_exists": _custom_exists,
         "custom_sound_filename": _custom_path.replace("\\", "/").split("/")[-1] if _custom_path else "",
+        "audio_enabled":   _audio_enabled,
     }
 
 
@@ -80,6 +115,8 @@ def update_config(form: dict) -> tuple[bool, str]:
 
         # ── Features — save whatever user set, just warn if key missing ───────
         cfg["settings"]["enable_observations"] = form.get("enable_observations") == "1"
+        # Audio alerts enabled/disabled toggle
+        cfg["settings"]["audio_enabled"] = form.get("audio_enabled") == "1"
 
         # ── Worker port ───────────────────────────────────────────────────────
         new_port = form.get("worker_port", "").strip()
@@ -103,6 +140,28 @@ def update_config(form: dict) -> tuple[bool, str]:
             # If no new file was uploaded, keep existing alert_sound as-is
 
         save_config(cfg)
+
+        # Save audio settings to audio profile YAML (similar to security profiles)
+        try:
+            audio_profile_path = get_cloudbyte_dir() / "audio_profile.yaml"
+            # Determine sound type from form data (what user just selected)
+            sound_source = form.get("sound_source", "").strip().lower()
+            # Determine sound value: if custom, use alert_sound path; otherwise empty
+            sound_value = ""
+            if sound_source == "custom":
+                # Use the alert_sound value which was set from _alert_sound_path if provided
+                sound_value = cfg["settings"].get("alert_sound", "")
+
+            audio_data = {
+                'enabled': cfg["settings"].get("audio_enabled", True),
+                'sound_type': sound_source if sound_source in ("chime", "soft", "urgent", "custom") else "default",
+                'sound': sound_value
+            }
+
+            with open(audio_profile_path, 'w', encoding='utf-8') as f:
+                yaml.dump(audio_data, f, default_flow_style=False)
+        except Exception as e:
+            logger.debug(f"Could not save audio profile YAML: {e}")
 
         # Check if we should add a warning about features + missing key
         key_is_real = _api_key_is_real(ep.get("api_key", ""))

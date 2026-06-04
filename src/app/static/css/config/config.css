@@ -1,3 +1,36 @@
+/* ── Tab Navigation ── */
+.config-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.config-tab {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 11px 18px;
+    color: var(--text-dim);
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: color 0.12s;
+    margin-bottom: -1px;
+    border-radius: 0;
+}
+.config-tab:hover   { color: var(--text-muted); }
+.config-tab.active  { color: var(--text); border-bottom-color: var(--accent); }
+
+/* ── Tab Panes ── */
+.tab-pane { display: none; }
+.tab-pane.active { display: block; }
+
 /* ── System Config Industrial Overhaul ── */
 
 .config-form-container {

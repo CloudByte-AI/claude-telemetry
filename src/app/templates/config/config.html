@@ -3,7 +3,7 @@
 {% block breadcrumb %}system / configuration{% endblock %}
 
 {% block head %}
-<link rel="stylesheet" href="/static/css/config/config.css">
+<link rel="stylesheet" href="/static/css/config/config.css?v=1.1">
 {% endblock %}
 
 {% block content %}
@@ -64,8 +64,21 @@
 </div>
 {% endif %}
 
-<div class="config-form-container">
-    <!-- Database Maintenance -->
+    <!-- Tab Navigation -->
+    <div class="config-tabs" style="margin-bottom: 32px;">
+        <button type="button" class="config-tab active" data-tab-target="maintenance" onclick="switchTab('maintenance')">
+            Maintenance
+        </button>
+        <button type="button" class="config-tab" data-tab-target="audio" onclick="switchTab('audio')">
+            Audio Alerts
+        </button>
+    </div>
+
+    <form method="post" action="/config" id="config-form" enctype="multipart/form-data">
+
+    <div class="config-form-container">
+        <div id="tab-maintenance" class="tab-pane active">
+            <!-- Database Maintenance -->
     <div class="section">
         <div class="config-section-label">◈ Database Maintenance</div>
         <div style="background:var(--bg-alt); border:1px solid var(--border); padding:24px;">
@@ -111,8 +124,6 @@
         </div>
     </div>
 
-    <form method="post" action="/config" id="config-form" enctype="multipart/form-data">
-
         <!-- Features -->
         <!-- <div class="section">
         <div class="config-section-label">◈ Feature Intelligence</div>
@@ -139,7 +150,7 @@
         <div class="config-section-label">◎ LLM Infrastructure</div>
         <div class="field-grid">
             <div class="field-group">
-                <label class="field-label">Provider String</label>
+                <label class="field-label">Provider String</label
                 <input type="text" name="provider" class="field-input" value="{{ endpoint.provider or '' }}" placeholder="gemini/gemini-api">
             </div>
             <div class="field-group">
@@ -252,11 +263,28 @@
                 </button>
             </div>
         </div>
+    </div>
 
+    <div id="tab-audio" class="tab-pane">
         <!-- Alert Sound -->
         <div class="section">
             <div class="config-section-label">◈ Alert Sound</div>
             <div style="background:var(--bg-alt); border:1px solid var(--border); padding:24px;">
+                <!-- Enable/Disable Toggle -->
+                <div class="toggle-row">
+                    <div class="toggle-info">
+                        <div class="toggle-label">Audio Alerts</div>
+                        <div style="font-size: 13px; color: var(--text-dim); line-height: 1.4;">Play a sound when Claude requests permission</div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:16px;">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="audio-enabled-cb" value="1" {% if audio_enabled %}checked{% endif %} onchange="syncToggle('audio-enabled-cb','audio_enabled-hidden')">
+                            <span class="toggle-slider"></span>
+                            <input type="hidden" name="audio_enabled" id="audio_enabled-hidden" value="{{ '1' if audio_enabled else '0' }}">
+                        </label>
+                    </div>
+                </div>
+
                 <div style="font-size:11px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px;">Active Alert Sound</div>
                 <div style="font-size:13px; color:var(--text-dim); line-height:1.5; margin-bottom:24px; max-width:600px;">
                     Choose which sound plays when Claude requests a permission. Preview any option before saving.
@@ -340,10 +368,11 @@
                 </div>
             </div>
         </div>
+    </div>
 
-        <!-- Actions -->
-        <div class="section"
-            style="display: flex; justify-content: flex-end; margin-top: 24px; border-top: 1px solid var(--border); padding-top: 32px;">
+    <!-- Actions -->
+    <div class="section"
+        style="display: flex; justify-content: flex-end; margin-top: 24px; border-top: 1px solid var(--border); padding-top: 32px;">
             <button type="submit" class="btn-save">SAVE SYSTEM CHANGES ↗</button>
         </div>
 
@@ -392,9 +421,31 @@
 {% block scripts %}
 <script>
     function syncToggle(cbId, hiddenId) {
-        var cb = document.getElementById(cbId);
-        var hidden = document.getElementById(hiddenId);
-        if (hidden) hidden.value = cb.checked ? '1' : '0';
+        try {
+            var cb = document.getElementById(cbId);
+            var hidden = document.getElementById(hiddenId);
+            console.log('syncToggle called with:', {cbId: cbId, hiddenId: hiddenId, cbFound: !!cb, hiddenFound: !!hidden});
+            if (cb && hidden) {
+                console.log('Checkbox state before change:', {checked: cb.checked, value: cb.value});
+                hidden.value = cb.checked ? '1' : '0';
+                console.log('Hidden field updated to:', hidden.value);
+                // Optional: log for debugging
+                console.log('Audio alerts toggle changed to:', cb.checked ? 'enabled' : 'disabled');
+            } else {
+                console.error('Toggle elements not found:', {cbId: !!cb, hiddenId: !!hidden, cbElement: cb, hiddenElement: hidden});
+            }
+        } catch (e) {
+            console.error('Error in syncToggle:', e);
+        }
+    }
+
+    function switchTab(tabName) {
+        document.querySelectorAll('.config-tab').forEach(function(btn) {
+            btn.classList.toggle('active', btn.dataset.tabTarget === tabName);
+        });
+        document.querySelectorAll('.tab-pane').forEach(function(pane) {
+            pane.classList.toggle('active', pane.id === 'tab-' + tabName);
+        });
     }
 
     function workerAction(action) {
