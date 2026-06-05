@@ -467,16 +467,10 @@ def handle_user_prompt():
                         f"✅ Your prompt has been sanitized. Copy the masked version below to resubmit:\n\n"
                         f"{_masked}"
                     )
-                    _system_msg = (
-                        f"⚠️ {len(_sec_result.findings)} sensitive item(s) detected and blocked."
-                        f" Scanned {_sec_result.line_count} lines in {_sec_result.scan_ms}ms."
-                        f" Event logged to telemetry."
-                    )
                     print(json.dumps({
                         "decision": "block",
-                        "suppressOriginalPrompt": True,
                         "reason": _reason,
-                        "systemMessage": _system_msg,
+                        "suppressOriginalPrompt": True,
                     }))
                     return
         except Exception as _sec_err:

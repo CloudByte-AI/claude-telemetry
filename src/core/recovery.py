@@ -33,9 +33,12 @@ from src.integrations.claude.reader import (
     normalize_project_name,
     read_jsonl_file,
 )
+from src.observations.writer import save_observation
 
 
 logger = get_logger(__name__)
+
+MCP_OBS_TOOL = "mcp__plugin_claude-telemetry_cloudbyte__record_observation"
 
 # Maps interrupt text → interrupt_reason value stored in USER_PROMPT
 INTERRUPT_TEXT_TO_REASON = {
@@ -424,6 +427,20 @@ def _recover_interrupted_prompt(
                     "output_tokens": usage.get("output_tokens", 0),
                 })
 
+        # ── Save any MCP record_observation calls to HOOK_OBSERVATION ─────────
+        for tool_use in merged["tool_uses"]:
+            if tool_use.get("name") != MCP_OBS_TOOL:
+                continue
+            try:
+                obs_data = tool_use.get("input", {})
+                if isinstance(obs_data, str):
+                    obs_data = json.loads(obs_data)
+                if obs_data.get("title"):
+                    save_observation(session_id=session_id, prompt_id=db_prompt_id, obs_data=obs_data)
+                    logger.info(f"recovery pass1: saved MCP observation: {obs_data.get('title')}")
+            except Exception as obs_err:
+                logger.warning(f"recovery pass1: MCP obs save failed: {obs_err}")
+
     logger.info(f"recovery pass1: recovered interrupted promptId={prompt_id} db_prompt_id={db_prompt_id}")
     return True
 
@@ -540,6 +557,21 @@ def process_missed_pairs(session_id: str, cwd: str) -> dict:
 
             counts["pass2"] += 1
             logger.info(f"recovery pass2: recovered message_id={message_id}")
+
+            # Save any MCP record_observation calls to HOOK_OBSERVATION
+            for tool in db_data.get("tools", []):
+                if tool["prompt_id"] != jsonl_prompt_id:
+                    continue
+                if tool.get("tool_name") != MCP_OBS_TOOL:
+                    continue
+                try:
+                    raw_input = tool.get("input_json", "{}")
+                    obs_data = json.loads(raw_input) if isinstance(raw_input, str) else raw_input
+                    if obs_data.get("title"):
+                        save_observation(session_id=session_id, prompt_id=db_prompt_id, obs_data=obs_data)
+                        logger.info(f"recovery pass2: saved MCP observation: {obs_data.get('title')}")
+                except Exception as obs_err:
+                    logger.warning(f"recovery pass2: MCP obs save failed: {obs_err}")
 
     except Exception as exc:
         logger.error(f"process_missed_pairs failed: {exc}", exc_info=True)
