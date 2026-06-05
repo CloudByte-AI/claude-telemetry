@@ -598,7 +598,7 @@ def stop() -> None:
         # ── Response security scan ────────────────────────────────────────────
         # Runs after all DB writes. Response is never blocked — findings are
         # logged to SECURITY_SCAN_EVENT with masked text and surfaced as a
-        # UI notice via plain stdout (Stop hook surfaces output as plain text).
+        # UI notice via systemMessage.
         try:
             from src.security.config import load_security_config
             from src.security.scanner import scan_text
@@ -626,11 +626,13 @@ def stop() -> None:
                         _summary = ", ".join(f.detector for f in _sec_result.findings[:3])
                         if len(_sec_result.findings) > 3:
                             _summary += f" +{len(_sec_result.findings) - 3} more"
-                        print(
-                            f"⚠️ Security: {len(_sec_result.findings)} sensitive item(s) detected"
-                            f" in Claude's response ({_summary})."
-                            f" Event logged to telemetry."
-                        )
+                        print(_json.dumps({
+                            "systemMessage": (
+                                f"⚠️ Security: {len(_sec_result.findings)} sensitive item(s) detected"
+                                f" in Claude's response ({_summary})."
+                                f" Event logged to telemetry."
+                            )
+                        }))
         except Exception as _sec_err:
             logger.warning(f"Response security scan error (non-fatal): {_sec_err}")
 

@@ -307,6 +307,10 @@ def _scan_lines_batch(lines: list[tuple[int, str]], ds_config: dict) -> list[Fin
                             has_alpha = any(c.isalpha() for c in secret_val)
                             if not (has_digit and has_alpha):
                                 continue
+                            # Skip if the token is part of a URL — path segments,
+                            # query params, and signed URLs are high-entropy by design.
+                            if any(secret_val in m.group() for m in _URL_RE.finditer(line)):
+                                continue
 
                         tag = f"[REDACTED:{label}]"
                         findings.append(Finding(
@@ -365,6 +369,11 @@ _DS_ENTROPY_LABELS = frozenset({"HEX_HIGH_ENTROPY_STRING", "BASE64_HIGH_ENTROPY_
 # Minimum length for entropy findings to be considered real secrets.
 # Real API keys are almost always ≥ 20 chars; English words almost never reach that.
 _ENTROPY_MIN_LEN = 20
+
+# URL context guard: if a high-entropy token is embedded inside a URL it is almost
+# certainly a path segment, query parameter, or signing token — not a credential
+# the user typed.  We match greedily up to a whitespace/quote boundary.
+_URL_RE = re.compile(r'https?://\S+')
 
 
 def _scan_custom(text: str, cfg: ScanConfig) -> list[Finding]:
