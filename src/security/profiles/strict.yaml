@@ -11,7 +11,7 @@
 # built-in custom patterns (AI keys, DB strings, payment keys, etc.).
 plan: strict
 enabled: true
-scope: both
+scope: prompt_only
 
 # ── Shared defaults ──────────────────────────────────────────────────────────
 
@@ -65,7 +65,7 @@ detectors:
   BEARER_TOKEN: true
 
 entropy:
-  enabled: true
+  enabled: false
   hex_limit: 2.5
   base64_limit: 4.0
 
@@ -79,7 +79,7 @@ keyword_blocklist: []
 # ── Per-scan-point: prompts get max strictness, responses relax entropy ──────
 prompt:
   entropy:
-    enabled: true
+    enabled: false
     hex_limit: 2.5
     base64_limit: 4.0
   pii:
@@ -88,8 +88,8 @@ prompt:
 
 response:
   entropy:
-    enabled: true
-    hex_limit: 3.0       # looser — Claude's own code output has more variable-like strings
+    enabled: false
+    hex_limit: 3.0
     base64_limit: 4.5
   pii:
     email: true

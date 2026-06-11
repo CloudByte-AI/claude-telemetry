@@ -45,8 +45,8 @@ const PRESETS = {
             INLINE_PASSWORD:false,BEARER_TOKEN:false,
         },
         pii:{email:false,phone:false},
-        entropy:{enabled:true,hex_limit:3.5,base64_limit:4.5},
-        scope:'both',
+        entropy:{enabled:false,hex_limit:3.5,base64_limit:4.5},
+        scope:'prompt_only',
     },
     strict: {
         detectors: {
@@ -67,8 +67,8 @@ const PRESETS = {
             INLINE_PASSWORD:true,BEARER_TOKEN:true,
         },
         pii:{email:true,phone:true},
-        entropy:{enabled:true,hex_limit:2.5,base64_limit:4.0},
-        scope:'both',
+        entropy:{enabled:false,hex_limit:2.5,base64_limit:4.0},
+        scope:'prompt_only',
     },
 };
 
@@ -170,7 +170,9 @@ function applyPreset(name) {
     // Entropy
     const etog = document.getElementById('entropy-toggle');
     if (etog) {
-        etog.classList.toggle('sec-toggle-on', preset.entropy.enabled);
+        etog.classList.toggle('ent-toggle-on', preset.entropy.enabled);
+        const elabel = etog.querySelector('.ent-toggle-label');
+        if (elabel) elabel.textContent = preset.entropy.enabled ? 'ON' : 'OFF';
         document.getElementById('entropy-enabled-input').value = preset.entropy.enabled ? '1' : '0';
         document.getElementById('entropy-fields').classList.toggle('entropy-off', !preset.entropy.enabled);
     }
@@ -277,6 +279,18 @@ function updateTooltipToggleBtn(chip) {
 function tooltipToggle() {
     if (!_activeChip) return;
     toggleChip(_activeChip);
+}
+
+// ── Entropy toggle ────────────────────────────────────
+function toggleEntropy() {
+    const btn    = document.getElementById('entropy-toggle');
+    const input  = document.getElementById('entropy-enabled-input');
+    const fields = document.getElementById('entropy-fields');
+    if (!btn) return;
+    const nowOn = btn.classList.toggle('ent-toggle-on');
+    btn.querySelector('.ent-toggle-label').textContent = nowOn ? 'ON' : 'OFF';
+    if (input)  input.value = nowOn ? '1' : '0';
+    if (fields) fields.classList.toggle('entropy-off', !nowOn);
 }
 
 // ── Entropy stepper ───────────────────────────────────

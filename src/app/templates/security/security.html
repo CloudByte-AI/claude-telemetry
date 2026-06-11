@@ -420,12 +420,16 @@
 
     <!-- Entropy Detection -->
     <div class="sc-card sc-card-muted">
-        <div class="sc-card-hdr sc-card-hdr-compact">
+        <div class="sc-card-hdr sc-card-hdr-compact" style="display:flex;align-items:center;justify-content:space-between;">
             <span class="sec-section-label">Entropy Detection</span>
+            <button type="button" id="entropy-toggle" class="ent-toggle{% if entropy.enabled %} ent-toggle-on{% endif %}" onclick="toggleEntropy()" title="Enable/disable entropy detection">
+                <span class="ent-toggle-knob"></span>
+                <span class="ent-toggle-label">{{ 'ON' if entropy.enabled else 'OFF' }}</span>
+            </button>
         </div>
-        <div class="sc-card-desc" style="margin-bottom:14px;">Catches unknown key formats by measuring randomness. Lower = more sensitive.</div>
-        <input type="hidden" name="entropy_enabled" value="1">
-        <div class="ent-grid" id="entropy-fields">
+        <div class="sc-card-desc" style="margin-bottom:14px;">Catches unknown key formats by measuring randomness. Lower = more sensitive. Disabled by default — can cause false positives on URLs and common strings.</div>
+        <input type="hidden" id="entropy-enabled-input" name="entropy_enabled" value="{{ '1' if entropy.enabled else '0' }}">
+        <div class="ent-grid{% if not entropy.enabled %} entropy-off{% endif %}" id="entropy-fields">
             <div class="ent-field">
                 <label class="ent-label">Hex</label>
                 <div class="ent-stepper">

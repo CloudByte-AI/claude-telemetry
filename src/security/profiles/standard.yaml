@@ -12,7 +12,7 @@
 # built-in custom patterns (AI keys, DB strings, payment keys, etc.).
 plan: standard
 enabled: true
-scope: both
+scope: prompt_only
 
 # ── Shared defaults ──────────────────────────────────────────────────────────
 
@@ -65,12 +65,11 @@ detectors:
   INLINE_PASSWORD: false            # catches "password = getenv(...)" — noisy in dev code
   BEARER_TOKEN: false               # catches test/mock auth headers — noisy in dev code
 
-# Entropy: base64 only at standard threshold.
-# Hex entropy disabled — at 3.5 it still catches UUIDs and test hashes frequently.
-# Enable in strict for maximum coverage.
+# Entropy: disabled by default — causes false positives on URLs and common strings.
+# Enable manually in ~/.cloudbyte/security_profile.yaml if you want entropy detection.
 entropy:
-  enabled: true
-  hex_limit: 3.5                    # raised from 3.0 — fewer FPs on UUIDs and hex constants
+  enabled: false
+  hex_limit: 3.5
   base64_limit: 4.5
 
 pii:
