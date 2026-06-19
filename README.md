@@ -39,7 +39,7 @@ Before installing this plugin, ensure you have the following:
 /plugin marketplace add CloudByte-AI/claude-telemetry
 
 # Install the plugin
-/plugin install claude-telemetry@CloudByte-AI
+/plugin install claude-telemetry@claude-telemetry
 
 # Reload plugins
 /reload-plugins
