@@ -451,9 +451,9 @@ function editPattern(btn) {
             document.getElementById('pm-result').style.display = '';
         }
     } else if (data.pattern) {
-        // Regex-only mode
-        switchPmTab('regex', null);
+        // Regex-only mode — set value BEFORE switchPmTab so updatePmSaveBtn sees it
         document.getElementById('pm-regex-val').value = data.pattern;
+        switchPmTab('regex', null);
     }
 }
 
@@ -465,6 +465,14 @@ function switchPmTab(name, btn) {
     });
     document.getElementById('pm-panel-examples').classList.toggle('pm-panel-active', name === 'examples');
     document.getElementById('pm-panel-regex').classList.toggle('pm-panel-active', name === 'regex');
+    updatePmSaveBtn();
+}
+
+function updatePmSaveBtn() {
+    if (_pmActiveTab !== 'regex') return;
+    const val     = (document.getElementById('pm-regex-val')?.value || '').trim();
+    const saveBtn = document.getElementById('pm-save');
+    if (saveBtn) saveBtn.disabled = !val;
 }
 
 function addExRow() {

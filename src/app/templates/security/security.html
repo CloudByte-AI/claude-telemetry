@@ -580,7 +580,8 @@
                 <div class="pm-field">
                     <label class="pm-label">Regular expression</label>
                     <input type="text" id="pm-regex-val" class="pm-input"
-                           placeholder="e.g. (?&lt;![a-zA-Z0-9])MYCO_[a-zA-Z0-9]{16}">
+                           placeholder="e.g. (?&lt;![a-zA-Z0-9])MYCO_[a-zA-Z0-9]{16}"
+                           oninput="updatePmSaveBtn()">
                 </div>
                 <div class="pm-regex-hint">
                     Tested with Python's <code>re.finditer()</code> — use lookbehind/lookahead to avoid partial matches.
