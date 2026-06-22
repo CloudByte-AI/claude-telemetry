@@ -45,3 +45,6 @@ DESIGN.md
 
 context/
 tests/
+
+.claude/
+.pytest_cache/

@@ -4,7 +4,7 @@ Processes longest matches first to avoid partial replacement issues.
 Idempotent: already-redacted placeholders are never double-redacted.
 """
 
-from src.security.scanner import Finding
+from src.security.detectors.base import Finding
 
 
 def mask_text(text: str, findings: list[Finding]) -> str:

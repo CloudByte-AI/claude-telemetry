@@ -1,27 +1,27 @@
 """
 Security scanning configuration loader.
 
-Reads ~/.cloudbyte/security_profile.yaml on every invocation.
+Reads ~/.cloudbyte/security_profile_v2.yaml on every invocation.
 Falls back to standard preset if the file is missing or malformed.
 
-Config supports two formats:
+Config format:
+  enabled: true
+  scope: prompt_only   # 'prompt_only' | 'both'
+  plan: standard       # 'minimal' | 'standard' | 'strict'
+  categories:
+    AWS: true
+    OpenAI: true
+    Email Address: false   # each key is the CATEGORY of a registered detector
+  custom_patterns: []
+  keyword_blocklist: []
 
-  Flat (backward-compatible) — shared config for both scan points:
-    enabled: true
-    detectors: {AWSKeyDetector: true, ...}
-    pii: {ssn: true}
-
-  Per-scan-point — separate config for prompt and response:
-    enabled: true
-    detectors: {AWSKeyDetector: true}   # top-level defaults
-    prompt:
-      pii: {ssn: true, credit_card: true}
-    response:
-      entropy: {enabled: false}
-      pii: {email: false}
-
-When prompt:/response: sections are present they override top-level defaults
-for that scan point only. Missing keys fall through to top-level values.
+Per-scan-point overrides (optional):
+  prompt:
+    categories:
+      Email Address: true
+  response:
+    categories:
+      JWT: false
 """
 
 import re
@@ -36,35 +36,34 @@ from src.common.logging import get_logger
 
 logger = get_logger(__name__)
 
-PROFILES_DIR = Path(__file__).parent / "profiles"
-USER_CONFIG_PATH = Path.home() / ".cloudbyte" / "security_profile.yaml"
+PROFILES_DIR    = Path(__file__).parent / "profiles"
+USER_CONFIG_PATH = Path.home() / ".cloudbyte" / "security_profile_v2.yaml"
 
 
 @dataclass
 class ScanConfig:
     """
-    Scan-specific settings — applies to one scan point (prompt or response).
-    Shared between both points unless the user defines per-point overrides.
+    Scan settings applied to one scan point (prompt or response).
+
+    categories:       CATEGORY → enabled bool.
+                      Missing keys fall back to the detector's ENABLED_BY_DEFAULT.
+    custom_patterns:  list of [{name, pattern, severity}] dicts (user-defined extra regex).
+    keyword_blocklist: list of literal strings to flag.
+    allowlist:        exact secret values that should NEVER be flagged or block a prompt.
+                      Checked before any Finding is created — zero detector overhead.
     """
-    # detector name → enabled bool (empty dict = all on)
-    detectors: dict = field(default_factory=dict)
-    # {enabled, hex_limit, base64_limit}
-    entropy: dict = field(default_factory=dict)
-    # pii type → enabled bool  (credit_card, ssn, email, phone)
-    pii: dict = field(default_factory=dict)
-    # [{name, pattern, severity}]
+    categories: dict = field(default_factory=dict)
     custom_patterns: list = field(default_factory=list)
     keyword_blocklist: list = field(default_factory=list)
+    allowlist: list = field(default_factory=list)
 
 
 @dataclass
 class SecurityConfig:
-    """Top-level security config loaded from security_profile.yaml."""
+    """Top-level security config loaded from security_profile_v2.yaml."""
     enabled: bool = False
     plan: str = "standard"
-    # 'prompt_only' | 'both'
     scope: str = "both"
-    # Per-scan-point configs (may be the same object if no overrides)
     prompt_config: ScanConfig = field(default_factory=ScanConfig)
     response_config: ScanConfig = field(default_factory=ScanConfig)
 
@@ -84,47 +83,12 @@ def _load_preset(name: str) -> dict:
         return {}
 
 
-def _check_example_overlap(examples: list[str], name: str) -> list[str]:
-    """
-    Run examples through every detect-secrets built-in detector.
-    Returns the list of detector types that already catch these examples,
-    indicating the user may not need a custom pattern for this format.
-    """
-    overlapping: list[str] = []
-    try:
-        from detect_secrets.core.scan import scan_line
-        from detect_secrets.settings import transient_settings
-
-        all_ds_plugins = [
-            {"name": n} for n in [
-                "AWSKeyDetector", "ArtifactoryDetector", "AzureStorageKeyDetector",
-                "BasicAuthDetector", "CloudantDetector", "DiscordBotTokenDetector",
-                "GitHubTokenDetector", "GitLabTokenDetector", "IbmCloudIamDetector",
-                "IbmCosHmacDetector", "JwtTokenDetector", "KeywordDetector",
-                "MailchimpDetector", "NpmDetector", "OpenAIDetector", "PrivateKeyDetector",
-                "PypiTokenDetector", "SendGridDetector", "SlackDetector", "SoftlayerDetector",
-                "SquareOAuthDetector", "StripeDetector", "TelegramBotTokenDetector",
-                "TwilioKeyDetector",
-            ]
-        ]
-        with transient_settings({"plugins_used": all_ds_plugins}):
-            for ex in examples:
-                for secret in scan_line(ex):
-                    det = secret.type
-                    if det not in overlapping:
-                        overlapping.append(det)
-    except Exception:
-        pass
-    return overlapping
-
-
 def _validate_patterns(patterns: list, label: str, cwd: str | None = None) -> list:
     """
     Validate and normalise custom patterns.
 
-    Supports two modes:
-      Mode A — examples list: system generates a regex pattern automatically.
-      Mode B — manual regex: validated and used as-is.
+    Mode A — examples-based: system generates a regex automatically.
+    Mode B — manual regex: compiled and used as-is.
     """
     valid = []
     for p in patterns:
@@ -135,7 +99,7 @@ def _validate_patterns(patterns: list, label: str, cwd: str | None = None) -> li
 
         # ── Mode A: examples-based pattern generation ──────────────────────
         if "examples" in p and "pattern" not in p:
-            _MAX_EXAMPLES = 5  # 3–5 is the sweet spot; beyond this accuracy does not improve
+            _MAX_EXAMPLES = 5
             examples = p.get("examples") or []
             if not examples:
                 logger.warning(f"{label}: pattern '{name}' has empty examples list — skipped")
@@ -143,21 +107,10 @@ def _validate_patterns(patterns: list, label: str, cwd: str | None = None) -> li
             if len(examples) > _MAX_EXAMPLES:
                 logger.warning(
                     f"{label} [{name}]: {len(examples)} examples provided — "
-                    f"only the first {_MAX_EXAMPLES} are used "
-                    f"(maximum is {_MAX_EXAMPLES}; accuracy does not improve beyond this)"
+                    f"only the first {_MAX_EXAMPLES} are used"
                 )
                 examples = examples[:_MAX_EXAMPLES]
             try:
-                # Overlap check — warn if a built-in detector already covers this format
-                overlapping = _check_example_overlap(examples, name)
-                if overlapping:
-                    overlap_names = ", ".join(overlapping[:3])
-                    logger.warning(
-                        f"{label} [{name}]: built-in detector(s) already catch this format "
-                        f"({overlap_names}) — you may not need a custom pattern. "
-                        "If your format is different, the custom pattern still adds coverage."
-                    )
-
                 from src.security.pattern_builder import analyze_examples
                 generated = analyze_examples(
                     name=name,
@@ -180,7 +133,6 @@ def _validate_patterns(patterns: list, label: str, cwd: str | None = None) -> li
                     f"validated={generated.examples_matched}/{generated.examples_total}"
                     f"{codebase_note}"
                 )
-                # Log full summary at DEBUG so users can inspect alternatives
                 for line in generated.summary().splitlines():
                     logger.debug(f"  {line}")
                 valid.append(generated.to_scan_config_entry())
@@ -207,32 +159,31 @@ def _parse_scan_section(raw: dict, defaults: ScanConfig, cwd: str | None = None)
     the top-level defaults for any key not present in the section.
     """
     patterns = raw.get("custom_patterns") or defaults.custom_patterns
+    # Merge category overrides on top of defaults
+    merged_categories = dict(defaults.categories)
+    if isinstance(raw.get("categories"), dict):
+        merged_categories.update(raw["categories"])
     return ScanConfig(
-        detectors=raw.get("detectors") or defaults.detectors,
-        entropy=raw.get("entropy") or defaults.entropy,
-        pii=raw.get("pii") or defaults.pii,
+        categories=merged_categories,
         custom_patterns=_validate_patterns(patterns, "section", cwd=cwd),
         keyword_blocklist=raw.get("keyword_blocklist") or defaults.keyword_blocklist,
+        allowlist=defaults.allowlist,  # allowlist is global — always inherited, no per-section override
     )
 
 
 def _parse_config(raw: dict[str, Any], cwd: str | None = None) -> SecurityConfig:
     """Parse raw YAML dict into a SecurityConfig."""
-    # Build top-level defaults (used for both scan points unless overridden)
-    _default_entropy = {"enabled": True, "hex_limit": 3.0, "base64_limit": 4.5}
     base = ScanConfig(
-        detectors=raw.get("detectors") or {},
-        entropy=raw.get("entropy") or _default_entropy,
-        pii=raw.get("pii") or {},
+        categories=raw.get("categories") or {},
         custom_patterns=_validate_patterns(raw.get("custom_patterns") or [], "top-level", cwd=cwd),
         keyword_blocklist=raw.get("keyword_blocklist") or [],
+        allowlist=[str(v) for v in (raw.get("allowlist") or []) if v],
     )
 
-    # Per-scan-point overrides (optional)
-    prompt_raw = raw.get("prompt")
+    prompt_raw   = raw.get("prompt")
     response_raw = raw.get("response")
 
-    prompt_config = _parse_scan_section(prompt_raw, base, cwd=cwd) if isinstance(prompt_raw, dict) else base
+    prompt_config   = _parse_scan_section(prompt_raw, base, cwd=cwd)   if isinstance(prompt_raw, dict)   else base
     response_config = _parse_scan_section(response_raw, base, cwd=cwd) if isinstance(response_raw, dict) else base
 
     return SecurityConfig(
@@ -250,13 +201,8 @@ def load_security_config(cwd: str | None = None) -> SecurityConfig:
     """
     Load user security config from disk.
 
-    Args:
-        cwd: Project working directory. When provided and the config has
-             examples-based custom patterns, the generated patterns are tested
-             against real project files (cached for 24 hours per examples set).
-
-    Returns SecurityConfig(enabled=False) if the config file does not exist
-    (feature not yet set up by the user). Never raises.
+    Returns SecurityConfig(enabled=False) if the config file does not exist.
+    Never raises.
     """
     if not USER_CONFIG_PATH.exists():
         return SecurityConfig(enabled=False)
@@ -266,11 +212,11 @@ def load_security_config(cwd: str | None = None) -> SecurityConfig:
         with open(USER_CONFIG_PATH, encoding="utf-8") as f:
             raw = yaml.safe_load(f)
     except Exception as e:
-        logger.warning(f"security_profile.yaml unreadable — falling back to standard preset: {e}")
+        logger.warning(f"security_profile_v2.yaml unreadable — falling back to standard preset: {e}")
         raw = _load_preset("standard")
 
     if not isinstance(raw, dict):
-        logger.warning("security_profile.yaml is not a mapping — falling back to standard preset")
+        logger.warning("security_profile_v2.yaml is not a mapping — falling back to standard preset")
         raw = _load_preset("standard")
 
     return _parse_config(raw, cwd=cwd)

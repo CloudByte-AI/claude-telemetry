@@ -70,7 +70,8 @@ def get_scan_stats() -> dict:
             try:
                 findings = json.loads(row["findings_json"] or "[]")
                 for f in findings:
-                    det = f.get("detector", "")
+                    # New format stores 'label'; old events may have 'detector'
+                    det = f.get("label") or f.get("detector") or f.get("category") or ""
                     if det:
                         detector_counts[det] = detector_counts.get(det, 0) + 1
             except Exception:
@@ -106,7 +107,10 @@ def get_recent_events(limit: int = 5) -> list[dict]:
             d = dict(row)
             try:
                 findings = json.loads(d.get("findings_json") or "[]")
-                d["top_detector"] = findings[0].get("detector", "") if findings else ""
+                first = findings[0] if findings else {}
+                d["top_detector"] = (
+                    first.get("label") or first.get("detector") or first.get("category") or ""
+                )
             except Exception:
                 d["top_detector"] = ""
             result.append(d)

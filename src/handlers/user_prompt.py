@@ -451,26 +451,36 @@ def handle_user_prompt():
                         blocked=True,
                         masked_text=_masked,
                     )
+                    _ms = _sec_result.scan_ms
+                    _ms_str = f"{_ms:.2f}" if _ms < 1 else f"{int(_ms)}"
                     logger.info(
                         f"Security scan: {len(_sec_result.findings)} finding(s) — blocking prompt "
-                        f"[{_sec_result.scan_strategy}, {_sec_result.scan_ms}ms]"
+                        f"[{_sec_result.scan_strategy}, {_ms_str}ms]"
                     )
                     _finding_lines = "\n".join(
-                        f"  • {f.detector} [{f.severity}] — {f.detector_src}"
+                        f"  • {f.category} — {f.type} [{f.severity}]"
                         for f in _sec_result.findings
                     )
                     _reason = (
                         f"⚠️  Sensitive data detected and masked automatically!\n\n"
                         f"Detected:\n{_finding_lines}\n\n"
-                        f"📊 Scanned {_sec_result.line_count} lines in {_sec_result.scan_ms}ms"
+                        f"📊 Scanned {_sec_result.line_count} lines in {_ms_str}ms"
                         f" [strategy: {_sec_result.scan_strategy}]\n\n"
                         f"✅ Your prompt has been sanitized. Copy the masked version below to resubmit:\n\n"
-                        f"{_masked}"
+                        f"{_masked}\n\n"
+                        f"─────────────────────────────────────────────────────\n"
+                        f"💡 False positive? If a detected value is a test credential, documentation\n"
+                        f"   example, or placeholder that is safe to ignore, you can add it to your\n"
+                        f"   allowlist via the CloudByte dashboard:\n\n"
+                        f"   http://localhost:8765/security\n\n"
+                        f"   Once added, that value will never be detected or block your prompt again."
                     )
                     _system_msg = (
                         f"⚠️ {len(_sec_result.findings)} sensitive item(s) detected and blocked."
-                        f" Scanned {_sec_result.line_count} lines in {_sec_result.scan_ms}ms."
+                        f" Scanned {_sec_result.line_count} lines in {_ms_str}ms."
                         f" Event logged to telemetry."
+                        f" To suppress known-safe values, add them to allowlist in"
+                        f" ~/.cloudbyte/security_profile_v2.yaml."
                     )
                     print(json.dumps({
                         "decision": "block",

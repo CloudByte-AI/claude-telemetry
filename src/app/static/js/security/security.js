@@ -1,76 +1,6 @@
 /* ══════════════════════════════════════════════════════
-   Security Scanning — UI Controller (Redesigned)
+   Security Scanning — UI Controller
    ══════════════════════════════════════════════════════ */
-
-// ── Preset data ───────────────────────────────────────
-const PRESETS = {
-    minimal: {
-        detectors: {
-            AWSKeyDetector:true,ArtifactoryDetector:false,AzureStorageKeyDetector:false,
-            BasicAuthDetector:false,CloudantDetector:false,DiscordBotTokenDetector:false,
-            GitHubTokenDetector:true,GitLabTokenDetector:true,IbmCloudIamDetector:false,
-            IbmCosHmacDetector:false,IpPublicDetector:false,JwtTokenDetector:true,
-            KeywordDetector:false,MailchimpDetector:false,NpmDetector:false,
-            OpenAIDetector:true,PrivateKeyDetector:true,PypiTokenDetector:false,
-            SendGridDetector:false,SlackDetector:false,SoftlayerDetector:false,
-            SquareOAuthDetector:false,StripeDetector:true,TelegramBotTokenDetector:false,
-            TwilioKeyDetector:false,
-            ANTHROPIC_KEY:true,GCP_API_KEY:true,GROQ_API_KEY:false,HUGGING_FACE_TOKEN:false,
-            REPLICATE_TOKEN:false,COHERE_API_KEY:false,MISTRAL_API_KEY:false,
-            DIGITAL_OCEAN_TOKEN:false,CLOUDFLARE_API_TOKEN:false,MAPBOX_TOKEN:false,
-            RAZORPAY_KEY:true,PAYU_KEY:false,SENTRY_DSN:false,PYPI_TOKEN:false,
-            DB_CONNECTION:false,JDBC_CONNECTION:false,FIREBASE_URL:false,
-            INLINE_PASSWORD:false,BEARER_TOKEN:false,
-        },
-        pii:{email:false,phone:false},
-        entropy:{enabled:false,hex_limit:3.5,base64_limit:4.5},
-        scope:'prompt_only',
-    },
-    standard: {
-        detectors: {
-            AWSKeyDetector:true,ArtifactoryDetector:true,AzureStorageKeyDetector:true,
-            BasicAuthDetector:true,CloudantDetector:true,DiscordBotTokenDetector:true,
-            GitHubTokenDetector:true,GitLabTokenDetector:true,IbmCloudIamDetector:false,
-            IbmCosHmacDetector:false,IpPublicDetector:false,JwtTokenDetector:true,
-            KeywordDetector:false,MailchimpDetector:true,NpmDetector:true,
-            OpenAIDetector:true,PrivateKeyDetector:true,PypiTokenDetector:true,
-            SendGridDetector:true,SlackDetector:true,SoftlayerDetector:false,
-            SquareOAuthDetector:true,StripeDetector:true,TelegramBotTokenDetector:true,
-            TwilioKeyDetector:true,
-            ANTHROPIC_KEY:true,GCP_API_KEY:true,GROQ_API_KEY:true,HUGGING_FACE_TOKEN:true,
-            REPLICATE_TOKEN:true,COHERE_API_KEY:true,MISTRAL_API_KEY:true,
-            DIGITAL_OCEAN_TOKEN:true,CLOUDFLARE_API_TOKEN:true,MAPBOX_TOKEN:true,
-            RAZORPAY_KEY:true,PAYU_KEY:true,SENTRY_DSN:true,PYPI_TOKEN:true,
-            DB_CONNECTION:true,JDBC_CONNECTION:true,FIREBASE_URL:true,
-            INLINE_PASSWORD:false,BEARER_TOKEN:false,
-        },
-        pii:{email:false,phone:false},
-        entropy:{enabled:false,hex_limit:3.5,base64_limit:4.5},
-        scope:'prompt_only',
-    },
-    strict: {
-        detectors: {
-            AWSKeyDetector:true,ArtifactoryDetector:true,AzureStorageKeyDetector:true,
-            BasicAuthDetector:true,CloudantDetector:true,DiscordBotTokenDetector:true,
-            GitHubTokenDetector:true,GitLabTokenDetector:true,IbmCloudIamDetector:true,
-            IbmCosHmacDetector:true,IpPublicDetector:false,JwtTokenDetector:true,
-            KeywordDetector:true,MailchimpDetector:true,NpmDetector:true,
-            OpenAIDetector:true,PrivateKeyDetector:true,PypiTokenDetector:true,
-            SendGridDetector:true,SlackDetector:true,SoftlayerDetector:true,
-            SquareOAuthDetector:true,StripeDetector:true,TelegramBotTokenDetector:true,
-            TwilioKeyDetector:true,
-            ANTHROPIC_KEY:true,GCP_API_KEY:true,GROQ_API_KEY:true,HUGGING_FACE_TOKEN:true,
-            REPLICATE_TOKEN:true,COHERE_API_KEY:true,MISTRAL_API_KEY:true,
-            DIGITAL_OCEAN_TOKEN:true,CLOUDFLARE_API_TOKEN:true,MAPBOX_TOKEN:true,
-            RAZORPAY_KEY:true,PAYU_KEY:true,SENTRY_DSN:true,PYPI_TOKEN:true,
-            DB_CONNECTION:true,JDBC_CONNECTION:true,FIREBASE_URL:true,
-            INLINE_PASSWORD:true,BEARER_TOKEN:true,
-        },
-        pii:{email:true,phone:true},
-        entropy:{enabled:false,hex_limit:2.5,base64_limit:4.0},
-        scope:'prompt_only',
-    },
-};
 
 // ── Hero / enable flow ────────────────────────────────
 function enableFeature() {
@@ -113,111 +43,52 @@ function disableFeature() {
 
 // ── Preset application (enabled state) ───────────────
 
-// The plan that is currently saved — read once at page load, never changes until reload.
-// Used to distinguish "currently active" from "selected but not yet saved".
+// The plan saved on the server — read once at page load.
 const _serverPlan = (() => {
     const el = document.getElementById('plan-input');
     return el ? el.value : '';
 })();
 
 function _updatePlanBadges(selectedName) {
-    const cards = document.querySelectorAll('.sc-plan-card');
-    cards.forEach(card => {
+    document.querySelectorAll('.sc-plan-card').forEach(card => {
         const p = card.dataset.plan;
         card.classList.remove('sc-pc-pending', 'sc-pc-was-saved');
         if (selectedName !== _serverPlan) {
-            if (p === _serverPlan)     card.classList.add('sc-pc-was-saved');
-            if (p === selectedName)    card.classList.add('sc-pc-pending');
+            if (p === _serverPlan)  card.classList.add('sc-pc-was-saved');
+            if (p === selectedName) card.classList.add('sc-pc-pending');
         }
     });
 }
 
 function applyPreset(name) {
-    const preset = PRESETS[name];
-    if (!preset) return;
-
-    // Update plan buttons
-    document.querySelectorAll('.sps-btn').forEach(b => b.classList.remove('sps-active'));
-    const btn = document.querySelector(`.sps-btn[onclick="applyPreset('${name}')"]`);
-    if (btn) btn.classList.add('sps-active');
+    // POST to server preset endpoint — applies preset YAML (with preserved
+    // allowlist/custom patterns) and reloads. Avoids stale client-side detector lists.
     document.getElementById('plan-input').value = name;
-
-    // Show "Active plan" / "Currently saved" / "Will apply" badges
+    document.querySelectorAll('.sps-btn').forEach(b => b.classList.remove('sps-active'));
+    const btn = document.querySelector(`.sps-btn[data-plan="${name}"]`);
+    if (btn) btn.classList.add('sps-active');
     _updatePlanBadges(name);
 
-    // Detector chips
-    Object.entries(preset.detectors).forEach(([key, on]) => {
-        const chip = document.querySelector(`.det-chip[data-key="${key}"]`);
-        if (!chip) return;
-        chip.classList.toggle('det-on', on);
-        chip.classList.toggle('det-off', !on);
-        chip.dataset.on = on ? '1' : '0';
-        const hidden = document.getElementById(`det_${key}`);
-        if (hidden) hidden.value = on ? '1' : '0';
-    });
-
-    // PII chips
-    Object.entries(preset.pii).forEach(([key, on]) => {
-        const chip = document.querySelector(`.det-chip[data-pii="${key}"]`);
-        if (!chip) return;
-        chip.classList.toggle('det-on', on);
-        chip.classList.toggle('det-off', !on);
-        chip.dataset.on = on ? '1' : '0';
-        const hidden = document.getElementById(`pii_${key}`);
-        if (hidden) hidden.value = on ? '1' : '0';
-    });
-
-    // Entropy
-    const etog = document.getElementById('entropy-toggle');
-    if (etog) {
-        etog.classList.toggle('ent-toggle-on', preset.entropy.enabled);
-        const elabel = etog.querySelector('.ent-toggle-label');
-        if (elabel) elabel.textContent = preset.entropy.enabled ? 'ON' : 'OFF';
-        document.getElementById('entropy-enabled-input').value = preset.entropy.enabled ? '1' : '0';
-        document.getElementById('entropy-fields').classList.toggle('entropy-off', !preset.entropy.enabled);
-    }
-    const hl = document.getElementById('hex_limit');
-    const bl = document.getElementById('base64_limit');
-    if (hl) hl.value = preset.entropy.hex_limit;
-    if (bl) bl.value = preset.entropy.base64_limit;
-
-    // Scope — works with both .scope-card (new) and .scope-pill (legacy)
-    document.querySelectorAll('.scope-card, .scope-pill').forEach(card => {
-        const radio = card.querySelector('input[type=radio]');
-        if (!radio) return;
-        const match = radio.value === preset.scope;
-        radio.checked = match;
-        card.classList.toggle('scope-card-active', match);
-        card.classList.toggle('scope-active', match);
-        // Update the ●/○ text indicator inside the card
-        const check = card.querySelector('.scope-card-check');
-        if (check) check.textContent = match ? '●' : '○';
-    });
-    document.getElementById('scope-hidden').value = preset.scope;
+    fetch(`/security/preset/${encodeURIComponent(name)}`, { method: 'POST' })
+        .then(() => window.location.reload())
+        .catch(e => console.error('Preset apply failed:', e));
 }
 
 // ── Chip toggle (click) ───────────────────────────────
 function toggleChip(chip) {
-    const isOn = chip.dataset.on === '1';
-    const nowOn = !isOn;
+    const nowOn = chip.dataset.on !== '1';
     chip.classList.toggle('det-on', nowOn);
     chip.classList.toggle('det-off', !nowOn);
     chip.dataset.on = nowOn ? '1' : '0';
 
-    const key    = chip.dataset.key;
-    const piiKey = chip.dataset.pii;
+    // All detectors (including PII) use det_ prefix with spaces→_ sanitised by template
+    const key = chip.dataset.key;
     if (key) {
         const h = document.getElementById(`det_${key}`);
         if (h) h.value = nowOn ? '1' : '0';
-    } else if (piiKey) {
-        const h = document.getElementById(`pii_${piiKey}`);
-        if (h) h.value = nowOn ? '1' : '0';
     }
 
-    // Deselect all preset buttons (user customised)
     document.querySelectorAll('.sps-btn').forEach(b => b.classList.remove('sps-active'));
-
-    // Update tooltip toggle button if open
     updateTooltipToggleBtn(chip);
 }
 
@@ -230,27 +101,50 @@ function showTooltip(chip) {
     _activeChip = chip;
 
     const tt = document.getElementById('det-tooltip');
-    document.getElementById('dtt-name').textContent    = chip.dataset.name    || '';
-    document.getElementById('dtt-desc').textContent    = chip.dataset.desc    || '';
-    document.getElementById('dtt-example').textContent = chip.dataset.example || '';
+    document.getElementById('dtt-name').textContent = chip.dataset.name || '';
+    document.getElementById('dtt-desc').textContent = chip.dataset.desc || '';
+
+    // Rich type list from data-type-details (JSON array of {type, example})
+    const listEl = document.getElementById('dtt-type-list');
+    if (listEl) {
+        let typeDetails = [];
+        try { typeDetails = JSON.parse(chip.dataset.typeDetails || '[]'); } catch(e) {}
+
+        if (typeDetails.length) {
+            listEl.innerHTML = '';
+            const hdr = document.createElement('div');
+            hdr.className = 'dtt-type-hdr';
+            hdr.textContent = typeDetails.length + ' token type' + (typeDetails.length !== 1 ? 's' : '');
+            listEl.appendChild(hdr);
+            typeDetails.forEach(td => {
+                const row = document.createElement('div');
+                row.className = 'dtt-type-row';
+                const exTrunc = (td.example || '').substring(0, 30);
+                row.innerHTML =
+                    `<span class="dtt-type-name">${esc(td.type)}</span>` +
+                    (exTrunc ? `<code class="dtt-type-ex">${esc(exTrunc)}</code>` : '');
+                listEl.appendChild(row);
+            });
+            listEl.style.display = '';
+        } else {
+            listEl.style.display = 'none';
+        }
+    }
+
     updateTooltipToggleBtn(chip);
 
-    // Position: below the chip, flip up if near bottom
+    // Position: below the chip; flip left/up if near viewport edge
     const rect = chip.getBoundingClientRect();
-    const ttW  = 280;
-    const ttH  = 160; // estimated
+    const ttW  = 390;
+    let _tdLen = 0;
+    try { _tdLen = JSON.parse(chip.dataset.typeDetails || '[]').length; } catch(e) {}
+    const ttH  = Math.min(340, 90 + _tdLen * 30);
 
     let top  = rect.bottom + 8;
     let left = rect.left;
 
-    // Flip left if overflows right
-    if (left + ttW > window.innerWidth - 12) {
-        left = Math.max(12, rect.right - ttW);
-    }
-    // Flip up if overflows bottom
-    if (top + ttH > window.innerHeight - 12) {
-        top = rect.top - ttH - 8;
-    }
+    if (left + ttW > window.innerWidth - 12)  left = Math.max(12, rect.right - ttW);
+    if (top + ttH  > window.innerHeight - 12) top  = rect.top - ttH - 8;
 
     tt.style.top  = `${top}px`;
     tt.style.left = `${left}px`;
@@ -269,10 +163,10 @@ function cancelHideTooltip() {
 }
 
 function updateTooltipToggleBtn(chip) {
-    const btn  = document.getElementById('dtt-toggle');
+    const btn = document.getElementById('dtt-toggle');
     if (!btn) return;
     const isOn = chip.dataset.on === '1';
-    btn.textContent = isOn ? 'Disable this detector' : 'Enable this detector';
+    btn.textContent = isOn ? 'Disable' : 'Enable';
     btn.classList.toggle('toggle-disable', isOn);
 }
 
@@ -291,18 +185,6 @@ function toggleEntropy() {
     btn.querySelector('.ent-toggle-label').textContent = nowOn ? 'ON' : 'OFF';
     if (input)  input.value = nowOn ? '1' : '0';
     if (fields) fields.classList.toggle('entropy-off', !nowOn);
-}
-
-// ── Entropy stepper ───────────────────────────────────
-function stepEntropy(fieldId, delta) {
-    const input = document.getElementById(fieldId);
-    if (!input) return;
-    const min = fieldId === 'hex_limit' ? 1.0 : 1.0;
-    const max = fieldId === 'hex_limit' ? 6.0 : 8.0;
-    let val = parseFloat(input.value) || 3.5;
-    val = Math.round((val + delta) * 10) / 10;  // avoid float drift
-    val = Math.max(min, Math.min(max, val));
-    input.value = val.toFixed(1);
 }
 
 // ── Scope ─────────────────────────────────────────────
@@ -366,6 +248,47 @@ function addKeyword() {
 function removeKw(i) { keywords.splice(i, 1); renderKeywords(); }
 
 function handleKwKey(e) { if (e.key === 'Enter') { e.preventDefault(); addKeyword(); } }
+
+// ── Allowlist ─────────────────────────────────────────
+let allowlistItems = [];
+
+function initAllowlist() {
+    const h = document.getElementById('al-hidden');
+    if (!h) return;
+    allowlistItems = h.value.split('\n').map(k => k.trim()).filter(Boolean);
+    renderAllowlist();
+}
+
+function renderAllowlist() {
+    const container = document.getElementById('al-tags');
+    const hidden    = document.getElementById('al-hidden');
+    if (!container) return;
+    container.innerHTML = '';
+    allowlistItems.forEach((val, i) => {
+        const tag = document.createElement('span');
+        tag.className = 'kw-tag';
+        tag.innerHTML = `${esc(val)}<button type="button" onclick="removeAllowlistItem(${i})">×</button>`;
+        container.appendChild(tag);
+    });
+    if (hidden) hidden.value = allowlistItems.join('\n');
+}
+
+function addAllowlistItem() {
+    const inp = document.getElementById('al-input');
+    if (!inp) return;
+    const val = inp.value.trim();
+    if (!val) return;
+    if (!allowlistItems.includes(val)) {
+        allowlistItems.push(val);
+        renderAllowlist();
+    }
+    inp.value = '';
+    inp.focus();
+}
+
+function removeAllowlistItem(i) { allowlistItems.splice(i, 1); renderAllowlist(); }
+
+function handleAlKey(e) { if (e.key === 'Enter') { e.preventDefault(); addAllowlistItem(); } }
 
 // ── Pattern builder ───────────────────────────────────
 let selectedPattern    = '';
@@ -702,6 +625,7 @@ function esc(s) {
 // ── Boot ──────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
     initKeywords();
+    initAllowlist();
     initSaveForm();
 
     // Close pattern modal on backdrop click / Escape

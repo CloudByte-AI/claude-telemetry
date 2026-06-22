@@ -5,7 +5,7 @@ Users provide one or more example keys (real or dummy with same format).
 The builder analyzes structure and produces a precise, validated regex
 with confidence scoring and false-positive risk assessment.
 
-YAML usage in security_profile.yaml:
+YAML usage in security_profile_v2.yaml:
 
   custom_patterns:
     # Mode A — examples (system generates pattern):

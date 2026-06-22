@@ -1,96 +1,76 @@
 # Strict security profile — maximum protection. Every detector on.
-# All PII types, tightest entropy thresholds.
+# All PII types, entropy, keyword assignments.
 #
 # Includes detectors intentionally excluded from standard due to noise:
-#   - KeywordDetector    : catches "api_key = value" style assignments
-#   - INLINE_PASSWORD    : catches password = "..." patterns
-#   - BEARER_TOKEN       : catches all Authorization: Bearer headers
-#   - HexHighEntropy 2.5 : catches aggressively, including hash-looking values
-#
-# The detectors: section controls BOTH detect-secrets library detectors AND
-# built-in custom patterns (AI keys, DB strings, payment keys, etc.).
+#   Keyword Secret — catches "api_key = value" style assignments
+#   Bearer Token   — catches all Authorization: Bearer headers
+#   Basic Auth     — catches http://user:pass@host URLs
+#   Entropy Secret — entropy-based catch-all for high-randomness values
+#   Email Address  — PII: all email addresses
+#   Phone Number   — PII: all phone numbers
 plan: strict
 enabled: true
 scope: prompt_only
 
-# ── Shared defaults ──────────────────────────────────────────────────────────
+categories:
+  # ── Cloud & Infrastructure ───────────────────────────────────────────────
+  AWS: true
+  GCP: true
+  DigitalOcean: true
+  Cloudflare: true
 
-detectors:
-  # ── detect-secrets library detectors ─────────────────────────────────────
-  AWSKeyDetector: true
-  ArtifactoryDetector: true
-  AzureStorageKeyDetector: true
-  BasicAuthDetector: true
-  CloudantDetector: true
-  DiscordBotTokenDetector: true
-  GitHubTokenDetector: true
-  GitLabTokenDetector: true
-  IbmCloudIamDetector: true
-  IbmCosHmacDetector: true
-  IpPublicDetector: false       # still off even in strict — too many FPs in code
-  JwtTokenDetector: true
-  KeywordDetector: true
-  MailchimpDetector: true
-  NpmDetector: true
-  OpenAIDetector: true
-  PrivateKeyDetector: true
-  PypiTokenDetector: true
-  SendGridDetector: true
-  SlackDetector: true
-  SoftlayerDetector: true
-  SquareOAuthDetector: true
-  StripeDetector: true
-  TelegramBotTokenDetector: true
-  TwilioKeyDetector: true
+  # ── AI & ML Platforms ────────────────────────────────────────────────────
+  OpenAI: true
+  Anthropic: true
+  Groq: true
+  HuggingFace: true
+  Replicate: true
+  Cohere: true
+  Mistral: true
 
-  # ── Built-in custom pattern controls ─────────────────────────────────────
-  ANTHROPIC_KEY: true
-  GCP_API_KEY: true
-  GROQ_API_KEY: true
-  HUGGING_FACE_TOKEN: true
-  REPLICATE_TOKEN: true
-  COHERE_API_KEY: true
-  MISTRAL_API_KEY: true
-  DIGITAL_OCEAN_TOKEN: true
-  CLOUDFLARE_API_TOKEN: true
-  MAPBOX_TOKEN: true
-  RAZORPAY_KEY: true
-  PAYU_KEY: true
-  SENTRY_DSN: true
-  PYPI_TOKEN: true
-  DB_CONNECTION: true
-  JDBC_CONNECTION: true
-  FIREBASE_URL: true
-  INLINE_PASSWORD: true
-  BEARER_TOKEN: true
+  # ── Developer Tools ──────────────────────────────────────────────────────
+  GitHub: true
+  GitLab: true
+  NPM: true
+  PyPI: true
 
-entropy:
-  enabled: false
-  hex_limit: 2.5
-  base64_limit: 4.0
+  # ── Payment Gateways ─────────────────────────────────────────────────────
+  Stripe: true
+  Razorpay: true
 
-pii:
-  email: true
-  phone: true
+  # ── Communication ────────────────────────────────────────────────────────
+  Twilio: true
+
+  # ── Database Credentials ─────────────────────────────────────────────────
+  Database Connection: true
+  JDBC Connection: true
+
+  # ── Auth / Credentials ───────────────────────────────────────────────────
+  JWT: true
+  Private Key: true
+  Bearer Token: true
+  Basic Auth: true
+
+  # ── PII ──────────────────────────────────────────────────────────────────
+  Email Address: true
+  Phone Number: true
+
+  # ── Generic / Entropy ────────────────────────────────────────────────────
+  Entropy Secret: true
+  Keyword Secret: true
 
 custom_patterns: []
 keyword_blocklist: []
 
-# ── Per-scan-point: prompts get max strictness, responses relax entropy ──────
+# ── Per-scan-point: prompts get max strictness; responses relax some checks ──
 prompt:
-  entropy:
-    enabled: false
-    hex_limit: 2.5
-    base64_limit: 4.0
-  pii:
-    email: true
-    phone: true
+  categories:
+    Email Address: true
+    Phone Number: true
+    Entropy Secret: true
 
 response:
-  entropy:
-    enabled: false
-    hex_limit: 3.0
-    base64_limit: 4.5
-  pii:
-    email: true
-    phone: false         # phone numbers appear legitimately in Claude responses
+  categories:
+    Phone Number: false       # phone numbers appear legitimately in Claude responses
+    Entropy Secret: false     # Claude outputs often contain hash-like strings
+    Keyword Secret: false     # Claude generates assignment examples in answers

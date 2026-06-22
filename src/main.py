@@ -73,7 +73,7 @@ def setup() -> None:
         config_file = get_config_file()
         if not config_file.exists():
             default_config = {
-                "version": "0.1.31",
+                "version": "0.1.32",
                 "created_at": get_now_ist_iso(),
                 "settings": {
                     "log_level": "INFO",
@@ -619,11 +619,13 @@ def stop() -> None:
                             blocked=False,
                             masked_text=_masked_response,
                         )
+                        _rms = _sec_result.scan_ms
+                        _rms_str = f"{_rms:.2f}" if _rms < 1 else f"{int(_rms)}"
                         logger.info(
                             f"Response scan: {len(_sec_result.findings)} finding(s) logged"
-                            f" [{_sec_result.scan_strategy}, {_sec_result.scan_ms}ms]"
+                            f" [{_sec_result.scan_strategy}, {_rms_str}ms]"
                         )
-                        _summary = ", ".join(f.detector for f in _sec_result.findings[:3])
+                        _summary = ", ".join(f"{f.category} — {f.type}" for f in _sec_result.findings[:3])
                         if len(_sec_result.findings) > 3:
                             _summary += f" +{len(_sec_result.findings) - 3} more"
                         print(_json.dumps({
@@ -631,6 +633,8 @@ def stop() -> None:
                                 f"⚠️ Security: {len(_sec_result.findings)} sensitive item(s) detected"
                                 f" in Claude's response ({_summary})."
                                 f" Event logged to telemetry."
+                                f" To suppress known-safe or test values, manage your allowlist at"
+                                f" http://localhost:8765/security"
                             )
                         }))
         except Exception as _sec_err:

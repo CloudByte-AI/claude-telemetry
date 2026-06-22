@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.common.logging import get_logger
-from src.security.scanner import ScanResult
+from src.security.detectors.base import ScanResult
 
 logger = get_logger(__name__)
 
@@ -38,11 +38,12 @@ def write_finding(
         event_id = str(uuid.uuid4())
         findings_list = [
             {
-                "detector":     f.detector,
-                "detector_src": f.detector_src,
-                "severity":     f.severity,
+                "category":    f.category,
+                "type":        f.type,
+                "label":       f.label,
+                "severity":    f.severity,
                 "masked_value": f.masked_value,
-                "line_number":  f.line_number,
+                "line_number": f.line_number,
             }
             for f in result.findings
         ]

@@ -2,7 +2,7 @@
 {% block title %}Security Scanning — CloudByte{% endblock %}
 
 {% block head %}
-<link rel="stylesheet" href="/static/css/security/security.css?v=4.1">
+<link rel="stylesheet" href="/static/css/security/security.css?v=4.2">
 {% endblock %}
 
 {% block content %}
@@ -46,7 +46,7 @@
                 <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
                     <path d="M3 8l4 4 6-6" stroke-linecap="square"/>
                 </svg>
-                43 credential types detected automatically
+                {{ total_types }} credential types detected automatically
             </div>
             <div class="sec-hero-check sec-hero-check-highlight">
                 <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
@@ -84,8 +84,8 @@
             <span class="sht">DB Connections</span>
             <span class="sht">JWT Tokens</span>
             <span class="sht">Private Keys</span>
-            <span class="sht">Slack</span>
-            <span class="sht sht-more">+34 more</span>
+            <span class="sht">Cloudflare</span>
+            <span class="sht sht-more">+{{ (preset_counts.strict - 9) if preset_counts else 19 }} more</span>
         </div>
 
     </div>
@@ -104,7 +104,7 @@
                 <div class="spc-name">Minimal</div>
                 <div class="spc-desc">Critical cloud keys only. Low noise. Good if you want essential coverage without interruptions.</div>
                 <div class="spc-specs">
-                    <span>9 detectors</span>
+                    <span>{{ preset_counts.minimal if preset_counts else 10 }} detectors</span>
                     <span class="spc-sep">·</span>
                     <span>Prompts only</span>
                     <span class="spc-sep">·</span>
@@ -118,11 +118,11 @@
                     <div class="spc-tier spc-tier-accent">Recommended</div>
                 </div>
                 <div class="spc-name">Standard</div>
-                <div class="spc-desc">All major API keys, AI platform keys, and database connections. Balanced for daily use.</div>
+                <div class="spc-desc">All major API keys, AI platforms, and database connections. Balanced for daily use.</div>
                 <div class="spc-specs">
-                    <span>37 detectors</span>
+                    <span>{{ preset_counts.standard if preset_counts else 22 }} detectors</span>
                     <span class="spc-sep">·</span>
-                    <span>Prompts + Responses</span>
+                    <span>Prompts only</span>
                 </div>
             </div>
 
@@ -132,9 +132,9 @@
                     <div class="spc-tier">Maximum</div>
                 </div>
                 <div class="spc-name">Strict</div>
-                <div class="spc-desc">Everything on. Tightest entropy thresholds. Full PII coverage including email and phone.</div>
+                <div class="spc-desc">Everything on. Entropy fallback for unknown services. Full PII coverage including email and phone.</div>
                 <div class="spc-specs">
-                    <span>43 detectors</span>
+                    <span>{{ preset_counts.strict if preset_counts else 28 }} detectors</span>
                     <span class="spc-sep">·</span>
                     <span>All PII on</span>
                 </div>
@@ -196,7 +196,7 @@
                 <span class="sc-pc-tier">Basic</span>
             </div>
             <div class="sc-pc-name">Minimal</div>
-            <div class="sc-pc-specs">9 detectors · Prompts only</div>
+            <div class="sc-pc-specs">{{ preset_counts.minimal if preset_counts else 10 }} detectors · Prompts only</div>
             <div class="sc-pc-status-row">
                 <span class="sc-pc-active-badge">◈ Active plan</span>
                 <span class="sc-pc-pending-badge">↑ Will apply on save</span>
@@ -212,7 +212,7 @@
                 <span class="sc-pc-tier sc-pc-tier-accent">Recommended</span>
             </div>
             <div class="sc-pc-name">Standard</div>
-            <div class="sc-pc-specs">37 detectors · Prompts + Responses</div>
+            <div class="sc-pc-specs">{{ preset_counts.standard if preset_counts else 22 }} detectors · Prompts only</div>
             <div class="sc-pc-status-row">
                 <span class="sc-pc-active-badge">◈ Active plan</span>
                 <span class="sc-pc-pending-badge">↑ Will apply on save</span>
@@ -228,7 +228,7 @@
                 <span class="sc-pc-tier">Maximum</span>
             </div>
             <div class="sc-pc-name">Strict</div>
-            <div class="sc-pc-specs">43 detectors · All PII on</div>
+            <div class="sc-pc-specs">{{ preset_counts.strict if preset_counts else 28 }} detectors · All PII on</div>
             <div class="sc-pc-status-row">
                 <span class="sc-pc-active-badge">◈ Active plan</span>
                 <span class="sc-pc-pending-badge">↑ Will apply on save</span>
@@ -259,7 +259,7 @@
 <div class="sc-detectors">
     <div class="sc-det-header">
         <span class="sc-det-title">Detectors</span>
-        <span class="sc-det-hint">Hover to inspect · click to toggle</span>
+        <span class="sc-det-hint">Hover for token types · click to toggle</span>
     </div>
 
     {% for group in grouped_detectors %}
@@ -271,18 +271,21 @@
         </div>
         <div class="cat-chips sc-chip-grid">
             {% for det in group.detectors %}
+            {% set fkey = det.key | replace(' ', '_') %}
             <button type="button"
                     class="det-chip {% if det.enabled %}det-on{% else %}det-off{% endif %}"
-                    data-key="{{ det.key }}"
-                    data-name="{{ det.name }}"
+                    data-key="{{ fkey }}"
+                    data-name="{{ det.key }}"
                     data-desc="{{ det.description }}"
                     data-example="{{ det.example }}"
+                    data-types="{{ det.types | join(' · ') }}"
+                    data-type-details="{{ det.type_details | tojson | forceescape }}"
                     data-on="{{ '1' if det.enabled else '0' }}"
                     onmouseenter="showTooltip(this)"
                     onmouseleave="scheduleHideTooltip()"
                     onclick="toggleChip(this)">
-                {{ det.name | replace(' API Key','') | replace(' Token','') | replace(' Key','') | replace(' Access','') | replace(' Secret','') | truncate(20, True, '') }}
-                <input type="hidden" name="det_{{ det.key }}" id="det_{{ det.key }}"
+                {{ det.key | replace(' API Key','') | replace(' Token','') | replace(' Key','') | replace(' Access','') | replace(' Secret','') | truncate(20, True, '') }}{% if det.types %}<span class="det-chip-count">({{ det.types | length }})</span>{% endif %}
+                <input type="hidden" name="det_{{ fkey }}" id="det_{{ fkey }}"
                        value="{{ '1' if det.enabled else '0' }}">
             </button>
             {% endfor %}
@@ -299,18 +302,21 @@
         </div>
         <div class="cat-chips sc-chip-grid">
             {% for det in pii_detectors %}
+            {% set fkey = det.key | replace(' ', '_') %}
             <button type="button"
                     class="det-chip {% if det.enabled %}det-on{% else %}det-off{% endif %}"
-                    data-pii="{{ det.key }}"
-                    data-name="{{ det.name }}"
+                    data-key="{{ fkey }}"
+                    data-name="{{ det.key }}"
                     data-desc="{{ det.description }}"
                     data-example="{{ det.example }}"
+                    data-types="{{ det.types | join(' · ') }}"
+                    data-type-details="{{ det.type_details | tojson | forceescape }}"
                     data-on="{{ '1' if det.enabled else '0' }}"
                     onmouseenter="showTooltip(this)"
                     onmouseleave="scheduleHideTooltip()"
                     onclick="toggleChip(this)">
-                {{ det.name }}
-                <input type="hidden" name="pii_{{ det.key }}" id="pii_{{ det.key }}"
+                {{ det.key }}{% if det.types %}<span class="det-chip-count">({{ det.types | length }})</span>{% endif %}
+                <input type="hidden" name="det_{{ fkey }}" id="det_{{ fkey }}"
                        value="{{ '1' if det.enabled else '0' }}">
             </button>
             {% endfor %}
@@ -427,29 +433,12 @@
                 <span class="ent-toggle-label">{{ 'ON' if entropy.enabled else 'OFF' }}</span>
             </button>
         </div>
-        <div class="sc-card-desc" style="margin-bottom:14px;">Catches unknown key formats by measuring randomness. Lower = more sensitive. Disabled by default — can cause false positives on URLs and common strings.</div>
+        <div class="sc-card-desc">Catches secrets that specific detectors can't — anything without a known prefix or format. Covers Azure storage keys, IBM credentials, HMACs, and any high-entropy random string. Enable this if you work with services not in the built-in detector list.</div>
         <input type="hidden" id="entropy-enabled-input" name="entropy_enabled" value="{{ '1' if entropy.enabled else '0' }}">
-        <div class="ent-grid{% if not entropy.enabled %} entropy-off{% endif %}" id="entropy-fields">
-            <div class="ent-field">
-                <label class="ent-label">Hex</label>
-                <div class="ent-stepper">
-                    <button type="button" class="ent-step" onclick="stepEntropy('hex_limit', -0.1)">−</button>
-                    <input type="text" name="hex_limit" id="hex_limit" class="ent-val"
-                           value="{{ entropy.hex_limit | default(3.5) }}" readonly>
-                    <button type="button" class="ent-step" onclick="stepEntropy('hex_limit', 0.1)">+</button>
-                </div>
-                <div class="ent-hint">Rec: 3.5</div>
-            </div>
-            <div class="ent-field">
-                <label class="ent-label">Base64</label>
-                <div class="ent-stepper">
-                    <button type="button" class="ent-step" onclick="stepEntropy('base64_limit', -0.1)">−</button>
-                    <input type="text" name="base64_limit" id="base64_limit" class="ent-val"
-                           value="{{ entropy.base64_limit | default(4.5) }}" readonly>
-                    <button type="button" class="ent-step" onclick="stepEntropy('base64_limit', 0.1)">+</button>
-                </div>
-                <div class="ent-hint">Rec: 4.5</div>
-            </div>
+        <div class="ent-modes{% if not entropy.enabled %} entropy-off{% endif %}" id="entropy-fields">
+            <div class="ent-mode-item">◈ Variable assignment — <code>api_key = "…"</code></div>
+            <div class="ent-mode-item">◈ Bare hex strings — IBM keys, HMACs, Azure secrets</div>
+            <div class="ent-mode-item">◈ Bare base64 strings — Azure storage keys, IAM tokens</div>
         </div>
     </div>
 
@@ -470,6 +459,24 @@
         </div>
     </div>
 
+</div>
+
+<!-- ── Allowlist — full width ─────────────────────────────────────────────── -->
+<div class="sc-card sc-card-muted">
+    <div class="sc-card-hdr sc-card-hdr-compact">
+        <span class="sec-section-label">Allowlist</span>
+        <span class="sc-card-desc-inline">Values that are never detected, masked, or blocked</span>
+    </div>
+    <div class="sc-card-desc" style="margin-bottom:12px;">Add test credentials, documentation examples, or placeholder values. Once allowlisted, a value will never trigger any detector — even if it looks like a real secret.</div>
+    <div class="kw-wrap">
+        <div class="kw-tags" id="al-tags"></div>
+        <input type="hidden" name="allowlist" id="al-hidden" value="{{ allowlist | join('\n') }}">
+        <div class="kw-row">
+            <input type="text" id="al-input" class="kw-input" placeholder="Paste value to allowlist (exact match)…"
+                   onkeydown="handleAlKey(event)">
+            <button type="button" class="kw-add" onclick="addAllowlistItem()">Add</button>
+        </div>
+    </div>
 </div>
 
 <!-- ── Save bar ──────────────────────────────────── -->
@@ -496,10 +503,12 @@
 <div id="det-tooltip" class="det-tooltip"
      onmouseenter="cancelHideTooltip()"
      onmouseleave="scheduleHideTooltip()">
-    <div class="dtt-name" id="dtt-name"></div>
+    <div class="dtt-head">
+        <div class="dtt-name" id="dtt-name"></div>
+        <button type="button" class="dtt-toggle dtt-toggle-inline" id="dtt-toggle" onclick="tooltipToggle()"></button>
+    </div>
     <div class="dtt-desc" id="dtt-desc"></div>
-    <div class="dtt-example" id="dtt-example"></div>
-    <button type="button" class="dtt-toggle" id="dtt-toggle" onclick="tooltipToggle()"></button>
+    <div class="dtt-type-list" id="dtt-type-list" style="display:none;"></div>
 </div>
 
 <!-- ═══ Pattern Builder Modal ════════════════════ -->
@@ -610,5 +619,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/security/security.js?v=2.5"></script>
+<script src="/static/js/security/security.js?v=2.6"></script>
 {% endblock %}

@@ -221,7 +221,7 @@
                 <span class="er-time" title="{{ ev.timestamp }}">{{ ev.time_ago }}</span>
             </div>
             <div class="er-th-r">
-                <span class="er-ms">{{ ev.scan_ms }}ms</span>
+                <span class="er-ms">{% if ev.scan_ms and ev.scan_ms < 1 %}{{ ev.scan_ms | round(2) }}{% elif ev.scan_ms %}{{ ev.scan_ms | int }}{% else %}0{% endif %}ms</span>
             </div>
             <div class="er-chev-wrap">
                 <span class="er-chev" id="chev-{{ ev.event_id }}">▼</span>
@@ -239,7 +239,11 @@
                     {% for f in ev.findings_parsed %}
                     <div class="er-finding">
                         <div class="er-finding-left">
-                            <span class="er-finding-name">{{ f.detector | replace('_', ' ') | title }}</span>
+                            {% if f.category %}
+                            <span class="er-finding-name">{{ f.category }}{% if f.type %} · <span class="er-finding-type">{{ f.type }}</span>{% endif %}</span>
+                            {% else %}
+                            <span class="er-finding-name">{{ (f.label or f.detector or '') | replace('_', ' ') | title }}</span>
+                            {% endif %}
                             <span class="er-sev er-sev-{{ (f.severity | default('HIGH')) | lower }}">{{ f.severity | default('HIGH') }}</span>
                         </div>
                         <code class="er-masked-val">{{ f.masked_value }}</code>

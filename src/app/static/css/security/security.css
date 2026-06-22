@@ -972,60 +972,154 @@
     color: var(--text-muted);
 }
 
-/* ── Detector tooltip ────────────────────────────────────────── */
+/* ── Detector tooltip — rich type-list panel ─────────────────── */
 .det-tooltip {
     position: fixed;
     z-index: 9999;
     background: var(--bg-surface);
     border: 1px solid var(--border-alt);
-    box-shadow: 0 8px 28px rgba(0,0,0,0.25);
-    padding: 14px 16px;
-    width: 270px;
+    box-shadow: 0 10px 32px rgba(0,0,0,0.28);
+    padding: 0;
+    width: 390px;
+    max-height: 340px;
     display: none;
     animation: tlt-in 0.12s ease;
+    overflow: hidden;
 }
-.det-tooltip.visible { display: block; }
+.det-tooltip.visible { display: flex; flex-direction: column; }
 @keyframes tlt-in {
     from { opacity: 0; transform: translateY(4px); }
     to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Header row: name left + toggle button right */
+.dtt-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 12px 14px 0;
+    flex-shrink: 0;
 }
 .dtt-name {
     font-size: 13px;
     font-weight: 600;
     color: var(--text);
-    margin-bottom: 7px;
 }
 .dtt-desc {
-    font-size: 12px;
+    font-size: 11.5px;
     color: var(--text-muted);
     line-height: 1.5;
-    margin-bottom: 9px;
+    padding: 6px 14px 10px;
+    flex-shrink: 0;
 }
-.dtt-example {
-    font-size: 10px;
-    color: var(--accent);
-    background: var(--accent-soft);
-    padding: 3px 7px;
-    word-break: break-all;
-    display: block;
-    margin-bottom: 10px;
-}
-.dtt-toggle {
-    width: 100%;
-    padding: 7px;
-    background: var(--bg-alt);
+
+/* Inline toggle button (right side of header) */
+.dtt-toggle-inline {
+    background: none;
     border: 1px solid var(--border);
-    color: var(--text-muted);
+    color: var(--text-dim);
     font-family: 'IBM Plex Mono', monospace;
-    font-size: 9px;
+    font-size: 8px;
     font-weight: 800;
     text-transform: uppercase;
     letter-spacing: 0.07em;
+    padding: 4px 10px;
+    cursor: pointer;
+    transition: all 0.12s;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.dtt-toggle-inline:hover { border-color: var(--accent); color: var(--accent); }
+.dtt-toggle-inline.toggle-disable:hover { border-color: var(--red); color: var(--red); }
+
+/* Backward compat — keep old dtt-toggle selector working */
+.dtt-toggle {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 8px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    padding: 4px 10px;
     cursor: pointer;
     transition: all 0.12s;
 }
 .dtt-toggle:hover { border-color: var(--accent); color: var(--accent); }
 .dtt-toggle.toggle-disable:hover { border-color: var(--red); color: var(--red); }
+
+/* Type list — scrollable when many types */
+.dtt-type-list {
+    flex: 1;
+    overflow-y: auto;
+    border-top: 1px solid var(--border);
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-alt) transparent;
+}
+.dtt-type-list::-webkit-scrollbar       { width: 4px; }
+.dtt-type-list::-webkit-scrollbar-thumb { background: var(--border-alt); }
+
+.dtt-type-hdr {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 8px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--text-dim);
+    padding: 6px 12px 5px;
+    background: var(--bg-alt);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.dtt-type-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.1s;
+}
+.dtt-type-row:last-child { border-bottom: none; }
+.dtt-type-row:hover { background: var(--bg-alt); }
+
+.dtt-type-name {
+    font-size: 11px;
+    color: var(--text-muted);
+    flex: 1;
+    min-width: 0;
+}
+
+.dtt-type-ex {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    color: var(--accent);
+    background: var(--accent-soft);
+    padding: 2px 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 160px;
+    display: inline-block;
+    flex-shrink: 0;
+}
+
+/* ── Chip type-count badge ────────────────────────────────────── */
+.det-chip-count {
+    font-size: 9px;
+    font-weight: 400;
+    color: var(--text-dim);
+    margin-left: 4px;
+    font-family: 'IBM Plex Mono', monospace;
+    opacity: 0.8;
+}
+.det-on .det-chip-count  { color: rgba(255,86,0,0.55); }
+.det-off .det-chip-count { color: var(--text-dim); }
 
 /* ── Custom pattern list ─────────────────────────────────────── */
 .cpl-list { display: flex; flex-direction: column; gap: 1px; }
@@ -1240,6 +1334,32 @@
 
 /* Dims threshold steppers when entropy is disabled */
 .ent-grid.entropy-off { opacity: 0.35; pointer-events: none; }
+
+/* ── Entropy mode list ───────────────────────────────────────── */
+.ent-modes {
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    transition: opacity 0.2s;
+}
+.ent-modes.entropy-off { opacity: 0.3; pointer-events: none; }
+.ent-mode-item {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    line-height: 1.5;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border);
+}
+.ent-mode-item:last-child { border-bottom: none; }
+.ent-mode-item code {
+    color: var(--accent);
+    background: var(--accent-soft);
+    padding: 1px 5px;
+    font-size: 9px;
+    font-family: 'IBM Plex Mono', monospace;
+}
 
 /* ── Keyword blocklist ───────────────────────────────────────── */
 .kw-wrap { display: flex; flex-direction: column; gap: 10px; }

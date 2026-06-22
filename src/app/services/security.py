@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from ..queries.security import get_scan_events, get_scan_stats, get_recent_events
 
-SECURITY_CONFIG_PATH = Path.home() / ".cloudbyte" / "security_profile.yaml"
+SECURITY_CONFIG_PATH = Path.home() / ".cloudbyte" / "security_profile_v2.yaml"
 PROFILES_DIR = Path(__file__).parent.parent.parent / "security" / "profiles"
 
 
@@ -56,69 +56,86 @@ def load_preset(name: str) -> dict:
 
 def get_security_context() -> dict:
     """Full context for the /security settings page."""
-    from src.security.detector_registry import DETECTORS, all_categories
+    from src.security.detector_registry import DETECTORS, get_detector_info_by_category
 
     cfg = load_security_yaml()
-    enabled = bool(cfg.get("enabled", False))
-    plan = cfg.get("plan", "standard")
-    scope = cfg.get("scope", "both")
-    detectors_cfg: dict = cfg.get("detectors", {})
-    pii_cfg: dict = cfg.get("pii", {})
-    entropy_cfg: dict = cfg.get("entropy", {"enabled": True, "hex_limit": 3.5, "base64_limit": 4.5})
-    custom_patterns: list = cfg.get("custom_patterns", [])
+    enabled       = bool(cfg.get("enabled", False))
+    plan          = cfg.get("plan", "standard")
+    scope         = cfg.get("scope", "both")
+    # New format: flat {CATEGORY: bool} dict
+    categories_cfg: dict = cfg.get("categories", {})
+    custom_patterns: list  = cfg.get("custom_patterns", [])
     keyword_blocklist: list = cfg.get("keyword_blocklist", [])
+    allowlist: list         = cfg.get("allowlist", [])
 
-    # Build detector state list for the template
+    # Legacy compat: old configs stored entropy under entropy.enabled
+    if "categories" not in cfg and "entropy" in cfg:
+        categories_cfg["Entropy Secret"] = bool(
+            (cfg.get("entropy") or {}).get("enabled", False)
+        )
+
+    entropy_enabled = bool(categories_cfg.get("Entropy Secret", False))
+
+    # Per-detector info: types covered and example value
+    det_info = get_detector_info_by_category()
+
+    # Build flat detector state list (Entropy shown separately in its own card)
+    PII_DOMAIN = "PII"
     detector_states = []
     for det in DETECTORS:
-        # For entropy entries, handle separately
-        if det.key in ("hex_entropy", "base64_entropy"):
+        if det.key == "Entropy Secret":
             continue
-        # PII detectors use pii: section
-        if det.category == "Privacy (PII)":
-            is_on = pii_cfg.get(det.key, det.default)
-        else:
-            # Check detectors: section; default to detector's own default
-            is_on = detectors_cfg.get(det.key, det.default)
+        info = det_info.get(det.key, {})
+        is_on = bool(categories_cfg.get(det.key, det.default))
         detector_states.append({
-            "key":         det.key,
-            "name":        det.name,
-            "description": det.description,
-            "example":     det.example,
-            "category":    det.category,
-            "default":     det.default,
-            "enabled":     is_on,
+            "key":          det.key,
+            "name":         det.key,
+            "description":  det.description,
+            "domain":       det.domain,
+            "default":      det.default,
+            "enabled":      is_on,
+            "types":        info.get("types", []),
+            "example":      info.get("example", ""),
+            "type_details": info.get("type_details", []),
         })
 
-    # Group by category
-    categories = all_categories()
-    grouped: list[dict] = []
-    for cat in categories:
-        if cat in ("Privacy (PII)", "Entropy Detection"):
+    # Group non-PII detectors by domain
+    domains: dict[str, list] = {}
+    for d in detector_states:
+        if d["domain"] == PII_DOMAIN:
             continue
-        items = [d for d in detector_states if d["category"] == cat]
-        if items:
-            grouped.append({"category": cat, "detectors": items})
+        domains.setdefault(d["domain"], []).append(d)
 
-    # PII detectors separately
-    pii_detectors = [d for d in detector_states if d["category"] == "Privacy (PII)"]
+    grouped   = [{"category": domain, "detectors": items}
+                 for domain, items in sorted(domains.items())]
+    pii_detectors = [d for d in detector_states if d["domain"] == PII_DOMAIN]
 
-    # Stats for the header
-    stats = {}
+    stats: dict = {}
     try:
         stats = get_scan_stats()
     except Exception:
         pass
 
-    # Check if current detectors match the named preset (for "Modified" indicator)
     plan_modified = False
     if enabled and plan:
         try:
             preset = load_preset(plan)
-            preset_dets = preset.get("detectors", {})
-            plan_modified = preset_dets != detectors_cfg
+            plan_modified = preset.get("categories", {}) != categories_cfg
         except Exception:
             pass
+
+    # Total token types across all detectors (for hero display)
+    total_types = sum(len(v.get("types", [])) for v in det_info.values())
+    total_categories = len(DETECTORS)
+
+    # Per-preset: count of enabled categories (used for plan card specs)
+    preset_counts: dict[str, int] = {}
+    for pname in ("minimal", "standard", "strict"):
+        try:
+            p = load_preset(pname)
+            preset_counts[pname] = sum(1 for v in p.get("categories", {}).values() if v)
+        except Exception:
+            preset_counts[pname] = 0
 
     return {
         "active":            "security",
@@ -128,10 +145,14 @@ def get_security_context() -> dict:
         "scope":             scope,
         "grouped_detectors": grouped,
         "pii_detectors":     pii_detectors,
-        "entropy":           entropy_cfg,
+        "entropy":           {"enabled": entropy_enabled},
         "custom_patterns":   custom_patterns,
         "keyword_blocklist": keyword_blocklist,
+        "allowlist":         allowlist,
         "stats":             stats,
+        "total_types":       total_types,
+        "total_categories":  total_categories,
+        "preset_counts":     preset_counts,
         "config_path":       str(SECURITY_CONFIG_PATH),
         "save_success":      None,
         "save_message":      None,
@@ -156,7 +177,7 @@ def _time_ago(ts_str: str) -> str:
 
 
 def _format_detector_name(raw: str) -> str:
-    """Convert detector label to readable name: AWS_ACCESS_KEY → AWS Access Key"""
+    """Convert detector label/category to readable name: AWS_ACCESS_KEY → AWS Access Key"""
     return raw.replace("_", " ").title()
 
 
@@ -181,6 +202,11 @@ def _compute_posture(stats: dict) -> tuple[str, int]:
     return "High threat frequency", 5
 
 
+def _finding_label(f: dict) -> str:
+    """Extract display label from a finding dict — handles both old and new formats."""
+    return f.get("label") or f.get("detector") or f.get("category") or ""
+
+
 def _get_threat_breakdown(period: str = "7d", limit: int = 8) -> list[dict]:
     from ..routers.db import q as _q
     clause = _period_clause(period)
@@ -192,7 +218,7 @@ def _get_threat_breakdown(period: str = "7d", limit: int = 8) -> list[dict]:
         for row in rows:
             try:
                 for f in json.loads(row["findings_json"] or "[]"):
-                    det = f.get("detector", "")
+                    det = _finding_label(f)
                     if det:
                         counts[det] = counts.get(det, 0) + 1
             except Exception:
@@ -389,10 +415,6 @@ def _generate_insights(
 
 
 def _get_chart_data(period: str, daily_activity: list[dict]) -> list[dict]:
-    """Group daily_activity into bar-chart groups.
-    today → 1 group; 7d → 7 daily groups (Mon…Sun); 30d/all → 4 weekly groups (W1-W4).
-    Each group: {label, blocked, detected}
-    """
     from datetime import datetime
     if not daily_activity:
         return []
@@ -406,7 +428,7 @@ def _get_chart_data(period: str, daily_activity: list[dict]) -> list[dict]:
         for d in daily_activity:
             try:
                 dt      = datetime.fromisoformat(d["date"])
-                weekday = dt.weekday()          # Mon=0 … Sun=6
+                weekday = dt.weekday()
                 label   = dt.strftime("%a")
             except Exception:
                 weekday = 7
@@ -422,23 +444,18 @@ def _get_chart_data(period: str, daily_activity: list[dict]) -> list[dict]:
             r.pop("_wd")
         return result
 
-    # 30d / all → 4 weekly buckets
-    # Bucket from the END so the most recent 7 days = W1.
-    # daily_activity[-1] = today, daily_activity[0] = oldest day.
     n = len(daily_activity)
     buckets = [{"blocked": 0, "detected": 0} for _ in range(4)]
     for i, d in enumerate(daily_activity):
-        days_ago = n - 1 - i          # 0 = today, n-1 = oldest
-        b_idx = min(days_ago // 7, 3) # 0 = W1 (current), 3 = W4 (oldest)
+        days_ago = n - 1 - i
+        b_idx = min(days_ago // 7, 3)
         buckets[b_idx]["blocked"]  += d.get("blocked", 0)
         buckets[b_idx]["detected"] += d.get("detected", 0)
 
-    # Build display list oldest → newest (W4 left, W1 right)
     weeks = [
         {"label": f"W{4 - i}", "blocked": buckets[3 - i]["blocked"], "detected": buckets[3 - i]["detected"]}
         for i in range(4)
     ]
-    # Drop leading empty weeks (oldest with no data)
     while len(weeks) > 1 and weeks[0]["blocked"] == 0 and weeks[0]["detected"] == 0:
         weeks.pop(0)
     return weeks
@@ -462,7 +479,6 @@ def get_events_context(
         blocked_only=blocked_only,
     )
 
-    # Parse and enrich each event
     events = []
     for ev in events_raw:
         findings = []
@@ -471,17 +487,18 @@ def get_events_context(
         except Exception:
             pass
         is_blocked = bool(ev.get("blocked"))
-        ev["status_label"]   = "BLOCKED"     if is_blocked else "DETECTED"
-        ev["status_class"]   = "evt-blocked" if is_blocked else "evt-detected"
+        ev["status_label"]    = "BLOCKED"     if is_blocked else "DETECTED"
+        ev["status_class"]    = "evt-blocked" if is_blocked else "evt-detected"
         ev["findings_parsed"] = findings
-        ev["top_detectors"]   = [_format_detector_name(f.get("detector", "")) for f in findings[:3]]
-        ev["extra_count"]     = max(0, ev.get("finding_count", 0) - len(ev["top_detectors"]))
-        ev["time_ago"]        = _time_ago(ev.get("timestamp", ""))
+        ev["top_detectors"]   = [
+            _format_detector_name(_finding_label(f)) for f in findings[:3]
+        ]
+        ev["extra_count"]  = max(0, ev.get("finding_count", 0) - len(ev["top_detectors"]))
+        ev["time_ago"]     = _time_ago(ev.get("timestamp", ""))
         ph = ev.get("prompt_hash") or ""
-        ev["hash_short"]      = ph[:12] + "…" if len(ph) > 12 else ph
+        ev["hash_short"]   = ph[:12] + "…" if len(ph) > 12 else ph
         events.append(ev)
 
-    # Stats (period-filtered)
     stats: dict = {}
     clause = _period_clause(period)
     try:
@@ -528,22 +545,22 @@ def get_events_context(
     has_more       = len(events) == per_page
 
     return {
-        "active":           "security",
-        "period":           period,
-        "events":           events,
-        "stats":            stats,
-        "page":             page,
-        "per_page":         per_page,
-        "has_more":         has_more,
-        "scan_target":      scan_target or "",
-        "blocked_only":     blocked_only,
-        "posture_label":    posture_label,
-        "posture_level":    posture_level,
-        "threat_breakdown": threat_breakdown,
-        "daily_activity":   daily_activity,
-        "max_daily":        max_daily,
-        "blocked_count":    blocked_count,
-        "detected_count":   detected_count,
+        "active":            "security",
+        "period":            period,
+        "events":            events,
+        "stats":             stats,
+        "page":              page,
+        "per_page":          per_page,
+        "has_more":          has_more,
+        "scan_target":       scan_target or "",
+        "blocked_only":      blocked_only,
+        "posture_label":     posture_label,
+        "posture_level":     posture_level,
+        "threat_breakdown":  threat_breakdown,
+        "daily_activity":    daily_activity,
+        "max_daily":         max_daily,
+        "blocked_count":     blocked_count,
+        "detected_count":    detected_count,
         "chart_data":        _get_chart_data(period, daily_activity),
         "security_insights": _generate_insights(period, stats, threat_breakdown),
     }
@@ -553,76 +570,63 @@ def get_events_context(
 
 def save_from_form(form: dict) -> tuple[bool, str]:
     """
-    Build a security config dict from form POST data and write it to YAML.
-    All detector keys come in as 'det_<key>' = '1' or absent.
-    PII keys come in as 'pii_<key>' = '1' or absent.
-
-    Special case: when the user enables from the hero state (first-enable or re-enable),
-    there are no det_* fields in the form because the detector chips only exist in the
-    enabled-state HTML. In this case, load the chosen preset directly so all detector
-    defaults are applied correctly.
+    Build a security config dict from form POST data and write to YAML.
+    All detector toggles arrive as 'det_<CATEGORY_with_spaces_as_underscores>' = '1' | '0'.
+    Entropy has its own 'entropy_enabled' field (separate toggle card in UI).
     """
-    from src.security.detector_registry import DETECTORS, CAT_PII
+    from src.security.detector_registry import DETECTORS
 
     enabled = form.get("enabled") == "1"
     plan    = form.get("plan", "standard")
 
-    # Detect "hero enable" path: enabled=1 but no detector inputs present
+    # Hero-enable path: enabled=1 but no det_* inputs (chips not rendered yet)
     has_det_inputs = any(k.startswith("det_") for k in form)
     if enabled and not has_det_inputs:
-        # Apply the full preset (includes enabled=true + all detector defaults)
-        # This preserves any existing custom_patterns and keyword_blocklist
         return apply_preset(plan)
 
-    scope     = form.get("scope", "both")
+    scope = form.get("scope", "both")
 
-    # Rebuild detectors dict
-    det_keys = [d.key for d in DETECTORS if d.category not in (CAT_PII, "Entropy Detection")]
-    detectors_cfg: dict = {}
-    for key in det_keys:
-        detectors_cfg[key] = form.get(f"det_{key}") == "1"
+    # Build categories dict — all detectors use det_ prefix with spaces→_
+    categories: dict = {}
+    for det in DETECTORS:
+        if det.key == "Entropy Secret":
+            continue
+        field_key = f"det_{det.key.replace(' ', '_')}"
+        val = form.get(field_key)
+        if val is not None:
+            categories[det.key] = (val == "1")
 
-    # PII
-    pii_keys = [d.key for d in DETECTORS if d.category == CAT_PII]
-    pii_cfg: dict = {}
-    for key in pii_keys:
-        pii_cfg[key] = form.get(f"pii_{key}") == "1"
+    # Entropy has its own toggle separate from the chip grid
+    categories["Entropy Secret"] = form.get("entropy_enabled") == "1"
 
-    # Entropy
-    entropy_cfg = {
-        "enabled":      form.get("entropy_enabled") == "1",
-        "hex_limit":    _float(form.get("hex_limit"), 3.5),
-        "base64_limit": _float(form.get("base64_limit"), 4.5),
-    }
-
-    # Custom patterns — kept as-is from existing config (edited via modal)
+    # Preserve custom patterns from existing config (edited via modal)
     existing = load_security_yaml()
-    custom_patterns  = existing.get("custom_patterns", [])
+    custom_patterns   = existing.get("custom_patterns", [])
     keyword_blocklist = _parse_keywords(form.get("keyword_blocklist", ""))
+    allowlist         = _parse_list(form.get("allowlist", ""))
 
     cfg = {
-        "enabled":          enabled,
-        "plan":             plan,
-        "scope":            scope,
-        "detectors":        detectors_cfg,
-        "entropy":          entropy_cfg,
-        "pii":              pii_cfg,
-        "custom_patterns":  custom_patterns,
+        "enabled":           enabled,
+        "plan":              plan,
+        "scope":             scope,
+        "categories":        categories,
+        "custom_patterns":   custom_patterns,
         "keyword_blocklist": keyword_blocklist,
+        "allowlist":         allowlist,
     }
 
     return save_security_yaml(cfg)
 
 
 def apply_preset(preset_name: str) -> tuple[bool, str]:
-    """Load a preset, preserve existing custom_patterns, and save."""
+    """Load a preset, preserve user's custom patterns / blocklist / allowlist, and save."""
     preset = load_preset(preset_name)
     if not preset:
         return False, f"Preset '{preset_name}' not found."
     existing = load_security_yaml()
-    # Preserve user's custom patterns and keyword blocklist
     preset["custom_patterns"]   = existing.get("custom_patterns", [])
     preset["keyword_blocklist"] = existing.get("keyword_blocklist", [])
+    preset["allowlist"]         = existing.get("allowlist", [])
     return save_security_yaml(preset)
 
 
@@ -635,9 +639,6 @@ def add_custom_pattern(name: str, pattern: str = "", examples: list[str] | None 
     if examples:
         entry["examples"] = [e.strip() for e in examples if e.strip()]
         if pattern:
-            # User selected a specific alternative regex — preserve it explicitly.
-            # _validate_patterns will use the explicit pattern (Mode B) rather than
-            # regenerating from examples each time config loads.
             entry["pattern"] = pattern
     elif pattern:
         entry["pattern"] = pattern
@@ -722,3 +723,10 @@ def _parse_keywords(raw: str) -> list[str]:
         return []
     parts = re.split(r"[,\n]+", raw)
     return [p.strip() for p in parts if p.strip()]
+
+
+def _parse_list(raw: str) -> list[str]:
+    """Parse a newline-separated list of exact values (preserves commas in values)."""
+    if not raw:
+        return []
+    return [p.strip() for p in raw.split("\n") if p.strip()]
