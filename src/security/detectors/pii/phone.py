@@ -27,7 +27,7 @@ _NANP_RE = re.compile(
 class PhoneDetector(BaseDetector):
     CATEGORY           = "Phone Number"
     ENABLED_BY_DEFAULT = False
-    DESCRIPTION        = "Phone numbers (PII — off by default)"
+    DESCRIPTION        = "Phone numbers (PII - off by default)"
     DOMAIN             = "PII"
 
     _DEFINITIONS: list[TokenDefinition] = [
@@ -38,7 +38,7 @@ class PhoneDetector(BaseDetector):
             detection="pattern",
             capture_group=0,
             pattern=_E164_RE,
-            description="International phone number (E.164 format) — PII that identifies an individual",
+            description="International phone number (E.164 format) - PII that identifies an individual",
             example="+14155552671",
         ),
         TokenDefinition(
@@ -48,7 +48,7 @@ class PhoneDetector(BaseDetector):
             detection="pattern",
             capture_group=0,
             pattern=_NANP_RE,
-            description="North American phone number (NANP format) — PII that identifies an individual",
+            description="North American phone number (NANP format) - PII that identifies an individual",
             example="(415) 555-2671",
         ),
     ]

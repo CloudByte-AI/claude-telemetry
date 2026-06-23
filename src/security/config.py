@@ -1,7 +1,7 @@
 """
 Security scanning configuration loader.
 
-Reads ~/.cloudbyte/security_profile_v2.yaml on every invocation.
+Reads ~/.cloudbyte/security_profile.yaml on every invocation.
 Falls back to standard preset if the file is missing or malformed.
 
 Config format:
@@ -37,7 +37,7 @@ from src.common.logging import get_logger
 logger = get_logger(__name__)
 
 PROFILES_DIR    = Path(__file__).parent / "profiles"
-USER_CONFIG_PATH = Path.home() / ".cloudbyte" / "security_profile_v2.yaml"
+USER_CONFIG_PATH = Path.home() / ".cloudbyte" / "security_profile.yaml"
 
 
 @dataclass
@@ -50,7 +50,7 @@ class ScanConfig:
     custom_patterns:  list of [{name, pattern, severity}] dicts (user-defined extra regex).
     keyword_blocklist: list of literal strings to flag.
     allowlist:        exact secret values that should NEVER be flagged or block a prompt.
-                      Checked before any Finding is created — zero detector overhead.
+                      Checked before any Finding is created - zero detector overhead.
     """
     categories: dict = field(default_factory=dict)
     custom_patterns: list = field(default_factory=list)
@@ -60,7 +60,7 @@ class ScanConfig:
 
 @dataclass
 class SecurityConfig:
-    """Top-level security config loaded from security_profile_v2.yaml."""
+    """Top-level security config loaded from security_profile.yaml."""
     enabled: bool = False
     plan: str = "standard"
     scope: str = "both"
@@ -87,8 +87,8 @@ def _validate_patterns(patterns: list, label: str, cwd: str | None = None) -> li
     """
     Validate and normalise custom patterns.
 
-    Mode A — examples-based: system generates a regex automatically.
-    Mode B — manual regex: compiled and used as-is.
+    Mode A - examples-based: system generates a regex automatically.
+    Mode B - manual regex: compiled and used as-is.
     """
     valid = []
     for p in patterns:
@@ -102,11 +102,11 @@ def _validate_patterns(patterns: list, label: str, cwd: str | None = None) -> li
             _MAX_EXAMPLES = 5
             examples = p.get("examples") or []
             if not examples:
-                logger.warning(f"{label}: pattern '{name}' has empty examples list — skipped")
+                logger.warning(f"{label}: pattern '{name}' has empty examples list - skipped")
                 continue
             if len(examples) > _MAX_EXAMPLES:
                 logger.warning(
-                    f"{label} [{name}]: {len(examples)} examples provided — "
+                    f"{label} [{name}]: {len(examples)} examples provided - "
                     f"only the first {_MAX_EXAMPLES} are used"
                 )
                 examples = examples[:_MAX_EXAMPLES]
@@ -127,7 +127,7 @@ def _validate_patterns(patterns: list, label: str, cwd: str | None = None) -> li
                         f"in {generated.codebase_files_checked} files"
                     )
                 logger.info(
-                    f"{label} [{name}]: generated pattern — "
+                    f"{label} [{name}]: generated pattern - "
                     f"confidence={generated.confidence} "
                     f"fp_risk={generated.false_positive_risk} "
                     f"validated={generated.examples_matched}/{generated.examples_total}"
@@ -137,18 +137,18 @@ def _validate_patterns(patterns: list, label: str, cwd: str | None = None) -> li
                     logger.debug(f"  {line}")
                 valid.append(generated.to_scan_config_entry())
             except Exception as e:
-                logger.warning(f"{label}: pattern builder failed for '{name}': {e} — skipped")
+                logger.warning(f"{label}: pattern builder failed for '{name}': {e} - skipped")
             continue
 
         # ── Mode B: manual regex ───────────────────────────────────────────
         if "pattern" not in p:
-            logger.warning(f"{label}: pattern '{name}' has neither 'pattern' nor 'examples' — skipped")
+            logger.warning(f"{label}: pattern '{name}' has neither 'pattern' nor 'examples' - skipped")
             continue
         try:
             re.compile(p["pattern"])
             valid.append(p)
         except re.error:
-            logger.warning(f"{label}: custom pattern '{name}' has invalid regex — skipped")
+            logger.warning(f"{label}: custom pattern '{name}' has invalid regex - skipped")
 
     return valid
 
@@ -167,7 +167,7 @@ def _parse_scan_section(raw: dict, defaults: ScanConfig, cwd: str | None = None)
         categories=merged_categories,
         custom_patterns=_validate_patterns(patterns, "section", cwd=cwd),
         keyword_blocklist=raw.get("keyword_blocklist") or defaults.keyword_blocklist,
-        allowlist=defaults.allowlist,  # allowlist is global — always inherited, no per-section override
+        allowlist=defaults.allowlist,  # allowlist is global - always inherited, no per-section override
     )
 
 
@@ -212,11 +212,11 @@ def load_security_config(cwd: str | None = None) -> SecurityConfig:
         with open(USER_CONFIG_PATH, encoding="utf-8") as f:
             raw = yaml.safe_load(f)
     except Exception as e:
-        logger.warning(f"security_profile_v2.yaml unreadable — falling back to standard preset: {e}")
+        logger.warning(f"security_profile.yaml unreadable - falling back to standard preset: {e}")
         raw = _load_preset("standard")
 
     if not isinstance(raw, dict):
-        logger.warning("security_profile_v2.yaml is not a mapping — falling back to standard preset")
+        logger.warning("security_profile.yaml is not a mapping - falling back to standard preset")
         raw = _load_preset("standard")
 
     return _parse_config(raw, cwd=cwd)

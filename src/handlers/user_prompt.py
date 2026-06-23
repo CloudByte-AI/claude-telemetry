@@ -480,7 +480,7 @@ def handle_user_prompt():
                         f" Scanned {_sec_result.line_count} lines in {_ms_str}ms."
                         f" Event logged to telemetry."
                         f" To suppress known-safe values, add them to allowlist in"
-                        f" ~/.cloudbyte/security_profile_v2.yaml."
+                        f" ~/.cloudbyte/security_profile.yaml."
                     )
                     print(json.dumps({
                         "decision": "block",

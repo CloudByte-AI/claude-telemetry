@@ -24,7 +24,7 @@ class ReplicateDetector(BaseDetector):
             severity="HIGH",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("r8_", r"[a-zA-Z0-9]", 37),
-            description="Replicate API token — used to run machine learning models on Replicate's cloud",
+            description="Replicate API token - used to run machine learning models on Replicate's cloud",
             example="r8_[EXAMPLE]",
         ),
         TokenDefinition(
@@ -36,7 +36,7 @@ class ReplicateDetector(BaseDetector):
             pattern=BaseDetector.prefix_pattern(
                 "whsec_", r"[a-zA-Z0-9+/=]", 32, 48, word_boundary=True
             ),
-            description="Replicate webhook signing secret — used to verify webhook payloads from Replicate",
+            description="Replicate webhook signing secret - used to verify webhook payloads from Replicate",
             example="whsec_[EXAMPLE]",
         ),
     ]

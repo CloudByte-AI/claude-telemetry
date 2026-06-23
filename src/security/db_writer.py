@@ -27,7 +27,7 @@ def write_finding(
     """
     Insert one SECURITY_SCAN_EVENT row for a scan event.
     Returns the event_id on success, None on failure.
-    Never raises — logging errors must not break the hook flow.
+    Never raises - logging errors must not break the hook flow.
     """
     try:
         from src.db.manager import get_db_connection

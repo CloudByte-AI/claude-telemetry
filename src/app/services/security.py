@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from ..queries.security import get_scan_events, get_scan_stats, get_recent_events
 
-SECURITY_CONFIG_PATH = Path.home() / ".cloudbyte" / "security_profile_v2.yaml"
+SECURITY_CONFIG_PATH = Path.home() / ".cloudbyte" / "security_profile.yaml"
 PROFILES_DIR = Path(__file__).parent.parent.parent / "security" / "profiles"
 
 

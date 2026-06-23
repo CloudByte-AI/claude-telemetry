@@ -1,4 +1,4 @@
-# Minimal security profile — basic cloud key + critical token protection only.
+# Minimal security profile - basic cloud key + critical token protection only.
 # No PII scanning. Prompts only. Catches the most critical credentials.
 plan: minimal
 enabled: true
@@ -48,7 +48,7 @@ categories:
   Phone Number: false
 
   # ── Generic / Entropy ────────────────────────────────────────────────────
-  Entropy Secret: false
+  Entropy Secret: true
   Keyword Secret: false
 
 custom_patterns: []

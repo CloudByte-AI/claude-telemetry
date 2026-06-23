@@ -26,7 +26,7 @@ class DigitalOceanDetector(BaseDetector):
             severity="HIGH",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("dop_v1_", _DO_HEX_CHARSET, _DO_HEX_LEN),
-            description="DigitalOcean Personal Access Token — full control over your DigitalOcean account (droplets, DNS, networking)",
+            description="DigitalOcean Personal Access Token - full control over your DigitalOcean account (droplets, DNS, networking)",
             example="dop_v1_[EXAMPLE]",
         ),
         TokenDefinition(
@@ -35,7 +35,7 @@ class DigitalOceanDetector(BaseDetector):
             severity="HIGH",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("doo_v1_", _DO_HEX_CHARSET, _DO_HEX_LEN),
-            description="DigitalOcean OAuth access token — third-party application access to DigitalOcean resources",
+            description="DigitalOcean OAuth access token - third-party application access to DigitalOcean resources",
             example="doo_v1_[EXAMPLE]",
         ),
         TokenDefinition(
@@ -44,7 +44,7 @@ class DigitalOceanDetector(BaseDetector):
             severity="HIGH",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("dor_v1_", _DO_HEX_CHARSET, _DO_HEX_LEN),
-            description="DigitalOcean OAuth refresh token — used to obtain new access tokens",
+            description="DigitalOcean OAuth refresh token - used to obtain new access tokens",
             example="dor_v1_[EXAMPLE]",
         ),
     ]

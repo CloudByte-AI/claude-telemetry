@@ -1,1 +1,1 @@
-# Payment Gateway detectors — imported by detectors/__init__.py
+# Payment Gateway detectors - imported by detectors/__init__.py

@@ -1,5 +1,5 @@
 """
-Text masker — replaces detected secret values with [REDACTED:LABEL] tags.
+Text masker - replaces detected secret values with [REDACTED:LABEL] tags.
 Processes longest matches first to avoid partial replacement issues.
 Idempotent: already-redacted placeholders are never double-redacted.
 """
@@ -15,7 +15,7 @@ def mask_text(text: str, findings: list[Finding]) -> str:
     if not findings or not text:
         return text
 
-    # Longest secret values first — avoids a short value masking part of a longer one
+    # Longest secret values first - avoids a short value masking part of a longer one
     ordered = sorted(
         [f for f in findings if f.secret_value],
         key=lambda f: len(f.secret_value),

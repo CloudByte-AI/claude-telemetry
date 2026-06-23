@@ -8,7 +8,7 @@ Catches HTTP Authorization header values of the form:
 The token is captured as the secret value.
 
 Disabled by default because bearer tokens are very common in documentation,
-log files, and example code — enable selectively in strict profiles.
+log files, and example code - enable selectively in strict profiles.
 """
 
 import re
@@ -25,7 +25,7 @@ _BEARER_RE = re.compile(
 class BearerTokenDetector(BaseDetector):
     CATEGORY           = "Bearer Token"
     ENABLED_BY_DEFAULT = False
-    DESCRIPTION        = "HTTP Authorization: Bearer tokens (off by default — noisy)"
+    DESCRIPTION        = "HTTP Authorization: Bearer tokens (off by default - noisy)"
     DOMAIN             = "Auth"
 
     _DEFINITIONS: list[TokenDefinition] = [
@@ -36,7 +36,7 @@ class BearerTokenDetector(BaseDetector):
             detection="pattern",
             capture_group=1,
             pattern=_BEARER_RE,
-            description="HTTP Authorization Bearer token — raw bearer token from an Authorization header",
+            description="HTTP Authorization Bearer token - raw bearer token from an Authorization header",
             example="Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyXzEyMyIsImlhdCI6MTcwMDAwMDAwMH0.dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
         ),
     ]

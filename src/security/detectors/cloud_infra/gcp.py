@@ -19,7 +19,7 @@ class GCPDetector(BaseDetector):
     DOMAIN             = "Cloud & Infrastructure"
 
     _DEFINITIONS: list[TokenDefinition] = [
-        # ── API Key — current format (AIza prefix) ────────────────────────────
+        # ── API Key - current format (AIza prefix) ────────────────────────────
         TokenDefinition(
             type="API Key",
             label="GCP_API_KEY",
@@ -27,11 +27,11 @@ class GCPDetector(BaseDetector):
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("AIza", r"[0-9A-Za-z\-_]", 35),
             known_safe=frozenset({"AIzaSyxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}),
-            description="Google Cloud API key — grants access to GCP APIs (Maps, Vision, Translation, etc.)",
+            description="Google Cloud API key - grants access to GCP APIs (Maps, Vision, Translation, etc.)",
             example="AIzaSy[EXAMPLE]",
         ),
 
-        # ── API Key — newer reported format (AQ. prefix) ─────────────────────
+        # ── API Key - newer reported format (AQ. prefix) ─────────────────────
         TokenDefinition(
             type="API Key (New Format)",
             label="GCP_API_KEY_NEW",
@@ -41,7 +41,7 @@ class GCPDetector(BaseDetector):
             pattern=re.compile(
                 r'(?<![a-zA-Z0-9\-_])AQ\.[a-zA-Z0-9\-_\.]{20,}(?![a-zA-Z0-9\-_])'
             ),
-            description="Google Cloud API key (newer format) — grants access to GCP services",
+            description="Google Cloud API key (newer format) - grants access to GCP services",
             example="AQ.[EXAMPLE]",
         ),
 
@@ -52,7 +52,7 @@ class GCPDetector(BaseDetector):
             severity="HIGH",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("GOCSPX-", r"[a-zA-Z0-9\-_]", 28),
-            description="Google OAuth 2.0 client secret — used to authenticate OAuth flows for your application",
+            description="Google OAuth 2.0 client secret - used to authenticate OAuth flows for your application",
             example="GOCSPX-[EXAMPLE]",
         ),
 
@@ -65,11 +65,11 @@ class GCPDetector(BaseDetector):
             pattern=re.compile(
                 r'(?<![a-zA-Z0-9\-_])ya29\.[a-zA-Z0-9\-_\.]{20,}(?![a-zA-Z0-9\-_\.])'
             ),
-            description="Google OAuth 2.0 access token — short-lived bearer token granting API access",
+            description="Google OAuth 2.0 access token - short-lived bearer token granting API access",
             example="ya29.a0[EXAMPLE]",
         ),
 
-        # ── OAuth Refresh Token (context-anchored — "1//" prefix is too generic) ──
+        # ── OAuth Refresh Token (context-anchored - "1//" prefix is too generic) ──
         TokenDefinition(
             type="OAuth Refresh Token",
             label="GCP_OAUTH_REFRESH_TOKEN",
@@ -84,7 +84,7 @@ class GCPDetector(BaseDetector):
                 value_charset=r"[a-zA-Z0-9\-_/]",
                 value_min=20,
             ),
-            description="Google OAuth 2.0 refresh token — used to obtain new access tokens without re-authentication",
+            description="Google OAuth 2.0 refresh token - used to obtain new access tokens without re-authentication",
             example="1//[EXAMPLE]",
         ),
 
@@ -97,7 +97,7 @@ class GCPDetector(BaseDetector):
             pattern=re.compile(
                 r'(?<!\w)\d{6,30}-[a-zA-Z0-9]{16,32}\.apps\.googleusercontent\.com(?!\w)'
             ),
-            description="Google OAuth 2.0 client ID — identifies your application (low sensitivity, but flag in context)",
+            description="Google OAuth 2.0 client ID - identifies your application (low sensitivity, but flag in context)",
             example="123456789012-abc123def456abc123def456.apps.googleusercontent.com",
         ),
     ]

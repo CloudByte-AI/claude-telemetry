@@ -5,7 +5,7 @@ Catches bare secret-looking assignments where no specific prefix or category
 detector fires.  Pattern is:
   <keyword>  <sep>  <quoted-or-unquoted-value>
 
-This is intentionally broad — enable only when you want maximum coverage
+This is intentionally broad - enable only when you want maximum coverage
 and are willing to triage false positives.
 
 Does NOT require high entropy; it fires on any non-trivial value (8+ chars)
@@ -51,7 +51,7 @@ _KEYWORD_RE = re.compile(
 class KeywordDetector(BaseDetector):
     CATEGORY           = "Keyword Secret"
     ENABLED_BY_DEFAULT = False
-    DESCRIPTION        = "Variable assignments with secret-sounding names (off by default — broad / noisy)"
+    DESCRIPTION        = "Variable assignments with secret-sounding names (off by default - broad / noisy)"
     DOMAIN             = "Generic"
 
     _DEFINITIONS: list[TokenDefinition] = [
@@ -62,7 +62,7 @@ class KeywordDetector(BaseDetector):
             detection="context",
             capture_group=1,
             pattern=_KEYWORD_RE,
-            description="Value assigned to a security-sensitive variable name — may be a hardcoded credential",
+            description="Value assigned to a security-sensitive variable name - may be a hardcoded credential",
             example="password=MySup3rS3cr3tP@ssword123!",
         ),
     ]

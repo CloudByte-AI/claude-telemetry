@@ -32,7 +32,7 @@ class MistralDetector(BaseDetector):
                 value_min=32,
                 value_max=48,   # allow slight format variation
             ),
-            description="Mistral API Key — used to call Mistral AI's language models",
+            description="Mistral API Key - used to call Mistral AI's language models",
             example="mistral_api_key=[EXAMPLE]",
         ),
     ]

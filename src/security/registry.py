@@ -1,5 +1,5 @@
 """
-Detector Registry — single source of truth for all registered detectors.
+Detector Registry - single source of truth for all registered detectors.
 
 Usage:
     from src.security.registry import register_detector, DetectorRegistry
@@ -44,7 +44,7 @@ def register_detector(cls: type) -> type:
 class DetectorRegistry:
     """
     Read-only interface over the global detector registry.
-    All methods are class methods — no instance needed.
+    All methods are class methods - no instance needed.
     """
 
     @classmethod

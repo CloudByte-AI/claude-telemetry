@@ -1,13 +1,13 @@
 """
 Entropy Detector (disabled by default).
 
-Self-implemented Shannon entropy — no external library.
+Self-implemented Shannon entropy - no external library.
 
 Operates in three modes (all active when this detector is enabled):
 
 1. Context-anchored: high-entropy value assigned to a secret-sounding variable
    name (password, api_key, token, azure_storage_key, ibm_api_key, …).
-   Threshold: 3.8 bits/char (lower — variable name already signals intent).
+   Threshold: 3.8 bits/char (lower - variable name already signals intent).
 
 2. Bare hex: high-entropy standalone hex string (32–128 chars).
    Catches hex-encoded API keys, HMACs, IBM/Azure keys, etc.
@@ -19,7 +19,7 @@ Operates in three modes (all active when this detector is enabled):
 
 Cross-detector deduplication in scanner.py ensures bare-entropy findings are
 dropped whenever a more specific detector (AWS, GitHub, etc.) already claimed
-the same character range — making entropy a true fallback.
+the same character range - making entropy a true fallback.
 """
 
 import math
@@ -42,9 +42,9 @@ def _shannon_entropy(s: str) -> float:
 
 
 # Thresholds
-_ENTROPY_THRESHOLD_CONTEXT = 3.8   # bits/char — weaker when variable name signals intent
-_ENTROPY_THRESHOLD_HEX     = 3.5   # bits/char — hex-encoded secrets (IBM, Azure, HMAC, etc.)
-_ENTROPY_THRESHOLD_B64     = 4.5   # bits/char — base64-encoded secrets (Azure storage, etc.)
+_ENTROPY_THRESHOLD_CONTEXT = 3.8   # bits/char - weaker when variable name signals intent
+_ENTROPY_THRESHOLD_HEX     = 3.5   # bits/char - hex-encoded secrets (IBM, Azure, HMAC, etc.)
+_ENTROPY_THRESHOLD_B64     = 4.5   # bits/char - base64-encoded secrets (Azure storage, etc.)
 _MIN_SECRET_LEN            = 20    # ignore shorter values
 _MAX_SECRET_LEN            = 512   # avoid matching large blobs
 
@@ -76,7 +76,7 @@ _BARE_HEX_RE = re.compile(
 )
 
 # Bare base64: standalone base64/base64url string, word-boundary delimited
-# High threshold (4.5) needed — many code identifiers and URLs would otherwise match
+# High threshold (4.5) needed - many code identifiers and URLs would otherwise match
 _BARE_B64_RE = re.compile(
     r"(?<![A-Za-z0-9+/=_\-])"
     r"([A-Za-z0-9+/=_\-]{32,512})"
@@ -87,10 +87,10 @@ _BARE_B64_RE = re.compile(
 @register_detector
 class EntropyDetector(BaseDetector):
     CATEGORY           = "Entropy Secret"
-    ENABLED_BY_DEFAULT = False
+    ENABLED_BY_DEFAULT = True
     DESCRIPTION        = (
         "High-entropy strings (self-implemented Shannon entropy, no library). "
-        "Context-anchored + bare hex/base64 modes — acts as fallback for unknown services."
+        "Context-anchored + bare hex/base64 modes - acts as fallback for unknown services."
     )
     DOMAIN             = "Generic"
 
@@ -102,7 +102,7 @@ class EntropyDetector(BaseDetector):
             detection="context",
             capture_group=1,
             pattern=_CONTEXT_RE,
-            description="High-entropy value assigned to a secret-sounding variable — likely a credential or key",
+            description="High-entropy value assigned to a secret-sounding variable - likely a credential or key",
             example="api_key=aX9bY2cZ3dW4eV5fU6gT7hS8iR9jQ0kP1lO2mN3",
         ),
         TokenDefinition(
@@ -112,7 +112,7 @@ class EntropyDetector(BaseDetector):
             detection="pattern",
             capture_group=1,
             pattern=_BARE_HEX_RE,
-            description="High-entropy hex string — may be an API key, HMAC, IBM or Azure credential",
+            description="High-entropy hex string - may be an API key, HMAC, IBM or Azure credential",
             example="a3f1b2c4d5e6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
         ),
         TokenDefinition(
@@ -122,7 +122,7 @@ class EntropyDetector(BaseDetector):
             detection="pattern",
             capture_group=1,
             pattern=_BARE_B64_RE,
-            description="High-entropy base64 string — may be an Azure storage key, IBM IAM token, or other encoded credential",
+            description="High-entropy base64 string - may be an Azure storage key, IBM IAM token, or other encoded credential",
             example="dGhpcyBpcyBhIGZha2Uga2V5IGZvciBleGFtcGxl",
         ),
     ]
@@ -134,7 +134,7 @@ class EntropyDetector(BaseDetector):
     @property
     def _quick_strings(self) -> list[str]:
         # Return empty so can_skip() never skips this detector.
-        # Entropy is a fallback for unknown services — it must run on all text.
+        # Entropy is a fallback for unknown services - it must run on all text.
         return []
 
     def _post_filter(self, value: str, definition: TokenDefinition) -> bool:

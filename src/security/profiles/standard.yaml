@@ -1,4 +1,4 @@
-# Standard security profile — recommended for most developers.
+# Standard security profile - recommended for most developers.
 # Philosophy: high-confidence detections only. Avoids patterns that
 # produce excessive noise in normal developer code.
 #
@@ -6,12 +6,12 @@
 # Missing categories fall back to the detector's ENABLED_BY_DEFAULT value.
 #
 # Off by default (moved to strict or opt-in only):
-#   Bearer Token   — catches every test/mock Authorization header
-#   Basic Auth     — HTTP URLs with auth common in docs and examples
-#   Keyword Secret — variable-assignment catch-all — too noisy in dev code
-#   Entropy Secret — entropy scan — noisy, many false positives
-#   Email Address  — appears legitimately in many contexts
-#   Phone Number   — digit sequences common in many non-PII contexts
+#   Bearer Token   - catches every test/mock Authorization header
+#   Basic Auth     - HTTP URLs with auth common in docs and examples
+#   Keyword Secret - variable-assignment catch-all - too noisy in dev code
+#   Entropy Secret - entropy scan (enabled by default)
+#   Email Address  - appears legitimately in many contexts
+#   Phone Number   - digit sequences common in many non-PII contexts
 plan: standard
 enabled: true
 scope: prompt_only
@@ -52,15 +52,15 @@ categories:
   # ── Auth / Credentials ───────────────────────────────────────────────────
   JWT: true
   Private Key: true
-  Bearer Token: false           # noisy — every mock auth header fires
-  Basic Auth: false             # noisy — common in docs / examples
+  Bearer Token: false           # noisy - every mock auth header fires
+  Basic Auth: false             # noisy - common in docs / examples
 
-  # ── PII (off by default — enable in strict or user config) ───────────────
+  # ── PII (off by default - enable in strict or user config) ───────────────
   Email Address: false
   Phone Number: false
 
-  # ── Generic / Entropy (opt-in only) ─────────────────────────────────────
-  Entropy Secret: false
+  # ── Generic / Entropy ────────────────────────────────────────────────────
+  Entropy Secret: true
   Keyword Secret: false
 
 custom_patterns: []
@@ -72,7 +72,7 @@ keyword_blocklist: []
 # that look like real credentials but are intentionally safe.
 #
 # To add a value: paste the exact string below (including prefix if any).
-# The scanner performs a direct O(1) lookup — no regex involved.
+# The scanner performs a direct O(1) lookup - no regex involved.
 #
 # Example:
 #   allowlist:

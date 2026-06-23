@@ -8,7 +8,7 @@ Architecture:
   - BaseDetector     : abstract base; subclasses declare DEFINITIONS and get scan() for free
   - compute_line_offsets / _char_to_line : O(log n) char-position → line-number mapping
 
-All regex patterns are pre-compiled at class definition time — never at scan time.
+All regex patterns are pre-compiled at class definition time - never at scan time.
 """
 
 import bisect
@@ -27,23 +27,23 @@ class TokenDefinition:
 
     Three detection modes (set via `detection`):
 
-    "prefix"   — Token has a known literal prefix followed by a fixed-charset suffix.
+    "prefix"   - Token has a known literal prefix followed by a fixed-charset suffix.
                  Build with BaseDetector.prefix_pattern().
                  capture_group=0 (full match is the secret value).
 
-    "context"  — No distinctive prefix; token only identifiable by surrounding variable
+    "context"  - No distinctive prefix; token only identifiable by surrounding variable
                  name (e.g. mistral_api_key=VALUE).
                  Build with BaseDetector.context_pattern().
                  capture_group=1 (group 1 = the secret value, not the variable name).
 
-    "pattern"  — Structural pattern without a simple prefix (JWTs, PEM blocks, DB URLs).
+    "pattern"  - Structural pattern without a simple prefix (JWTs, PEM blocks, DB URLs).
                  Provide a fully custom compiled regex.
                  capture_group=0 unless pattern uses explicit groups.
     """
     type: str               # Human-readable type  e.g. "IAM User Access Key"
     label: str              # REDACTED tag label   e.g. "AWS_IAM_ACCESS_KEY"
     severity: str           # "HIGH" | "MEDIUM" | "LOW"
-    pattern: re.Pattern     # Pre-compiled — NEVER compiled at scan time
+    pattern: re.Pattern     # Pre-compiled - NEVER compiled at scan time
     detection: str = "prefix"       # "prefix" | "context" | "pattern"
     capture_group: int = 0          # Which regex group holds the secret value
     known_safe: frozenset = field(default_factory=frozenset)  # Documentation examples to skip
@@ -102,7 +102,7 @@ def deduplicate_findings(findings: list[Finding]) -> list[Finding]:
     """
     Cross-detector deduplication: when multiple findings overlap in character
     range (same secret_value at same position), keep the one whose label is
-    most specific (longest label string as proxy — works because longer labels
+    most specific (longest label string as proxy - works because longer labels
     come from more specific detectors like AWS_IAM_ACCESS_KEY vs AWS_ACCESS_KEY).
 
     Findings without character positions are deduplicated by secret_value only,
@@ -124,7 +124,7 @@ def deduplicate_findings(findings: list[Finding]) -> list[Finding]:
         if f.char_start >= last_end:
             kept_positioned.append(f)
             last_end = f.char_end
-        # overlapping with a prior finding — skip (prior was more specific)
+        # overlapping with a prior finding - skip (prior was more specific)
 
     # For unpositioned, deduplicate by (label, secret_value)
     seen_unpos: set[tuple[str, str]] = set()
@@ -145,10 +145,10 @@ class BaseDetector(ABC):
     Abstract base for all secret detectors.
 
     Subclasses MUST declare class attributes:
-        CATEGORY            : str   — display name, e.g. "AWS"
-        ENABLED_BY_DEFAULT  : bool  — True → on in standard preset
-        DESCRIPTION         : str   — one-line description for the UI
-        DOMAIN              : str   — folder grouping, e.g. "Cloud & Infrastructure"
+        CATEGORY            : str   - display name, e.g. "AWS"
+        ENABLED_BY_DEFAULT  : bool  - True → on in standard preset
+        DESCRIPTION         : str   - one-line description for the UI
+        DOMAIN              : str   - folder grouping, e.g. "Cloud & Infrastructure"
 
     Subclasses MUST implement:
         definitions → list[TokenDefinition]
@@ -208,7 +208,7 @@ class BaseDetector(ABC):
         Thread-safe: all state is local; no shared mutable data.
 
         allowlist: frozenset of exact values that must never produce a Finding.
-                   Checked before any Finding object is created — zero overhead.
+                   Checked before any Finding object is created - zero overhead.
         """
         if self.can_skip(text):
             return []
@@ -234,7 +234,7 @@ class BaseDetector(ABC):
                     if not self._post_filter(secret_val, defn):
                         continue
 
-                    # Character positions — for context patterns capture group
+                    # Character positions - for context patterns capture group
                     # offset may differ from full-match offset
                     if defn.capture_group and defn.capture_group > 0:
                         try:
@@ -344,7 +344,7 @@ def _dedup_within(findings: list[Finding]) -> list[Finding]:
     """
     Remove overlapping findings produced by a single detector's definitions.
     When two definitions match at the same position, keep the longer match
-    (i.e. the more specific definition — e.g. sk-ant-api03- over sk-ant-).
+    (i.e. the more specific definition - e.g. sk-ant-api03- over sk-ant-).
     """
     if len(findings) <= 1:
         return findings

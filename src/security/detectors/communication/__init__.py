@@ -1,1 +1,1 @@
-# Communication detectors — imported by detectors/__init__.py
+# Communication detectors - imported by detectors/__init__.py

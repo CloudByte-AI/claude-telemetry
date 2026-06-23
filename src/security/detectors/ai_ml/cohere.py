@@ -32,7 +32,7 @@ class CohereDetector(BaseDetector):
                 value_min=40,
                 value_max=40,
             ),
-            description="Cohere API Key — used to access Cohere's NLP models (Command, Embed, Rerank)",
+            description="Cohere API Key - used to access Cohere's NLP models (Command, Embed, Rerank)",
             example="cohere_api_key=[EXAMPLE]",
         ),
     ]

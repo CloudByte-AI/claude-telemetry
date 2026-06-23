@@ -29,7 +29,7 @@ class PyPIDetector(BaseDetector):
             pattern=BaseDetector.prefix_pattern(
                 "pypi-AgEIcHlwaS5vcmc", r"[a-zA-Z0-9\-_]", 50, 1000, word_boundary=False
             ),
-            description="PyPI API token — used to upload Python packages to PyPI or TestPyPI",
+            description="PyPI API token - used to upload Python packages to PyPI or TestPyPI",
             example="pypi-AgEIcHlwaS5vcmc[EXAMPLE]",
         ),
     ]

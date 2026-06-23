@@ -39,7 +39,7 @@ class OpenAIDetector(BaseDetector):
             pattern=BaseDetector.prefix_pattern(
                 "sk-proj-", _OPENAI_CHARSET, _OPENAI_VAR_MIN, _OPENAI_VAR_MAX
             ),
-            description="OpenAI Project API Key — scoped to a specific project in your OpenAI organization",
+            description="OpenAI Project API Key - scoped to a specific project in your OpenAI organization",
             example="sk-proj-[EXAMPLE]",
         ),
         TokenDefinition(
@@ -50,7 +50,7 @@ class OpenAIDetector(BaseDetector):
             pattern=BaseDetector.prefix_pattern(
                 "sk-svcacct-", _OPENAI_CHARSET, _OPENAI_VAR_MIN, _OPENAI_VAR_MAX
             ),
-            description="OpenAI Service Account Key — used for automated workloads and CI/CD pipelines",
+            description="OpenAI Service Account Key - used for automated workloads and CI/CD pipelines",
             example="sk-svcacct-[EXAMPLE]",
         ),
         TokenDefinition(
@@ -61,7 +61,7 @@ class OpenAIDetector(BaseDetector):
             pattern=BaseDetector.prefix_pattern(
                 "sk-admin-", _OPENAI_CHARSET, _OPENAI_VAR_MIN, _OPENAI_VAR_MAX
             ),
-            description="OpenAI Admin Key — organization-wide administrative access",
+            description="OpenAI Admin Key - organization-wide administrative access",
             example="sk-admin-[EXAMPLE]",
         ),
         TokenDefinition(
@@ -73,7 +73,7 @@ class OpenAIDetector(BaseDetector):
             pattern=BaseDetector.prefix_pattern(
                 "sk-None-", _OPENAI_CHARSET, _OPENAI_VAR_MIN, _OPENAI_VAR_MAX
             ),
-            description="OpenAI User Key — personal API key tied to a specific user",
+            description="OpenAI User Key - personal API key tied to a specific user",
             example="sk-None-[EXAMPLE]",
         ),
         TokenDefinition(
@@ -86,7 +86,7 @@ class OpenAIDetector(BaseDetector):
                 r'(?<![a-zA-Z0-9\-_])sk-(?!proj-|svcacct-|admin-|None-|ant-)'
                 r'[a-zA-Z0-9]{48}(?![a-zA-Z0-9\-_])'
             ),
-            description="OpenAI legacy API key — older format still active, grants full API access",
+            description="OpenAI legacy API key - older format still active, grants full API access",
             example="sk-[EXAMPLE]",
         ),
     ]

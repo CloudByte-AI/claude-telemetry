@@ -24,7 +24,7 @@ class RazorpayDetector(BaseDetector):
             severity="HIGH",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("rzp_live_", r"[a-zA-Z0-9]", 14),
-            description="Razorpay live Key ID — identifies your live Razorpay merchant account",
+            description="Razorpay live Key ID - identifies your live Razorpay merchant account",
             example="rzp_live_[EXAMPLE]",
         ),
         TokenDefinition(
@@ -33,7 +33,7 @@ class RazorpayDetector(BaseDetector):
             severity="HIGH",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("rzp_test_", r"[a-zA-Z0-9]", 14),
-            description="Razorpay test Key ID — used for sandbox/testing transactions",
+            description="Razorpay test Key ID - used for sandbox/testing transactions",
             example="rzp_test_[EXAMPLE]",
         ),
         TokenDefinition(
@@ -51,7 +51,7 @@ class RazorpayDetector(BaseDetector):
                 value_min=24,
                 value_max=24,
             ),
-            description="Razorpay Key Secret — paired with Key ID, used to authenticate API requests and verify webhooks",
+            description="Razorpay Key Secret - paired with Key ID, used to authenticate API requests and verify webhooks",
             example="razorpay_key_secret=[EXAMPLE]",
         ),
     ]

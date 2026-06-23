@@ -1,9 +1,9 @@
 """
-Detector Registry — metadata facade over the live plugin registry.
+Detector Registry - metadata facade over the live plugin registry.
 
 Derives all metadata from the registered detector classes instead of a
 hardcoded static list. Adding a new service means creating one new detector
-file — no changes here needed.
+file - no changes here needed.
 
 Usage (UI / settings layer):
     from src.security.detector_registry import get_all_detector_meta, DetectorMeta
@@ -24,7 +24,7 @@ from src.security.registry import DetectorRegistry
 @dataclass(frozen=True)
 class DetectorMeta:
     """UI-facing descriptor for one detector."""
-    key: str         # == detector.CATEGORY — used as the categories: YAML key
+    key: str         # == detector.CATEGORY - used as the categories: YAML key
     name: str        # Human-readable name (same as key for now)
     description: str # One-line plain-English description
     domain: str      # Folder grouping: "Cloud & Infrastructure", "AI & ML Platforms", etc.

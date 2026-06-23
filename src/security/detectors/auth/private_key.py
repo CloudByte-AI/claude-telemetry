@@ -35,7 +35,7 @@ class PrivateKeyDetector(BaseDetector):
             detection="pattern",
             capture_group=0,
             pattern=_pem_pattern("RSA PRIVATE KEY"),
-            description="RSA private key (PEM) — used for TLS certificates, SSH authentication, and code signing",
+            description="RSA private key (PEM) - used for TLS certificates, SSH authentication, and code signing",
             example="-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA0Z3VS5JJcds3xHn/ygWep4PAtEo1\n-----END RSA PRIVATE KEY-----",
         ),
         TokenDefinition(
@@ -45,7 +45,7 @@ class PrivateKeyDetector(BaseDetector):
             detection="pattern",
             capture_group=0,
             pattern=_pem_pattern("EC PRIVATE KEY"),
-            description="Elliptic Curve private key (PEM) — used for TLS, JWT signing, and cryptocurrency wallets",
+            description="Elliptic Curve private key (PEM) - used for TLS, JWT signing, and cryptocurrency wallets",
             example="-----BEGIN EC PRIVATE KEY-----\nMHQCAQEEIOWDzJFVzYoEMkZQUBfqPH4VaQrHNKLjBfEM\n-----END EC PRIVATE KEY-----",
         ),
         TokenDefinition(
@@ -55,7 +55,7 @@ class PrivateKeyDetector(BaseDetector):
             detection="pattern",
             capture_group=0,
             pattern=_pem_pattern("PRIVATE KEY"),
-            description="PKCS#8 private key (PEM) — vendor-neutral private key format for TLS and code signing",
+            description="PKCS#8 private key (PEM) - vendor-neutral private key format for TLS and code signing",
             example="-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEA\n-----END PRIVATE KEY-----",
         ),
         TokenDefinition(
@@ -75,7 +75,7 @@ class PrivateKeyDetector(BaseDetector):
             detection="pattern",
             capture_group=0,
             pattern=_pem_pattern("OPENSSH PRIVATE KEY"),
-            description="OpenSSH private key — used for SSH public key authentication",
+            description="OpenSSH private key - used for SSH public key authentication",
             example="-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAA\n-----END OPENSSH PRIVATE KEY-----",
         ),
         TokenDefinition(
@@ -85,7 +85,7 @@ class PrivateKeyDetector(BaseDetector):
             detection="pattern",
             capture_group=0,
             pattern=_pem_pattern("DSA PRIVATE KEY"),
-            description="DSA private key (PEM) — legacy digital signature algorithm key",
+            description="DSA private key (PEM) - legacy digital signature algorithm key",
             example="-----BEGIN DSA PRIVATE KEY-----\nMIIBugIBAAKBgQDMPqGE7t3WoQ9fMaW5vLpM3hJpL5mY\n-----END DSA PRIVATE KEY-----",
         ),
         TokenDefinition(
@@ -95,7 +95,7 @@ class PrivateKeyDetector(BaseDetector):
             detection="pattern",
             capture_group=0,
             pattern=_pem_pattern("PGP PRIVATE KEY BLOCK"),
-            description="PGP/GPG private key — used for email encryption and package signing",
+            description="PGP/GPG private key - used for email encryption and package signing",
             example="-----BEGIN PGP PRIVATE KEY BLOCK-----\nxcaGBGRmXJEBEACsMJ5bfqpKhMbPMEGrYzE0VpEqR2kL\n-----END PGP PRIVATE KEY BLOCK-----",
         ),
         TokenDefinition(
@@ -105,7 +105,7 @@ class PrivateKeyDetector(BaseDetector):
             detection="pattern",
             capture_group=0,
             pattern=_pem_pattern("PKCS12"),
-            description="PKCS#12 certificate bundle (PEM) — contains private key + certificate chain",
+            description="PKCS#12 certificate bundle (PEM) - contains private key + certificate chain",
             example="-----BEGIN PKCS12-----\nMIIN0wIBAzCCDY0GCSqGSIb3DQEHAaCCDX4Egg16MIIMdA\n-----END PKCS12-----",
         ),
         TokenDefinition(
@@ -115,7 +115,7 @@ class PrivateKeyDetector(BaseDetector):
             detection="pattern",
             capture_group=0,
             pattern=_pem_pattern("CERTIFICATE"),
-            description="X.509 certificate (PEM) — public certificate; low sensitivity but flag in sensitive contexts",
+            description="X.509 certificate (PEM) - public certificate; low sensitivity but flag in sensitive contexts",
             example="-----BEGIN CERTIFICATE-----\nMIIDXTCCAkWgAwIBAgIJAKoK9EXAMPLE0MAoGCCqGSM49\n-----END CERTIFICATE-----",
         ),
     ]

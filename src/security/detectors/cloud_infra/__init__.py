@@ -1,1 +1,1 @@
-# Cloud & Infrastructure detectors — imported by detectors/__init__.py
+# Cloud & Infrastructure detectors - imported by detectors/__init__.py

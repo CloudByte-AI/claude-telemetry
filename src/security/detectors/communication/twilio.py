@@ -27,7 +27,7 @@ class TwilioDetector(BaseDetector):
             detection="prefix",
             # SK + 32 hex digits, strict hex-only charset for specificity
             pattern=BaseDetector.prefix_pattern("SK", r"[0-9a-fA-F]", 32),
-            description="Twilio API Key SID — identifies an API key, used with the API Key Secret for authentication",
+            description="Twilio API Key SID - identifies an API key, used with the API Key Secret for authentication",
             example="SK[EXAMPLE]",
         ),
         TokenDefinition(
@@ -37,7 +37,7 @@ class TwilioDetector(BaseDetector):
             detection="prefix",
             # AC + 32 hex digits
             pattern=BaseDetector.prefix_pattern("AC", r"[0-9a-fA-F]", 32),
-            description="Twilio Account SID — uniquely identifies your Twilio account",
+            description="Twilio Account SID - uniquely identifies your Twilio account",
             example="AC[EXAMPLE]",
         ),
         TokenDefinition(
@@ -55,7 +55,7 @@ class TwilioDetector(BaseDetector):
                 value_min=32,
                 value_max=32,
             ),
-            description="Twilio API Key Secret — paired with API Key SID, used to authenticate Twilio REST API calls",
+            description="Twilio API Key Secret - paired with API Key SID, used to authenticate Twilio REST API calls",
             example="twilio_api_key_secret=[EXAMPLE]",
         ),
         TokenDefinition(
@@ -72,7 +72,7 @@ class TwilioDetector(BaseDetector):
                 value_min=32,
                 value_max=32,
             ),
-            description="Twilio Auth Token — master credential for your Twilio account, equivalent to account password",
+            description="Twilio Auth Token - master credential for your Twilio account, equivalent to account password",
             example="twilio_auth_token=[EXAMPLE]",
         ),
     ]

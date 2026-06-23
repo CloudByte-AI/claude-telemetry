@@ -1,14 +1,14 @@
 """
-Pattern Builder — generates regex detectors from example keys.
+Pattern Builder - generates regex detectors from example keys.
 
 Users provide one or more example keys (real or dummy with same format).
 The builder analyzes structure and produces a precise, validated regex
 with confidence scoring and false-positive risk assessment.
 
-YAML usage in security_profile_v2.yaml:
+YAML usage in security_profile.yaml:
 
   custom_patterns:
-    # Mode A — examples (system generates pattern):
+    # Mode A - examples (system generates pattern):
     - name: "Your Secret Token"
       examples:
         - "INT_TKN_aBcD1234eFgH5678"
@@ -16,7 +16,7 @@ YAML usage in security_profile_v2.yaml:
         - "INT_TKN_mNoP2345qRsT6789"
       severity: HIGH
 
-    # Mode B — manual regex (existing, unchanged):
+    # Mode B - manual regex (existing, unchanged):
     - name: "Legacy Token"
       pattern: 'LGC-[a-f0-9]{32}'
       severity: MEDIUM
@@ -60,7 +60,7 @@ _CODEBASE_SCAN_EXTS = frozenset({
     '.yaml', '.yml', '.json', '.toml', '.ini', '.cfg',
     '.sh', '.bash', '.zsh', '.rb', '.go', '.java', '.cs',
     '.php', '.html', '.vue', '.svelte', '.md', '.txt', '.xml',
-    # Note: .env intentionally excluded — these files typically CONTAIN real secrets.
+    # Note: .env intentionally excluded - these files typically CONTAIN real secrets.
     # Counting a match there as a FP would be misleading.
 })
 _CODEBASE_SKIP_DIRS = frozenset({
@@ -68,7 +68,7 @@ _CODEBASE_SKIP_DIRS = frozenset({
     'dist', 'build', '.tox', 'coverage', '.pytest_cache',
     '.mypy_cache', '.ruff_cache', 'htmlcov', '.eggs', '.cloudbyte',
 })
-# Filenames that likely contain real secrets — skip to avoid counting TPs as FPs
+# Filenames that likely contain real secrets - skip to avoid counting TPs as FPs
 _CODEBASE_SKIP_FILENAMES = frozenset({
     '.env', '.env.local', '.env.production', '.env.staging', '.env.development',
     'credentials.json', 'service_account.json', 'secrets.yaml', 'secrets.yml',
@@ -92,9 +92,9 @@ class GeneratedPattern:
     """
     Result of analyzing example keys.
 
-    confidence       — how reliably the builder inferred the pattern
-    false_positive_risk — how likely the pattern is to fire on benign text
-    alternatives     — looser / stricter / context-anchored variants the user
+    confidence       - how reliably the builder inferred the pattern
+    false_positive_risk - how likely the pattern is to fire on benign text
+    alternatives     - looser / stricter / context-anchored variants the user
                        can substitute if the primary pattern over- or under-fires
     """
     name:                str
@@ -246,7 +246,7 @@ def _heuristic_prefix_single(example: str) -> str:
     is followed by enough random-looking content.
 
     A key like  rzp_live_ABC123XYZ789  has separator '_' at pos 3 and 7.
-    The second split gives 'rzp_live_' as prefix and 12 random chars — good.
+    The second split gives 'rzp_live_' as prefix and 12 random chars - good.
     """
     best = 0
     for i, ch in enumerate(example):
@@ -424,11 +424,11 @@ def _confidence(
 ) -> tuple[str, str]:
     issues: list[str] = []
     if n_examples < 2:
-        issues.append("single example — add more to improve accuracy")
+        issues.append("single example - add more to improve accuracy")
     if not validates:
         issues.append("generated pattern does not match all examples")
     if len(prefix) < _MIN_SAFE_PREFIX_LEN:
-        issues.append("prefix is very short — higher false-positive risk")
+        issues.append("prefix is very short - higher false-positive risk")
     min_var_len = min((len(v) for v in variable_parts), default=0)
     if min_var_len < _MIN_CONFIDENT_LEN:
         issues.append(f"variable part only {min_var_len} chars")
@@ -437,7 +437,7 @@ def _confidence(
         if variable_parts else 0
     )
     if mean_entropy < 2.0:
-        issues.append(f"low entropy ({mean_entropy:.1f}) — may not be a secret")
+        issues.append(f"low entropy ({mean_entropy:.1f}) - may not be a secret")
 
     if not issues:
         return "HIGH", (
@@ -456,13 +456,13 @@ def _fp_risk(prefix: str, char_class: str, min_len: int) -> tuple[str, str]:
     if plen >= _MIN_SAFE_PREFIX_LEN and min_len >= 12:
         return "LOW", f"prefix '{prefix}' + {min_len}-char minimum"
     if plen >= _MIN_SAFE_PREFIX_LEN:
-        return "MEDIUM", f"prefix '{prefix}' is short — ensure {min_len}-char min is distinctive"
+        return "MEDIUM", f"prefix '{prefix}' is short - ensure {min_len}-char min is distinctive"
     if min_len >= 32:
         return "MEDIUM", f"no prefix but {min_len}-char minimum provides specificity"
     if char_class in ("[0-9a-f]", "[0-9A-F]", "[0-9a-fA-F]") and min_len >= 16:
-        return "MEDIUM", f"hex-only {min_len}-char — specific but may match hash values"
+        return "MEDIUM", f"hex-only {min_len}-char - specific but may match hash values"
     return "HIGH", (
-        f"no distinctive prefix and short length ({min_len}) — "
+        f"no distinctive prefix and short length ({min_len}) - "
         "provide more examples or add a prefix to your key format"
     )
 
@@ -672,7 +672,7 @@ def analyze_examples(
     Args:
         name:     Human-readable name for this secret type.
         examples: Example key strings (real or safely-anonymised dummies).
-        severity: HIGH / MEDIUM / LOW — how critical is this if leaked.
+        severity: HIGH / MEDIUM / LOW - how critical is this if leaked.
         cwd:      Project working directory for real codebase FP scan (optional).
                   When provided, the generated pattern is tested against actual
                   project files using a file-based cache (24-hour TTL).
@@ -704,7 +704,7 @@ def analyze_examples(
             # Adjust effective prefix for downstream analysis
             prefix = env_core_prefix
             warnings.append(
-                f"Examples have variable environment prefixes — "
+                f"Examples have variable environment prefixes - "
                 f"generated pattern uses optional group {env_group}"
             )
 
@@ -720,14 +720,14 @@ def analyze_examples(
 
     if any(not v for v in var_parts):
         warnings.append(
-            "Some examples produced empty variable parts — "
+            "Some examples produced empty variable parts - "
             "prefix/suffix detection may be over-eager. Adding more diverse examples helps."
         )
         var_parts = [v or e for v, e in zip(var_parts, examples)]
 
     if n >= 2 and len(set(var_parts)) == 1:
         warnings.append(
-            "All examples share identical variable parts — "
+            "All examples share identical variable parts - "
             "pattern will be too specific. Provide varied examples."
         )
 
@@ -764,7 +764,7 @@ def analyze_examples(
     # ── 7. Validate + fallback ────────────────────────────────────────────────
     compiled = _safe_compile(primary)
     if compiled is None:
-        warnings.append(f"Generated pattern had a regex error — using fallback pattern")
+        warnings.append(f"Generated pattern had a regex error - using fallback pattern")
         primary = _fallback_pattern(prefix, char_class, length_spec)
         compiled = _safe_compile(primary)
 
@@ -795,13 +795,13 @@ def analyze_examples(
         fp = "HIGH" if clean_fp_hits >= 2 else "MEDIUM"
         fp_reason = (
             f"pattern fires {clean_fp_hits} time(s) on sample developer code "
-            f"— likely to produce false positives in practice"
+            f"- likely to produce false positives in practice"
         )
 
     # ── 12. User guidance warnings ────────────────────────────────────────────
     if n == 1:
         warnings.append(
-            "Only one example provided — confidence is limited. "
+            "Only one example provided - confidence is limited. "
             "Add 2–3 more examples for a more accurate and reliable pattern."
         )
     if not validates:
@@ -820,11 +820,11 @@ def analyze_examples(
     elif fp == "MEDIUM" and clean_fp_hits > 0:
         warnings.append(
             f"Pattern fired {clean_fp_hits} time(s) on sample developer code. "
-            "Review prompts carefully — some legitimate code may be flagged."
+            "Review prompts carefully - some legitimate code may be flagged."
         )
     if min_len < 6:
         warnings.append(
-            f"Variable part is only {min_len} chars — very likely to produce false positives. "
+            f"Variable part is only {min_len} chars - very likely to produce false positives. "
             "If your token format is genuinely this short, rely on the 'context' alternative "
             "that anchors detection to variable assignment patterns."
         )
@@ -856,11 +856,11 @@ def analyze_examples(
                 fp = "HIGH"
                 fp_reason = (
                     f"pattern fires {cb_fp} time(s) across {cb_files} project files "
-                    f"— likely to produce many false positives in your codebase"
+                    f"- likely to produce many false positives in your codebase"
                 )
                 warnings.append(
                     f"Codebase scan: {cb_fp} false-positive hit(s) in {cb_files} project files. "
-                    "Your pattern is firing on your own code — use the 'context' alternative "
+                    "Your pattern is firing on your own code - use the 'context' alternative "
                     "which requires the token to appear after a variable assignment (api_key=...)."
                 )
             elif cb_fp >= 2:
@@ -868,14 +868,14 @@ def analyze_examples(
                     fp = "MEDIUM"
                     fp_reason = (
                         f"pattern fires {cb_fp} time(s) in your project files "
-                        f"— some legitimate code may be flagged"
+                        f"- some legitimate code may be flagged"
                     )
                 warnings.append(
                     f"Codebase scan: {cb_fp} hit(s) in {cb_files} project files. "
                     "Review these occurrences to confirm they are real secrets, not legitimate code."
                 )
             elif cb_fp == 0 and cb_files > 0:
-                # Good result — pattern is clean on user's own code
+                # Good result - pattern is clean on user's own code
                 if fp == "MEDIUM":
                     fp = "LOW"
                     fp_reason = (

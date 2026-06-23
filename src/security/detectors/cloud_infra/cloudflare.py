@@ -26,7 +26,7 @@ class CloudflareDetector(BaseDetector):
             severity="HIGH",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("cfk_", _CF_CHARSET, _CF_LEN),
-            description="Cloudflare Global API Key — full account access, equivalent to account password",
+            description="Cloudflare Global API Key - full account access, equivalent to account password",
             example="cfk_[EXAMPLE]",
         ),
         TokenDefinition(
@@ -35,7 +35,7 @@ class CloudflareDetector(BaseDetector):
             severity="HIGH",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("cfut_", _CF_CHARSET, _CF_LEN),
-            description="Cloudflare User API Token — scoped token for specific Cloudflare zones/permissions",
+            description="Cloudflare User API Token - scoped token for specific Cloudflare zones/permissions",
             example="cfut_[EXAMPLE]",
         ),
         TokenDefinition(
@@ -44,7 +44,7 @@ class CloudflareDetector(BaseDetector):
             severity="HIGH",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("cfat_", _CF_CHARSET, _CF_LEN),
-            description="Cloudflare Account API Token — scoped to account-level operations",
+            description="Cloudflare Account API Token - scoped to account-level operations",
             example="cfat_[EXAMPLE]",
         ),
         # Legacy / context-anchored for tokens without new prefixes
@@ -64,7 +64,7 @@ class CloudflareDetector(BaseDetector):
                 value_min=37,
                 value_max=45,
             ),
-            description="Cloudflare API key (legacy context-only detection) — used for older integrations",
+            description="Cloudflare API key (legacy context-only detection) - used for older integrations",
             example="cloudflare_api_key=[EXAMPLE]",
         ),
     ]

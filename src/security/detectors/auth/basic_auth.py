@@ -47,7 +47,7 @@ class BasicAuthDetector(BaseDetector):
             detection="pattern",
             capture_group=1,
             pattern=_URL_RE,
-            description="Username and password embedded directly in an HTTP URL — transmitted in plain text",
+            description="Username and password embedded directly in an HTTP URL - transmitted in plain text",
             example="https://admin:s3cr3tP4ss@api.example.com/endpoint",
         ),
         TokenDefinition(
@@ -67,7 +67,7 @@ class BasicAuthDetector(BaseDetector):
             detection="pattern",
             capture_group=1,
             pattern=_BASIC_HDR_RE,
-            description="HTTP Basic authentication header — base64-encoded username:password pair",
+            description="HTTP Basic authentication header - base64-encoded username:password pair",
             example="Authorization: Basic YWRtaW46czNjcjN0UDRzcw==",
         ),
     ]

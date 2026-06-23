@@ -1,4 +1,4 @@
-"""Groq Detector — gsk_ prefix + exactly 52 alphanumeric chars."""
+"""Groq Detector - gsk_ prefix + exactly 52 alphanumeric chars."""
 
 from src.security.detectors.base import BaseDetector, TokenDefinition
 from src.security.registry import register_detector
@@ -18,7 +18,7 @@ class GroqDetector(BaseDetector):
             severity="HIGH",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("gsk_", r"[a-zA-Z0-9_]", 52),
-            description="Groq API Key — used to call Groq's LLM inference API (LLaMA, Mixtral, etc.)",
+            description="Groq API Key - used to call Groq's LLM inference API (LLaMA, Mixtral, etc.)",
             example="gsk_[EXAMPLE]",
         ),
     ]

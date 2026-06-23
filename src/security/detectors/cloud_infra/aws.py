@@ -1,5 +1,5 @@
 """
-AWS Detector — covers all IAM identifier prefixes and the Secret Access Key.
+AWS Detector - covers all IAM identifier prefixes and the Secret Access Key.
 
 AWS IAM ID lengths by prefix type:
   20 chars (prefix + 16): AKIA (access keys), ASIA (STS temporary keys)
@@ -14,7 +14,7 @@ import re
 from src.security.detectors.base import BaseDetector, TokenDefinition
 from src.security.registry import register_detector
 
-# AWS documents these as canonical example keys — always safe to skip.
+# AWS documents these as canonical example keys - always safe to skip.
 _AWS_EXAMPLE_KEYS: frozenset = frozenset({
     "AKIAIOSFODNN7EXAMPLE",    # 20-char AKIA
     "ASIAY7XTRA4NBEXAMPLE",    # 20-char ASIA
@@ -42,7 +42,7 @@ class AWSDetector(BaseDetector):
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("AKIA", _IAM_CHARSET, _IAM_AFTER_SHORT),
             known_safe=_AWS_EXAMPLE_KEYS,
-            description="AWS IAM user access key — grants programmatic API access to your AWS account",
+            description="AWS IAM user access key - grants programmatic API access to your AWS account",
             example="AKIAIOSFODNN7EXAMPLE",
         ),
         TokenDefinition(
@@ -52,7 +52,7 @@ class AWSDetector(BaseDetector):
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("ASIA", _IAM_CHARSET, _IAM_AFTER_SHORT),
             known_safe=_AWS_EXAMPLE_KEYS,
-            description="AWS STS temporary access key — short-lived credential issued by AssumeRole",
+            description="AWS STS temporary access key - short-lived credential issued by AssumeRole",
             example="ASIAY7XTRA4NBEXAMPLE",
         ),
         # ── 21-char IAM identifiers: all others (prefix + 17) ────────────────
@@ -63,7 +63,7 @@ class AWSDetector(BaseDetector):
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("ABIA", _IAM_CHARSET, _IAM_AFTER_LONG),
             known_safe=_AWS_EXAMPLE_KEYS,
-            description="AWS STS service bearer token — used internally by AWS services",
+            description="AWS STS service bearer token - used internally by AWS services",
             example="ABIAJOSHUA67EXAMPLEBX",
         ),
         TokenDefinition(
@@ -72,7 +72,7 @@ class AWSDetector(BaseDetector):
             severity="HIGH",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("ACCA", _IAM_CHARSET, _IAM_AFTER_LONG),
-            description="AWS context-specific credential — used within service-to-service calls",
+            description="AWS context-specific credential - used within service-to-service calls",
             example="ACCAIOSFODNN7EXAMPLEX",
         ),
         TokenDefinition(
@@ -99,7 +99,7 @@ class AWSDetector(BaseDetector):
             severity="MEDIUM",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("AIPA", _IAM_CHARSET, _IAM_AFTER_LONG),
-            description="AWS EC2 instance profile — role attached to an EC2 instance",
+            description="AWS EC2 instance profile - role attached to an EC2 instance",
             example="AIPARUNNINGONEXAMP001",
         ),
         TokenDefinition(
@@ -164,7 +164,7 @@ class AWSDetector(BaseDetector):
                 value_min=40,
                 value_max=40,
             ),
-            description="AWS IAM secret access key — paired with an access key ID, used to sign API requests",
+            description="AWS IAM secret access key - paired with an access key ID, used to sign API requests",
             example="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
         ),
     ]

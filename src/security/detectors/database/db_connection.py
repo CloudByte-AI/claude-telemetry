@@ -11,7 +11,7 @@ Detects connection strings that embed credentials:
   amqp(s)://user:pass@host  (RabbitMQ)
   smtp://user:pass@host     (mail relay)
 
-Patterns are "structural" — the credential is captured from the URI itself.
+Patterns are "structural" - the credential is captured from the URI itself.
 """
 
 import re
@@ -21,7 +21,7 @@ from src.security.registry import register_detector
 # Reusable URI sub-patterns
 _USERINFO     = r"[^:@/\s]{1,128}:[^@\s]{1,256}"   # user:pass
 _HOST         = r"[^/\s@]+"                          # host[:port]
-_OPTIONAL_DB  = r"(?:/[^\s]*)?"                       # /dbname?options — optional
+_OPTIONAL_DB  = r"(?:/[^\s]*)?"                       # /dbname?options - optional
 
 
 def _conn_pattern(schemes: list[str]) -> re.Pattern:
@@ -48,7 +48,7 @@ class DatabaseConnectionDetector(BaseDetector):
             detection="pattern",
             capture_group=1,
             pattern=_conn_pattern(["mongodb", "mongodb+srv"]),
-            description="MongoDB connection string with embedded credentials — grants full database access",
+            description="MongoDB connection string with embedded credentials - grants full database access",
             example="mongodb://admin:s3cr3tP4ss@mongo.example.com:27017/mydb",
         ),
         TokenDefinition(

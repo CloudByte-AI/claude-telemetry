@@ -27,7 +27,7 @@ class GitLabDetector(BaseDetector):
             severity="HIGH",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("glpat-", _GL_CHARSET, _GL_STANDARD),
-            description="GitLab personal, project, or group access token — grants Git and API access",
+            description="GitLab personal, project, or group access token - grants Git and API access",
             example="glpat-[EXAMPLE]",
         ),
         TokenDefinition(
@@ -36,7 +36,7 @@ class GitLabDetector(BaseDetector):
             severity="HIGH",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("gldt-", _GL_CHARSET, _GL_STANDARD),
-            description="GitLab deploy token — read-only access to pull packages or container images",
+            description="GitLab deploy token - read-only access to pull packages or container images",
             example="gldt-[EXAMPLE]",
         ),
         TokenDefinition(
@@ -45,7 +45,7 @@ class GitLabDetector(BaseDetector):
             severity="HIGH",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("glrt-", _GL_CHARSET, _GL_STANDARD),
-            description="GitLab runner authentication token — used by CI/CD runners to authenticate with GitLab",
+            description="GitLab runner authentication token - used by CI/CD runners to authenticate with GitLab",
             example="glrt-[EXAMPLE]",
         ),
         TokenDefinition(
@@ -63,7 +63,7 @@ class GitLabDetector(BaseDetector):
             severity="HIGH",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("glcbt-", _GL_CHARSET, _GL_STANDARD),
-            description="GitLab CI/CD job token — temporary token available during CI pipeline jobs",
+            description="GitLab CI/CD job token - temporary token available during CI pipeline jobs",
             example="glcbt-[EXAMPLE]",
         ),
         TokenDefinition(
@@ -72,7 +72,7 @@ class GitLabDetector(BaseDetector):
             severity="HIGH",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("glptt-", _GL_CHARSET, _GL_STANDARD),
-            description="GitLab pipeline trigger token — used to trigger CI pipelines via API",
+            description="GitLab pipeline trigger token - used to trigger CI pipelines via API",
             example="glptt-[EXAMPLE]",
         ),
         TokenDefinition(
@@ -81,7 +81,7 @@ class GitLabDetector(BaseDetector):
             severity="MEDIUM",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("glft-", _GL_CHARSET, _GL_STANDARD),
-            description="GitLab feed token — read-only access to RSS/Atom feeds",
+            description="GitLab feed token - read-only access to RSS/Atom feeds",
             example="glft-[EXAMPLE]",
         ),
         TokenDefinition(
@@ -90,7 +90,7 @@ class GitLabDetector(BaseDetector):
             severity="MEDIUM",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("glimt-", _GL_CHARSET, _GL_STANDARD),
-            description="GitLab incoming email token — creates issues/comments via email",
+            description="GitLab incoming email token - creates issues/comments via email",
             example="glimt-[EXAMPLE]",
         ),
         TokenDefinition(
@@ -99,7 +99,7 @@ class GitLabDetector(BaseDetector):
             severity="HIGH",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("glsoat-", _GL_CHARSET, _GL_STANDARD),
-            description="GitLab SCIM token — used for SCIM-based user provisioning (SSO/SAML)",
+            description="GitLab SCIM token - used for SCIM-based user provisioning (SSO/SAML)",
             example="glsoat-[EXAMPLE]",
         ),
         TokenDefinition(
@@ -108,7 +108,7 @@ class GitLabDetector(BaseDetector):
             severity="HIGH",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("glwt-", _GL_CHARSET, _GL_STANDARD),
-            description="GitLab workspace token — access to GitLab workspaces",
+            description="GitLab workspace token - access to GitLab workspaces",
             example="glwt-[EXAMPLE]",
         ),
         TokenDefinition(
@@ -117,7 +117,7 @@ class GitLabDetector(BaseDetector):
             severity="HIGH",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("gloas-", _GL_CHARSET, 64),
-            description="GitLab OAuth application secret — used in OAuth 2.0 flows for third-party apps",
+            description="GitLab OAuth application secret - used in OAuth 2.0 flows for third-party apps",
             example="gloas-[EXAMPLE]",
         ),
         TokenDefinition(
@@ -126,7 +126,7 @@ class GitLabDetector(BaseDetector):
             severity="HIGH",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("glagent-", _GL_CHARSET, 50),
-            description="GitLab Kubernetes Agent token — authenticates the GitLab agent running inside a Kubernetes cluster",
+            description="GitLab Kubernetes Agent token - authenticates the GitLab agent running inside a Kubernetes cluster",
             example="glagent-[EXAMPLE]",
         ),
     ]

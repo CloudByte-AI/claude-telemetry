@@ -1,5 +1,5 @@
 """
-Security scanner — plugin-based custom detector system.
+Security scanner - plugin-based custom detector system.
 
 No dependency on detect-secrets or any third-party scanning library.
 All detectors live in src/security/detectors/ and self-register via
@@ -43,7 +43,7 @@ MAX_LINES_CHUNK = 5000
 MAX_WORKERS     = 6
 MAX_LINE_LENGTH = 2000  # skip minified / bundled lines
 
-# ── Pre-filter — lines matching this are "high-risk" and retained in filtered mode ──
+# ── Pre-filter - lines matching this are "high-risk" and retained in filtered mode ──
 _QUICK_FILTER = re.compile(
     # Cloud / infra prefixes
     r'AKIA[0-9A-Z]'
@@ -103,7 +103,7 @@ def _run_timed(pattern_str: str, text: str) -> list[re.Match]:
             return future.result(timeout=_PATTERN_TIMEOUT_SECS)
         except TimeoutError:
             logger.warning(
-                f"Custom pattern timed out after {_PATTERN_TIMEOUT_SECS}s — skipped. "
+                f"Custom pattern timed out after {_PATTERN_TIMEOUT_SECS}s - skipped. "
                 "Consider simplifying the regex."
             )
             return []
@@ -279,10 +279,10 @@ def scan_text(text: str, cfg: ScanConfig) -> ScanResult:
     lines_raw    = text.splitlines()
     count        = len(lines_raw)
     detectors    = DetectorRegistry.get_enabled(cfg.categories)
-    # Build allowlist frozenset once — passed to every detector and custom-pattern scan.
+    # Build allowlist frozenset once - passed to every detector and custom-pattern scan.
     # A frozenset lookup is O(1); this is the only place cfg.allowlist is converted.
     allowlist_set = frozenset(v for v in cfg.allowlist if v)
-    # Pre-compute line offsets once for the full text — used by custom patterns
+    # Pre-compute line offsets once for the full text - used by custom patterns
     # and by full/chunked strategies. Filtered strategy uses compact_offsets instead.
     line_offsets = compute_line_offsets(text)
 

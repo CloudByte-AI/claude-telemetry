@@ -1,4 +1,4 @@
-"""NPM Detector — npm_ prefix + 36 alphanumeric chars."""
+"""NPM Detector - npm_ prefix + 36 alphanumeric chars."""
 
 from src.security.detectors.base import BaseDetector, TokenDefinition
 from src.security.registry import register_detector
@@ -18,7 +18,7 @@ class NPMDetector(BaseDetector):
             severity="HIGH",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("npm_", r"[a-zA-Z0-9]", 36),
-            description="NPM access token — used to publish/install packages and manage npm organization access",
+            description="NPM access token - used to publish/install packages and manage npm organization access",
             example="npm_[EXAMPLE]",
         ),
     ]

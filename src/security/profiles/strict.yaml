@@ -1,13 +1,13 @@
-# Strict security profile — maximum protection. Every detector on.
+# Strict security profile - maximum protection. Every detector on.
 # All PII types, entropy, keyword assignments.
 #
 # Includes detectors intentionally excluded from standard due to noise:
-#   Keyword Secret — catches "api_key = value" style assignments
-#   Bearer Token   — catches all Authorization: Bearer headers
-#   Basic Auth     — catches http://user:pass@host URLs
-#   Entropy Secret — entropy-based catch-all for high-randomness values
-#   Email Address  — PII: all email addresses
-#   Phone Number   — PII: all phone numbers
+#   Keyword Secret - catches "api_key = value" style assignments
+#   Bearer Token   - catches all Authorization: Bearer headers
+#   Basic Auth     - catches http://user:pass@host URLs
+#   Entropy Secret - entropy-based catch-all for high-randomness values
+#   Email Address  - PII: all email addresses
+#   Phone Number   - PII: all phone numbers
 plan: strict
 enabled: true
 scope: prompt_only

@@ -1,1 +1,1 @@
-# Database detectors — imported by detectors/__init__.py
+# Database detectors - imported by detectors/__init__.py

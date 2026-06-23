@@ -1,1 +1,1 @@
-# PII detectors — imported by detectors/__init__.py
+# PII detectors - imported by detectors/__init__.py

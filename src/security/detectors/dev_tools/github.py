@@ -28,7 +28,7 @@ class GitHubDetector(BaseDetector):
             severity="HIGH",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("ghp_", _GH_CHARSET, _GH_LEN),
-            description="GitHub Personal Access Token (classic) — grants access to GitHub repositories and APIs",
+            description="GitHub Personal Access Token (classic) - grants access to GitHub repositories and APIs",
             example="ghp_[EXAMPLE]",
         ),
         TokenDefinition(
@@ -37,7 +37,7 @@ class GitHubDetector(BaseDetector):
             severity="HIGH",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("gho_", _GH_CHARSET, _GH_LEN),
-            description="GitHub OAuth access token — issued to OAuth apps, scoped to user's permitted resources",
+            description="GitHub OAuth access token - issued to OAuth apps, scoped to user's permitted resources",
             example="gho_[EXAMPLE]",
         ),
         TokenDefinition(
@@ -46,7 +46,7 @@ class GitHubDetector(BaseDetector):
             severity="HIGH",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("ghu_", _GH_CHARSET, _GH_LEN),
-            description="GitHub App user access token — issued when a user authorizes a GitHub App installation",
+            description="GitHub App user access token - issued when a user authorizes a GitHub App installation",
             example="ghu_[EXAMPLE]",
         ),
         TokenDefinition(
@@ -55,7 +55,7 @@ class GitHubDetector(BaseDetector):
             severity="HIGH",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("ghs_", _GH_CHARSET, _GH_LEN),
-            description="GitHub App installation access token — short-lived token for automated GitHub App operations",
+            description="GitHub App installation access token - short-lived token for automated GitHub App operations",
             example="ghs_[EXAMPLE]",
         ),
         TokenDefinition(
@@ -64,7 +64,7 @@ class GitHubDetector(BaseDetector):
             severity="HIGH",
             detection="prefix",
             pattern=BaseDetector.prefix_pattern("ghr_", _GH_CHARSET, _GH_LEN),
-            description="GitHub App OAuth refresh token — used to renew user access tokens without re-authorization",
+            description="GitHub App OAuth refresh token - used to renew user access tokens without re-authorization",
             example="ghr_[EXAMPLE]",
         ),
         TokenDefinition(
@@ -77,7 +77,7 @@ class GitHubDetector(BaseDetector):
                 r'(?<![a-zA-Z0-9\-_])github_pat_[a-zA-Z0-9]{22}_[a-zA-Z0-9]{59}'
                 r'(?![a-zA-Z0-9\-_])'
             ),
-            description="GitHub fine-grained PAT — repository-scoped token with granular permissions",
+            description="GitHub fine-grained PAT - repository-scoped token with granular permissions",
             example="github_pat_[EXAMPLE]_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
         ),
     ]
