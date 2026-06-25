@@ -584,6 +584,11 @@ def save_from_form(form: dict) -> tuple[bool, str]:
     if enabled and not has_det_inputs:
         return apply_preset(plan)
 
+    # Plan changed — load preset defaults (preserves allowlist / custom patterns)
+    existing_plan = load_security_yaml().get("plan")
+    if enabled and plan != existing_plan:
+        return apply_preset(plan)
+
     scope = form.get("scope", "both")
 
     # Build categories dict — all detectors use det_ prefix with spaces→_

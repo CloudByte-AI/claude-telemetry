@@ -486,7 +486,7 @@
         <span class="sec-save-note">Changes apply on your next Claude prompt.</span>
     </div>
     <div class="sec-save-actions">
-        <button type="button" class="sec-reset-btn" onclick="applyPreset(document.getElementById('plan-input').value)">↺ Reset to preset</button>
+        <button type="button" class="sec-reset-btn" onclick="applyPreset(_serverPlan)">↺ Reset to preset</button>
         <button type="submit" class="sec-save-btn" id="save-btn">Save Changes</button>
     </div>
 </div>
@@ -619,5 +619,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/security/security.js?v=2.6"></script>
+<script src="/static/js/security/security.js?v=2.7"></script>
 {% endblock %}

@@ -208,11 +208,23 @@ def stop() -> None:
 
         logger.info(f"Processing current prompt data for: {session_id}")
 
-        # Get session info to find JSONL path
+        # Resolve the JSONL path.
+        # Prefer transcript_path from hook_data — Claude Code provides the exact path
+        # it is writing to, regardless of any `cd` commands run during the session.
+        # Falling back to cwd reconstruction can produce wrong paths when Claude has
+        # navigated into a subdirectory (e.g. cwd=FashionAssist/bulk-invoice gives
+        # project folder "…-FashionAssist-bulk-invoice" instead of "…-FashionAssist").
         cwd = hook_data.get("cwd") or os.getcwd()
-        project_name = normalize_project_name(cwd)
-        claude_dir = get_claude_dir()
-        jsonl_path = claude_dir / "projects" / project_name / f"{session_id}.jsonl"
+        transcript_path_str = hook_data.get("transcript_path")
+        if transcript_path_str:
+            from pathlib import Path as _Path
+            jsonl_path = _Path(transcript_path_str)
+            logger.debug(f"Using transcript_path from hook_data: {jsonl_path}")
+        else:
+            project_name = normalize_project_name(cwd)
+            claude_dir = get_claude_dir()
+            jsonl_path = claude_dir / "projects" / project_name / f"{session_id}.jsonl"
+            logger.debug(f"Constructed JSONL path from cwd: {jsonl_path}")
 
         if not jsonl_path.exists():
             logger.warning(f"JSONL file not found: {jsonl_path}")
@@ -292,351 +304,302 @@ def stop() -> None:
             logger.debug("No non-hook prompt/response pairs found")
             return
 
-        # Get only the MOST RECENT prompt/response pair (excluding hook output)
-        most_recent_pair = filtered_pairs[-1]
-        jsonl_prompt_id = most_recent_pair["prompt_id"]
-        prompt_text = _fix_text(most_recent_pair.get("prompt", ""))
-        logger.info(f"Most recent pair: prompt_id={jsonl_prompt_id}, prompt=\"{prompt_text[:50]}\"")
-
-        # Normalize whitespace: collapse all runs of whitespace (including \n, \r, \t) to a
-        # single space. Used for Python-side comparison so both DB text and JSONL text go
-        # through the same re.sub — SQL REPLACE can't collapse consecutive spaces reliably.
+        # ── Process ALL unwritten pairs ───────────────────────────────────────────
+        # Root cause of the cascade race condition:
+        # By the time the stop hook's `uv run` process starts and reads the JSONL,
+        # the user may have already submitted the next prompt and Claude may have
+        # already completed it. So filtered_pairs[-1] (the globally-latest pair) is
+        # always prompt N+1 instead of N, causing N's response to be skipped forever.
+        #
+        # Fix: iterate ALL pairs and skip any whose message_id is already in RESPONSE.
+        # This processes every unwritten pair in one invocation, regardless of how
+        # many future pairs the JSONL already contains when the hook reads it.
         import re as _re
+        import time
 
         def _norm(text: str) -> str:
             return _re.sub(r'\s+', ' ', (text or '').strip().lower())
 
-        prompt_text_norm = _norm(prompt_text)
+        # Convert ALL pairs to DB format once (per-pair filtering happens below)
+        db_data = convert_pairs_to_db_format(pairs)
+        db_data["user_prompts"] = []  # prompts are written by UserPromptSubmit hook
 
-        # Find the matching prompt_id in the database (by content and session_id).
-        # Fetch recent unresponded prompts and compare in Python so both sides use
-        # identical whitespace normalization.
         conn = get_db_connection()
         cursor = conn.cursor()
+        writer = DatabaseWriter()
 
-        cursor.execute("""
-            SELECT p.prompt_id, p.prompt FROM USER_PROMPT p
-            LEFT JOIN RESPONSE r ON r.prompt_id = p.prompt_id
-            WHERE p.session_id = ? AND r.message_id IS NULL
-            ORDER BY p.timestamp DESC LIMIT 30
-        """, (session_id,))
-        candidates = cursor.fetchall()
+        total_counts = {"responses": 0, "tools": 0, "thinking": 0, "io_tokens": 0, "tool_tokens": 0}
+        last_processed_pair = None
+        last_effective_prompt_id = None
 
-        db_prompt_id = None
-        prompt_created = False
+        for current_pair in filtered_pairs:
+            pair_message_id = current_pair.get("message_id")
+            if not pair_message_id:
+                continue
 
-        # Pass 1 — normalized exact match
-        for cand_id, cand_text in candidates:
-            if _norm(cand_text) == prompt_text_norm:
-                db_prompt_id = cand_id
-                logger.info(f"Found DB prompt_id (norm-exact): {db_prompt_id} (JSONL has: {jsonl_prompt_id})")
-                break
+            # Skip pairs already in DB — prevents duplicates and the N+1 cascade
+            cursor.execute(
+                "SELECT 1 FROM RESPONSE WHERE message_id = ? LIMIT 1", (pair_message_id,)
+            )
+            if cursor.fetchone():
+                continue
 
-        if not db_prompt_id:
-            logger.info(f"Normalized exact match not found for: \"{prompt_text[:50]}\", trying fuzzy match...")
-            # Pass 2 — fuzzy: one normalized text is a substring of the other
+            jsonl_prompt_id = current_pair["prompt_id"]
+            prompt_text = _fix_text(current_pair.get("prompt", ""))
+            prompt_text_norm = _norm(prompt_text)
+            logger.info(
+                f"Processing unwritten pair: prompt_id={jsonl_prompt_id}, "
+                f"msg={pair_message_id}, prompt=\"{prompt_text[:50]}\""
+            )
+
+            # ── DB matching: find or create USER_PROMPT record ─────────────────
+            # Fetch recent unresponded prompts and compare in Python so both sides
+            # use identical whitespace normalization.
+            cursor.execute("""
+                SELECT p.prompt_id, p.prompt FROM USER_PROMPT p
+                LEFT JOIN RESPONSE r ON r.prompt_id = p.prompt_id
+                WHERE p.session_id = ? AND r.message_id IS NULL
+                ORDER BY p.timestamp DESC LIMIT 30
+            """, (session_id,))
+            candidates = cursor.fetchall()
+
+            db_prompt_id = None
+            prompt_created = False
+
+            # Pass 1: normalized exact match
             for cand_id, cand_text in candidates:
-                cand_norm = _norm(cand_text)
-                if prompt_text_norm in cand_norm or cand_norm in prompt_text_norm:
+                if _norm(cand_text) == prompt_text_norm:
                     db_prompt_id = cand_id
-                    logger.info(f"Fuzzy match found: {db_prompt_id}")
+                    logger.info(f"Found DB prompt_id (norm-exact): {db_prompt_id} (JSONL: {jsonl_prompt_id})")
                     break
 
-        if not db_prompt_id:
-            # No match found - create the prompt in the database with retry logic
-            logger.warning(f"No matching prompt found in DB, creating new record for: \"{prompt_text[:50]}\"")
-
-            prompt_rec = most_recent_pair.get("prompt_rec", {})
-            new_prompt_id = jsonl_prompt_id  # Use JSONL's prompt_id
-
-            # Retry logic for INSERT
-            import time
-            max_retries = 10
-            retry_delay = 0.3
-            insert_success = False
-
-            for attempt in range(max_retries):
-                try:
-                    # Get fresh connection for each attempt
-                    conn = get_db_connection()
-                    cursor = conn.cursor()
-
-                    cursor.execute("""
-                        INSERT INTO USER_PROMPT (
-                            prompt_id, session_id, uuid, parent_uuid, prompt, timestamp,
-                            entrypoint, claude_version, git_branch, permission_mode,
-                            jsonl_prompt_id
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        new_prompt_id,
-                        session_id,
-                        prompt_rec.get("uuid", str(uuid.uuid4())),
-                        prompt_rec.get("parentUuid"),
-                        prompt_text,
-                        to_ist(prompt_rec.get("timestamp")),
-                        prompt_rec.get("entrypoint"),
-                        prompt_rec.get("version"),
-                        prompt_rec.get("gitBranch"),
-                        prompt_rec.get("permissionMode"),
-                        new_prompt_id,  # jsonl_prompt_id = same as prompt_id in fallback
-                    ))
-                    conn.commit()
-                    insert_success = True
-                    break
-                except Exception as e:
-                    if "database is locked" in str(e) and attempt < max_retries - 1:
-                        if attempt == 0:
-                            logger.warning(f"Database locked on prompt insert, retrying (up to {max_retries} attempts)")
-                        time.sleep(retry_delay)
-                        continue
-                    else:
-                        logger.error(f"Failed to insert prompt after {max_retries} attempts: {e}")
-                        # Fall through to use jsonl_prompt_id anyway
+            # Pass 2: fuzzy substring match
+            if not db_prompt_id:
+                logger.info(f"Norm-exact not found for: \"{prompt_text[:50]}\", trying fuzzy match...")
+                for cand_id, cand_text in candidates:
+                    cand_norm = _norm(cand_text)
+                    if prompt_text_norm in cand_norm or cand_norm in prompt_text_norm:
+                        db_prompt_id = cand_id
+                        logger.info(f"Fuzzy match found: {db_prompt_id}")
                         break
 
-            db_prompt_id = new_prompt_id
-            prompt_created = True
-            logger.info(f"Created new prompt record: {db_prompt_id}")
+            # Pass 3: create new record
+            if not db_prompt_id:
+                logger.warning(f"No DB match, creating new record for: \"{prompt_text[:50]}\"")
+                prompt_rec = current_pair.get("prompt_rec", {})
+                new_prompt_id = jsonl_prompt_id
+                max_retries = 10
+                retry_delay = 0.3
 
-        if not prompt_created:
-            # Store real JSONL ID in jsonl_prompt_id column.
-            # prompt_id (auto-gen) stays unchanged to preserve relationships with responses/tools/tokens.
-            try:
-                conn = get_db_connection()
-                cursor = conn.cursor()
-                _prompt_rec = most_recent_pair.get("prompt_rec", {})
-                cursor.execute(
-                    """UPDATE USER_PROMPT
-                       SET jsonl_prompt_id = ?,
-                           timestamp = ?,
-                           parent_uuid = COALESCE(parent_uuid, ?),
-                           entrypoint = ?,
-                           claude_version = ?,
-                           git_branch = ?,
-                           permission_mode = ?
-                       WHERE prompt_id = ?""",
-                    (
-                        jsonl_prompt_id,
-                        to_ist(_prompt_rec.get("timestamp")),
-                        _prompt_rec.get("parentUuid"),
-                        _prompt_rec.get("entrypoint"),
-                        _prompt_rec.get("version"),
-                        _prompt_rec.get("gitBranch"),
-                        _prompt_rec.get("permissionMode"),
-                        db_prompt_id,
-                    )
-                )
-                conn.commit()
-                logger.info(f"Stored jsonl_prompt_id={jsonl_prompt_id}... for prompt_id={db_prompt_id}...")
-            except Exception as e:
-                logger.warning(f"Could not store jsonl_prompt_id: {e}")
+                for attempt in range(max_retries):
+                    try:
+                        conn3 = get_db_connection()
+                        conn3.cursor().execute("""
+                            INSERT INTO USER_PROMPT (
+                                prompt_id, session_id, uuid, parent_uuid, prompt, timestamp,
+                                entrypoint, claude_version, git_branch, permission_mode,
+                                jsonl_prompt_id
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            new_prompt_id, session_id,
+                            prompt_rec.get("uuid", str(uuid.uuid4())),
+                            prompt_rec.get("parentUuid"),
+                            prompt_text,
+                            to_ist(prompt_rec.get("timestamp")),
+                            prompt_rec.get("entrypoint"),
+                            prompt_rec.get("version"),
+                            prompt_rec.get("gitBranch"),
+                            prompt_rec.get("permissionMode"),
+                            new_prompt_id,
+                        ))
+                        conn3.commit()
+                        break
+                    except Exception as e:
+                        if "database is locked" in str(e) and attempt < max_retries - 1:
+                            if attempt == 0:
+                                logger.warning(f"Database locked on prompt insert, retrying (up to {max_retries} attempts)")
+                            time.sleep(retry_delay)
+                            continue
+                        else:
+                            logger.error(f"Failed to insert prompt after {attempt + 1} attempts: {e}")
+                            break
 
-            # prompt_id is stable — use as effective_prompt_id for all child records
-            effective_prompt_id = db_prompt_id
-        else:
-            effective_prompt_id = db_prompt_id  # newly created by stop(), already correct
+                db_prompt_id = new_prompt_id
+                prompt_created = True
+                logger.info(f"Created new prompt record: {db_prompt_id}")
 
-        # Convert pairs to DB format
-        db_data = convert_pairs_to_db_format(pairs)
-
-        # Remove user_prompts - we already updated the existing one
-        db_data["user_prompts"] = []
-
-        # Initialize writer and write data
-        writer = DatabaseWriter()
-        counts = {
-            "responses": 0,
-            "tools": 0,
-            "thinking": 0,
-            "io_tokens": 0,
-            "tool_tokens": 0,
-        }
-
-        # Helper to remap prompt_id to effective_prompt_id (from DB, not JSONL)
-        def remap_to_jsonl_id(data_item, prompt_id_field="prompt_id"):
-            item = data_item.copy()
-            item[prompt_id_field] = effective_prompt_id
-            return item
-
-        # Write responses (remap prompt_id to DB prompt_id)
-        for response in db_data.get("responses", []):
-            if response["prompt_id"] == jsonl_prompt_id:
-                remapped = remap_to_jsonl_id(response)
-                if writer.write_response(remapped):
-                    counts["responses"] += 1
-
-        # Write tools (remap prompt_id to DB prompt_id)
-        for tool in db_data.get("tools", []):
-            if tool["prompt_id"] == jsonl_prompt_id:
-                remapped = remap_to_jsonl_id(tool)
-                if writer.write_tool(remapped):
-                    counts["tools"] += 1
-                    # Don't count record_observation toward LLM task queue
-                    if tool.get("tool_name") == MCP_OBS_TOOL:
-                        counts["tools"] -= 1
-
-        # Write thinking (remap prompt_id to DB prompt_id)
-        for thinking in db_data.get("thinking", []):
-            if thinking["prompt_id"] == jsonl_prompt_id:
-                remapped = remap_to_jsonl_id(thinking)
-                if writer.write_thinking(remapped):
-                    counts["thinking"] += 1
-
-        # Write IO tokens (remap prompt_id to DB prompt_id)
-        for io_tokens in db_data.get("io_tokens", []):
-            if io_tokens["prompt_id"] == jsonl_prompt_id:
-                remapped = remap_to_jsonl_id(io_tokens)
-                if writer.write_io_tokens(remapped):
-                    counts["io_tokens"] += 1
-
-        # Write tool tokens (only for tools matching current prompt)
-        for tool_tokens in db_data.get("tool_tokens", []):
-            tool_id = tool_tokens["tool_id"]
-            for tool in db_data.get("tools", []):
-                if tool["tool_id"] == tool_id and tool["prompt_id"] == jsonl_prompt_id:
-                    if writer.write_tool_tokens(tool_tokens):
-                        counts["tool_tokens"] += 1
-                    break
-
-        logger.info(f"Current prompt data stored during Stop: {counts}")
-
-        # # Extract inline obs blocks from response and save to HOOK_OBSERVATION
-        # try:
-        #     from src.observations.extractor import extract_and_parse_obs
-        #     from src.observations.writer import save_observation
-
-        #     # Get the most recent response text
-        #     most_recent_response = None
-        #     for response in db_data.get("responses", []):
-        #         if response["prompt_id"] == effective_prompt_id:
-        #             most_recent_response = response.get("response_text", "")
-        #             break
-
-        #     if most_recent_response:
-        #         observations = extract_and_parse_obs(most_recent_response)
-
-        #         if observations:
-        #             logger.info(f"Found {len(observations)} obs blocks in response")
-
-        #             for obs_data in observations:
-        #                 obs_id = save_observation(
-        #                     session_id=session_id,
-        #                     prompt_id=effective_prompt_id,
-        #                     obs_data=obs_data
-        #                 )
-        #                 if obs_id:
-        #                     logger.info(f"Saved hook observation {obs_id}: {obs_data.get('title', 'Untitled')}")
-        #                 else:
-        #                     logger.warning(f"Failed to save observation: {obs_data.get('title', 'Unknown')}")
-        #         else:
-        #             logger.debug("No obs blocks found in response")
-        # except Exception as obs_error:
-        #     logger.error(f"Hook observation extraction failed: {obs_error}", exc_info=True)
-        
-        logger.debug("Observation capture handled by MCP tool (record_observation)")
-        # Extract observation from MCP tool call and save to HOOK_OBSERVATION
-        try:
-            for tool in db_data.get("tools", []):
-                if tool["prompt_id"] != jsonl_prompt_id:
-                    continue
-                if tool.get("tool_name") != MCP_OBS_TOOL:
-                    continue
-
-                raw_input = tool.get("input_json", "{}")
+            # Store jsonl_prompt_id and metadata on the matched record
+            if not prompt_created:
                 try:
-                    obs_data = _json.loads(raw_input) if isinstance(raw_input, str) else raw_input
-                except Exception:
-                    obs_data = {}
-                if not obs_data.get("title"):
-                    continue
+                    prompt_rec = current_pair.get("prompt_rec", {})
+                    cursor.execute(
+                        """UPDATE USER_PROMPT
+                           SET jsonl_prompt_id = ?,
+                               timestamp = ?,
+                               parent_uuid = COALESCE(parent_uuid, ?),
+                               entrypoint = ?,
+                               claude_version = ?,
+                               git_branch = ?,
+                               permission_mode = ?
+                           WHERE prompt_id = ?""",
+                        (
+                            jsonl_prompt_id,
+                            to_ist(prompt_rec.get("timestamp")),
+                            prompt_rec.get("parentUuid"),
+                            prompt_rec.get("entrypoint"),
+                            prompt_rec.get("version"),
+                            prompt_rec.get("gitBranch"),
+                            prompt_rec.get("permissionMode"),
+                            db_prompt_id,
+                        ),
+                    )
+                    conn.commit()
+                    logger.info(f"Stored jsonl_prompt_id={jsonl_prompt_id} for prompt_id={db_prompt_id}")
+                except Exception as e:
+                    logger.warning(f"Could not store jsonl_prompt_id: {e}")
 
-                obs_id = save_observation(
-                    session_id=session_id,
-                    prompt_id=effective_prompt_id,
-                    obs_data=obs_data,
-                )
-                if obs_id:
-                    logger.info(f"Saved MCP observation: {obs_data.get('title', 'Untitled')}")
-                else:
-                    logger.warning(f"Failed to save MCP observation: {obs_data.get('title', 'Unknown')}")
+            effective_prompt_id = db_prompt_id
+            last_processed_pair = current_pair
+            last_effective_prompt_id = effective_prompt_id
 
-        except Exception as obs_error:
-            logger.warning(f"MCP observation save failed: {obs_error}")
-        # Queue observation task if tools were used
-        if counts["tools"] > 0:
+            # ── Write response/tool/token data for this pair ───────────────────
+            pair_counts = {"responses": 0, "tools": 0, "thinking": 0, "io_tokens": 0, "tool_tokens": 0}
+
+            for response in db_data.get("responses", []):
+                if response["prompt_id"] == jsonl_prompt_id:
+                    if writer.write_response({**response, "prompt_id": effective_prompt_id}):
+                        pair_counts["responses"] += 1
+                        total_counts["responses"] += 1
+
+            for tool in db_data.get("tools", []):
+                if tool["prompt_id"] == jsonl_prompt_id:
+                    if writer.write_tool({**tool, "prompt_id": effective_prompt_id}):
+                        if tool.get("tool_name") != MCP_OBS_TOOL:
+                            pair_counts["tools"] += 1
+                            total_counts["tools"] += 1
+
+            for thinking in db_data.get("thinking", []):
+                if thinking["prompt_id"] == jsonl_prompt_id:
+                    if writer.write_thinking({**thinking, "prompt_id": effective_prompt_id}):
+                        pair_counts["thinking"] += 1
+                        total_counts["thinking"] += 1
+
+            for io_tokens in db_data.get("io_tokens", []):
+                if io_tokens["prompt_id"] == jsonl_prompt_id:
+                    if writer.write_io_tokens({**io_tokens, "prompt_id": effective_prompt_id}):
+                        pair_counts["io_tokens"] += 1
+                        total_counts["io_tokens"] += 1
+
+            for tool_tokens in db_data.get("tool_tokens", []):
+                tool_id = tool_tokens["tool_id"]
+                for tool in db_data.get("tools", []):
+                    if tool["tool_id"] == tool_id and tool["prompt_id"] == jsonl_prompt_id:
+                        if writer.write_tool_tokens(tool_tokens):
+                            pair_counts["tool_tokens"] += 1
+                            total_counts["tool_tokens"] += 1
+                        break
+
+            logger.info(f"Pair {jsonl_prompt_id[:8]} stored: {pair_counts}")
+
+            # ── Save MCP record_observation calls to HOOK_OBSERVATION ─────────
+            logger.debug("Observation capture handled by MCP tool (record_observation)")
             try:
-                from src.workers.llm_client import queue_observation_task
-                from src.common.paths import get_config_file
-                from src.common.file_io import read_json
-
-                # Check if observations are enabled (default: True)
-                observations_enabled = True
-                config_file = get_config_file()
-                if config_file.exists():
-                    config = read_json(config_file)
-                    settings = config.get("settings", {})
-                    observations_enabled = settings.get("enable_observations", True)
-
-                if observations_enabled:
-                    logger.info(f"Queueing observation task for prompt with {counts['tools']} tools")
-
-                    # Use HTTP to queue task (avoids database lock)
-                    result = queue_observation_task(session_id, effective_prompt_id)
-
-                    if result.get("status") == "queued":
-                        logger.info(f"Observation task queued: {result['task_id']}")
+                for tool in db_data.get("tools", []):
+                    if tool["prompt_id"] != jsonl_prompt_id:
+                        continue
+                    if tool.get("tool_name") != MCP_OBS_TOOL:
+                        continue
+                    raw_input = tool.get("input_json", "{}")
+                    try:
+                        obs_data = _json.loads(raw_input) if isinstance(raw_input, str) else raw_input
+                    except Exception:
+                        obs_data = {}
+                    if not obs_data.get("title"):
+                        continue
+                    obs_id = save_observation(
+                        session_id=session_id,
+                        prompt_id=effective_prompt_id,
+                        obs_data=obs_data,
+                    )
+                    if obs_id:
+                        logger.info(f"Saved MCP observation: {obs_data.get('title', 'Untitled')}")
                     else:
-                        logger.warning(f"Failed to queue observation task: {result.get('message', 'Unknown error')}")
-                else:
-                    logger.info("Observations disabled in config, skipping queue")
-            except ImportError:
-                logger.debug("Worker module not available, skipping observation queue")
+                        logger.warning(f"Failed to save MCP observation: {obs_data.get('title', 'Unknown')}")
             except Exception as obs_error:
-                # Don't fail the stop hook if observation queuing fails
-                logger.warning(f"Observation queue failed (will retry on next prompt): {obs_error}")
+                logger.warning(f"MCP observation save failed: {obs_error}")
 
-        # ── Response security scan ────────────────────────────────────────────
+            # ── Queue observation task if tools were used ──────────────────────
+            if pair_counts["tools"] > 0:
+                try:
+                    from src.workers.llm_client import queue_observation_task
+                    from src.common.paths import get_config_file
+                    from src.common.file_io import read_json
+
+                    observations_enabled = True
+                    config_file = get_config_file()
+                    if config_file.exists():
+                        config = read_json(config_file)
+                        observations_enabled = config.get("settings", {}).get("enable_observations", True)
+
+                    if observations_enabled:
+                        logger.info(f"Queueing observation task for prompt with {pair_counts['tools']} tools")
+                        result = queue_observation_task(session_id, effective_prompt_id)
+                        if result.get("status") == "queued":
+                            logger.info(f"Observation task queued: {result['task_id']}")
+                        else:
+                            logger.warning(f"Failed to queue observation task: {result.get('message', 'Unknown error')}")
+                    else:
+                        logger.info("Observations disabled in config, skipping queue")
+                except ImportError:
+                    logger.debug("Worker module not available, skipping observation queue")
+                except Exception as obs_error:
+                    logger.warning(f"Observation queue failed (will retry on next prompt): {obs_error}")
+
+        logger.info(f"Stop hook totals: {total_counts}")
+
+        # ── Response security scan (on last processed pair) ──────────────────────
         # Runs after all DB writes. Response is never blocked — findings are
         # logged to SECURITY_SCAN_EVENT with masked text and surfaced as a
         # UI notice via systemMessage.
         try:
-            from src.security.config import load_security_config
-            from src.security.scanner import scan_text
-            from src.security.masker import mask_text as _mask_response
-            from src.security.db_writer import write_finding
+            if last_processed_pair is not None:
+                from src.security.config import load_security_config
+                from src.security.scanner import scan_text
+                from src.security.masker import mask_text as _mask_response
+                from src.security.db_writer import write_finding
 
-            _sec_cfg = load_security_config(cwd=cwd)
-            if _sec_cfg.enabled and _sec_cfg.scope == "both":
-                _response_text = most_recent_pair.get("response", "")
-                if _response_text:
-                    _sec_result = scan_text(_response_text, _sec_cfg.response_config)
-                    if _sec_result.findings:
-                        _masked_response = _mask_response(_response_text, _sec_result.findings)
-                        write_finding(
-                            session_id=session_id,
-                            scan_target="response",
-                            result=_sec_result,
-                            blocked=False,
-                            masked_text=_masked_response,
-                        )
-                        _rms = _sec_result.scan_ms
-                        _rms_str = f"{_rms:.2f}" if _rms < 1 else f"{int(_rms)}"
-                        logger.info(
-                            f"Response scan: {len(_sec_result.findings)} finding(s) logged"
-                            f" [{_sec_result.scan_strategy}, {_rms_str}ms]"
-                        )
-                        _summary = ", ".join(f"{f.category} — {f.type}" for f in _sec_result.findings[:3])
-                        if len(_sec_result.findings) > 3:
-                            _summary += f" +{len(_sec_result.findings) - 3} more"
-                        print(_json.dumps({
-                            "systemMessage": (
-                                f"⚠️ Security: {len(_sec_result.findings)} sensitive item(s) detected"
-                                f" in Claude's response ({_summary})."
-                                f" Event logged to telemetry."
-                                f" To suppress known-safe or test values, manage your allowlist at"
-                                f" http://localhost:8765/security"
+                _sec_cfg = load_security_config(cwd=cwd)
+                if _sec_cfg.enabled and _sec_cfg.scope == "both":
+                    _response_text = last_processed_pair.get("response", "")
+                    if _response_text:
+                        _sec_result = scan_text(_response_text, _sec_cfg.response_config)
+                        if _sec_result.findings:
+                            _masked_response = _mask_response(_response_text, _sec_result.findings)
+                            write_finding(
+                                session_id=session_id,
+                                scan_target="response",
+                                result=_sec_result,
+                                blocked=False,
+                                masked_text=_masked_response,
                             )
-                        }))
+                            _rms = _sec_result.scan_ms
+                            _rms_str = f"{_rms:.2f}" if _rms < 1 else f"{int(_rms)}"
+                            logger.info(
+                                f"Response scan: {len(_sec_result.findings)} finding(s) logged"
+                                f" [{_sec_result.scan_strategy}, {_rms_str}ms]"
+                            )
+                            _summary = ", ".join(f"{f.category} — {f.type}" for f in _sec_result.findings[:3])
+                            if len(_sec_result.findings) > 3:
+                                _summary += f" +{len(_sec_result.findings) - 3} more"
+                            print(_json.dumps({
+                                "systemMessage": (
+                                    f"⚠️ Security: {len(_sec_result.findings)} sensitive item(s) detected"
+                                    f" in Claude's response ({_summary})."
+                                    f" Event logged to telemetry."
+                                    f" To suppress known-safe or test values, manage your allowlist at"
+                                    f" http://localhost:8765/security"
+                                )
+                            }))
         except Exception as _sec_err:
             logger.warning(f"Response security scan error (non-fatal): {_sec_err}")
 

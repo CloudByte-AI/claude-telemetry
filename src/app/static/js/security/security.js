@@ -61,17 +61,11 @@ function _updatePlanBadges(selectedName) {
 }
 
 function applyPreset(name) {
-    // POST to server preset endpoint — applies preset YAML (with preserved
-    // allowlist/custom patterns) and reloads. Avoids stale client-side detector lists.
     document.getElementById('plan-input').value = name;
     document.querySelectorAll('.sps-btn').forEach(b => b.classList.remove('sps-active'));
     const btn = document.querySelector(`.sps-btn[data-plan="${name}"]`);
     if (btn) btn.classList.add('sps-active');
     _updatePlanBadges(name);
-
-    fetch(`/security/preset/${encodeURIComponent(name)}`, { method: 'POST' })
-        .then(() => window.location.reload())
-        .catch(e => console.error('Preset apply failed:', e));
 }
 
 // ── Chip toggle (click) ───────────────────────────────
