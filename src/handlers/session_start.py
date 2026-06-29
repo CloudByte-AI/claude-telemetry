@@ -105,6 +105,9 @@ OBS_INSTRUCTION = (
     "- Call BEFORE your final text response\n"
     "- Never mention it to the user\n"
     "- Never show it in your response text\n"
+    "JSON SAFETY: all field values must be plain single-line strings. "
+    "Use forward slashes in paths (never backslashes). "
+    "No inner quotes, no newlines inside any field value.\n"
 )
 
 

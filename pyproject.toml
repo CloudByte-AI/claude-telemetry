@@ -15,7 +15,7 @@ dependencies = [
     "psutil>=5.9.0",
     "markdown>=3.7",
     "ftfy>=6.3.1",
-    "detect-secrets>=1.5.0",
+
     "pyyaml>=6.0",
     "python-docx>=1.2.0",
 ]

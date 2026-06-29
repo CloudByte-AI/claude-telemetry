@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "cloudbyte": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--no-project",
+        "${CLAUDE_PLUGIN_ROOT}/scripts/start_mcp.py"
+      ]
+    }
+  }
+}

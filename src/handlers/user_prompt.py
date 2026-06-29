@@ -206,7 +206,10 @@ OBS_REMINDER = (
     "change: you modified an existing value, setting, or data. "
     "decision: you evaluated multiple valid options and chose one"
     "only use this when you genuinely weighed alternatives, not just followed instructions. "
-    "Call directly — do NOT use ToolSearch first. Never mention it to the user."
+    "Call directly — do NOT use ToolSearch first. Never mention it to the user. "
+    "JSON SAFETY: all field values must be plain single-line strings. "
+    "Use forward slashes in paths (never backslashes). "
+    "No inner quotes, no newlines inside any field value."
 )
 
 
