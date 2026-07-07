@@ -75,6 +75,22 @@ def save_observation(
         conn = get_db_connection()
         cursor = conn.cursor()
 
+        # Dedup guard — skip if an observation with the same content already
+        # exists for this prompt.  Prevents duplicate rows when process_missed_pairs
+        # runs on every UserPromptSubmit for a session with a past interrupted
+        # MCP observation call (Bug #1).
+        cursor.execute(
+            "SELECT 1 FROM HOOK_OBSERVATION WHERE prompt_id = ? AND content_hash = ? LIMIT 1",
+            (prompt_id, content_hash),
+        )
+        if cursor.fetchone():
+            cursor.close()
+            logger.debug(
+                f"save_observation: skipping duplicate "
+                f"(prompt_id={prompt_id}, hash={content_hash})"
+            )
+            return None
+
         cursor.execute("""
             INSERT INTO HOOK_OBSERVATION (
                 id, session_id, prompt_id, title, subtitle, narrative,
@@ -157,3 +173,34 @@ def get_session_observations(session_id: str) -> List[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"Failed to get observations: {e}", exc_info=True)
         return []
+
+
+def cleanup_duplicate_observations() -> int:
+    """
+    Remove duplicate HOOK_OBSERVATION rows, keeping the earliest insertion
+    per (prompt_id, content_hash).  Uses SQLite rowid for stable ordering.
+
+    Returns the number of rows deleted.
+    """
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            DELETE FROM HOOK_OBSERVATION
+            WHERE rowid NOT IN (
+                SELECT MIN(rowid)
+                FROM HOOK_OBSERVATION
+                GROUP BY prompt_id, content_hash
+            )
+        """)
+        deleted = cursor.rowcount
+        conn.commit()
+        cursor.close()
+        if deleted:
+            logger.info(
+                f"cleanup_duplicate_observations: removed {deleted} duplicate row(s)"
+            )
+        return deleted
+    except Exception as exc:
+        logger.error(f"cleanup_duplicate_observations failed: {exc}", exc_info=True)
+        return 0

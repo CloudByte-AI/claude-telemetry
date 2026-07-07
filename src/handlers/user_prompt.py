@@ -229,6 +229,7 @@ def filter_system_messages(content: str) -> str:
         - <system-reminder>…</system-reminder>
         - <user-prompt-submit-hook …>…</user-prompt-submit-hook>
         - <sessionstart-hook …>…</sessionstart-hook>
+        - <task-notification>…</task-notification>
 
     Args:
         content: Raw prompt content (may include system messages)
@@ -268,6 +269,11 @@ def filter_system_messages(content: str) -> str:
         "",
         content,
         flags=re.DOTALL,
+    )
+
+    # Remove <task-notification> blocks (sub-agent completion notices, not real prompts)
+    content = re.sub(
+        r"<task-notification>.*?</task-notification>\s*", "", content, flags=re.DOTALL
     )
 
     return content.strip()

@@ -56,6 +56,8 @@ def _filter_system_messages_from_prompt(text: str) -> str:
     # Remove other common system tags
     text = re.sub(r'<sessionstart-hook.*?</sessionstart-hook>\s*', '', text, flags=re.DOTALL)
     text = re.sub(r'<sessionstart-hook-additional-context.*?</sessionstart-hook-additional-context>\s*', '', text, flags=re.DOTALL)
+    # Remove <task-notification> blocks (sub-agent completion notices, not real prompts)
+    text = re.sub(r'<task-notification>.*?</task-notification>\s*', '', text, flags=re.DOTALL)
 
     return text.strip()
 
@@ -176,6 +178,11 @@ def extract_prompt_response_pairs(events: List[Dict[str, Any]]) -> List[Dict[str
 
         # Use helper to extract text from both string and list format content
         prompt_text = get_text_content(content)
+
+        # Skip sub-agent task-notification blocks — these are delivered back
+        # into the transcript as a "user" record but aren't a real user prompt
+        if prompt_text and prompt_text.lstrip().startswith("<task-notification>"):
+            continue
 
         if prompt_text and pid not in prompts:
             prompts[pid] = r

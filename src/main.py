@@ -73,7 +73,7 @@ def setup() -> None:
         config_file = get_config_file()
         if not config_file.exists():
             default_config = {
-                "version": "0.1.37",
+                "version": "0.1.38",
                 "created_at": get_now_ist_iso(),
                 "settings": {
                     "log_level": "INFO",
@@ -288,6 +288,8 @@ def stop() -> None:
             if text_stripped.startswith("● Ran") and "hooks" in text_stripped:
                 return True
             if text_stripped.startswith("⎿"):
+                return True
+            if text_stripped.startswith("<task-notification>"):
                 return True
             return False
 

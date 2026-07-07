@@ -93,7 +93,7 @@ def _get_user_prompt_event(events: list, prompt_id: str):
         # Plain string content (CLI prompts often use this format)
         if isinstance(content, str):
             text = content.strip()
-            if text and text not in INTERRUPT_TEXTS:
+            if text and text not in INTERRUPT_TEXTS and not text.startswith("<task-notification>"):
                 return text, event
             continue
 
@@ -239,12 +239,16 @@ def _find_or_create_db_prompt(
             break
 
     # Pass 2 — fuzzy substring
+    # Minimum-length guard prevents short prompts ("ok", "yes", etc.) from
+    # false-matching any longer candidate and attaching records to the wrong
+    # prompt (Bug #3).
     if not db_prompt_id:
         for cid, ctxt in candidates:
             cn = _norm(ctxt)
-            if prompt_text_norm in cn or cn in prompt_text_norm:
-                db_prompt_id = cid
-                break
+            if len(prompt_text_norm) > 20 and len(cn) > 20:
+                if prompt_text_norm in cn or cn in prompt_text_norm:
+                    db_prompt_id = cid
+                    break
 
     # Pass 3 — create new record
     if not db_prompt_id:
@@ -346,11 +350,27 @@ def _recover_interrupted_prompt(
 
     cursor = conn.cursor()
 
+    # Identify the chronologically last assistant message.  Only this one gets
+    # a RESPONSE row — mirroring the stop-hook, which only ever writes the
+    # final end_turn response.  Writing all intermediate sub-responses as
+    # RESPONSE rows caused N rows per interrupted agentic turn in the UI (Bug #4).
+    last_msg_id = max(
+        msg_ids,
+        key=lambda mid: next(
+            (e.get("timestamp", "") for e in events
+             if e.get("type") == "assistant" and e.get("message", {}).get("id") == mid),
+            "",
+        ),
+    ) if msg_ids else None
+
     for msg_id in msg_ids:
         merged = _merge_assistant_chunks(events, msg_id)
 
-        # ── Write text response if present ────────────────────────────────────
-        if merged["text"]:
+        # ── Write text response for the final assistant message only ──────────
+        # Intermediate sub-responses in multi-step agentic turns are skipped so
+        # only one RESPONSE row is written per prompt, matching stop-hook
+        # behaviour and preventing duplicate rows in the UI (Bug #4).
+        if merged["text"] and msg_id == last_msg_id:
             cursor.execute(
                 "SELECT 1 FROM RESPONSE WHERE message_id = ? LIMIT 1", (msg_id,)
             )
@@ -447,7 +467,7 @@ def _recover_interrupted_prompt(
 
 def _is_hook_output(text: str) -> bool:
     t = (text or "").strip()
-    return (t.startswith("● Ran") and "hooks" in t) or t.startswith("⎿")
+    return (t.startswith("● Ran") and "hooks" in t) or t.startswith("⎿") or t.startswith("<task-notification>")
 
 
 # ---------------------------------------------------------------------------
@@ -578,5 +598,13 @@ def process_missed_pairs(session_id: str, cwd: str) -> dict:
 
     if counts["pass1"] or counts["pass2"]:
         logger.info(f"process_missed_pairs: pass1={counts['pass1']} pass2={counts['pass2']}")
+
+    # Purge any duplicate observations already in the DB from prior runs
+    # before the Bug #1 dedup guard was in place.
+    try:
+        from src.observations.writer import cleanup_duplicate_observations
+        cleanup_duplicate_observations()
+    except Exception as _ce:
+        logger.warning(f"process_missed_pairs: cleanup_duplicate_observations failed: {_ce}")
 
     return counts
