@@ -15,6 +15,7 @@ On the next Claude restart the launcher automatically switches to full venv mode
 
 import os
 import runpy
+import subprocess
 import sys
 from pathlib import Path
 
@@ -31,7 +32,14 @@ def _venv_python() -> Path:
 def main() -> None:
     python = _venv_python()
 
-    if python.exists():
+    if python.exists() and sys.platform == "win32":
+        # Windows has no real exec syscall — os.execv() there is emulated via
+        # spawn-then-exit and unreliable with inherited stdio pipes (the MCP
+        # server never receives requests). Spawn as a subprocess and forward
+        # its exit code instead.
+        result = subprocess.run([str(python), str(SERVER)])
+        sys.exit(result.returncode)
+    elif python.exists():
         # Full mode: replace this process with venv python running the server.
         # Any future project-level imports in server.py will work here.
         os.execv(str(python), [str(python), str(SERVER)])
