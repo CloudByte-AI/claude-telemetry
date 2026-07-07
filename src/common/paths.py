@@ -71,9 +71,16 @@ def get_db_path(db_name: Optional[str] = None) -> Path:
 
     Returns:
         Path: The full path to the database file
+
+    Note:
+        The CLOUDBYTE_DB_NAME environment variable, if set, always wins over
+        both the db_name argument and the default - this is a local testing
+        escape hatch (e.g. point a hook at "cloudbyte-cursor-test" so test
+        writes don't land in the real cloudbyte.db) and isn't read anywhere
+        else in the codebase. Unset by default, so existing behavior is
+        unchanged unless someone opts in.
     """
-    if db_name is None:
-        db_name = DB_FILENAME
+    db_name = os.environ.get("CLOUDBYTE_DB_NAME") or db_name or DB_FILENAME
 
     if not db_name.endswith(".db"):
         db_name += ".db"

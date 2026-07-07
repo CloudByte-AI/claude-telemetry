@@ -74,7 +74,9 @@ class DatabaseWriter:
         Insert or update a session record.
 
         Args:
-            session_data: Dict with session_id, project_id, cwd, jsonl_file, created_at, kind, entrypoint
+            session_data: Dict with session_id, project_id, cwd, jsonl_file, created_at, kind, entrypoint.
+                Optional "client" key ('claude_code' | 'cursor') — defaults to 'claude_code'
+                for callers that don't know about multi-IDE support yet.
 
         Returns:
             bool: True if successful
@@ -85,14 +87,15 @@ class DatabaseWriter:
 
             cursor.execute("""
                 INSERT OR REPLACE INTO SESSION
-                (session_id, project_id, cwd, jsonl_file, created_at)
-                VALUES (?, ?, ?, ?, ?)
+                (session_id, project_id, cwd, jsonl_file, created_at, client)
+                VALUES (?, ?, ?, ?, ?, ?)
             """, (
                 session_data["session_id"],
                 session_data["project_id"],
                 session_data["cwd"],
                 session_data["jsonl_file"],
                 session_data["created_at"],
+                session_data.get("client", "claude_code"),
             ))
 
             conn.commit()

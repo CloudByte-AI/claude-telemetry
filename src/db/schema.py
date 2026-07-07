@@ -70,6 +70,9 @@ def create_tables(conn: sqlite3.Connection) -> None:
     """)
 
     # ---------------- SESSION ----------------
+    # client: which plugin/IDE this session came from ('claude_code' | 'cursor').
+    # Child tables never need their own copy — they all trace back to SESSION
+    # via session_id/prompt_id, so a join is enough to attribute any row.
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS SESSION (
         session_id TEXT PRIMARY KEY,
@@ -79,6 +82,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
         created_at DATETIME,
         ai_title TEXT,
         custom_title TEXT,
+        client TEXT DEFAULT 'claude_code',
         FOREIGN KEY (project_id) REFERENCES PROJECT(project_id)
     );
     """)
@@ -334,6 +338,9 @@ def migrate_schema(conn: sqlite3.Connection) -> None:
     if "custom_title" not in session_columns:
         cursor.execute("ALTER TABLE SESSION ADD COLUMN custom_title TEXT")
         logger.info("Migration: added custom_title column to SESSION")
+    if "client" not in session_columns:
+        cursor.execute("ALTER TABLE SESSION ADD COLUMN client TEXT DEFAULT 'claude_code'")
+        logger.info("Migration: added client column to SESSION (backfilled existing rows as 'claude_code')")
 
     # SECURITY_SCAN_EVENT table (added in 0.1.29+, renamed from SECURITY_FINDING)
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='SECURITY_FINDING'")
