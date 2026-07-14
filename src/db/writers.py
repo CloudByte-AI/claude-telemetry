@@ -38,20 +38,30 @@ class DatabaseWriter:
     @retry_on_lock(retries=3, delay=0.5)
     def write_project(self, project_data: Dict[str, Any]) -> bool:
         """
-        Insert or update a project record.
+        Ensure a project record exists. Does NOT update an existing row.
+
+        project_id is a hash of the (normalized) path, so path can never
+        legitimately differ for an existing project_id - and name/created_at
+        should only ever be set by whichever plugin (Claude or Cursor) sees
+        this project first. A project is shared across both plugins, so this
+        must stay a no-op on conflict rather than overwriting - otherwise
+        created_at resets to "now" and name flip-flops between Claude's and
+        Cursor's naming conventions every time either plugin's sessionStart
+        runs against an already-known project.
 
         Args:
             project_data: Dict with project_id, name, path, created_at
 
         Returns:
-            bool: True if successful
+            bool: True if successful (including when the project already
+            existed and this call was a no-op)
         """
         try:
             conn = self.get_connection()
             cursor = conn.cursor()
 
             cursor.execute("""
-                INSERT OR REPLACE INTO PROJECT (project_id, name, path, created_at)
+                INSERT OR IGNORE INTO PROJECT (project_id, name, path, created_at)
                 VALUES (?, ?, ?, ?)
             """, (
                 project_data["project_id"],
@@ -74,7 +84,7 @@ class DatabaseWriter:
         Insert or update a session record.
 
         Args:
-            session_data: Dict with session_id, project_id, cwd, jsonl_file, created_at, kind, entrypoint.
+            session_data: Dict with session_id, project_id, cwd, transcript_path, created_at, kind, entrypoint.
                 Optional "client" key ('claude_code' | 'cursor') — defaults to 'claude_code'
                 for callers that don't know about multi-IDE support yet.
 
@@ -87,13 +97,13 @@ class DatabaseWriter:
 
             cursor.execute("""
                 INSERT OR REPLACE INTO SESSION
-                (session_id, project_id, cwd, jsonl_file, created_at, client)
+                (session_id, project_id, cwd, transcript_path, created_at, client)
                 VALUES (?, ?, ?, ?, ?, ?)
             """, (
                 session_data["session_id"],
                 session_data["project_id"],
                 session_data["cwd"],
-                session_data["jsonl_file"],
+                session_data["transcript_path"],
                 session_data["created_at"],
                 session_data.get("client", "claude_code"),
             ))
@@ -104,6 +114,134 @@ class DatabaseWriter:
 
         except Exception as e:
             logger.error(f"Error writing session: {e}")
+            return False
+
+    @retry_on_lock(retries=3, delay=0.5)
+    def update_session_transcript_path(self, session_id: str, transcript_path: str) -> bool:
+        """
+        Backfill SESSION.transcript_path if it isn't set yet.
+
+        No-op if the session already has a transcript_path — safe to call on
+        every prompt without re-writing an already-known value.
+
+        Returns:
+            bool: True if the update executed without error (regardless of whether
+            a row was actually changed)
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                UPDATE SESSION
+                SET transcript_path = ?
+                WHERE session_id = ? AND (transcript_path IS NULL OR transcript_path = '')
+            """, (transcript_path, session_id))
+
+            conn.commit()
+            return True
+
+        except Exception as e:
+            logger.error(f"Error updating session transcript_path: {e}")
+            return False
+
+    @retry_on_lock(retries=3, delay=0.5)
+    def update_session_end(
+        self, session_id: str, ended_at: str, end_reason: Optional[str], final_status: Optional[str]
+    ) -> bool:
+        """
+        Set SESSION.ended_at/end_reason/final_status - the terminal outcome
+        of a session, so unlike the backfill-style updates above this always
+        overwrites, no "already known, don't touch" guard needed.
+
+        Returns:
+            bool: True only if a row was actually matched and updated.
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                UPDATE SESSION
+                SET ended_at = ?, end_reason = ?, final_status = ?
+                WHERE session_id = ?
+            """, (ended_at, end_reason, final_status, session_id))
+
+            conn.commit()
+            return cursor.rowcount > 0
+
+        except Exception as e:
+            logger.error(f"Error updating session end: {e}")
+            return False
+
+    def get_session_ai_title(self, session_id: str) -> Optional[str]:
+        """Read SESSION.ai_title, or None if unset/session doesn't exist."""
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT ai_title FROM SESSION WHERE session_id = ?", (session_id,))
+            row = cursor.fetchone()
+            return row[0] if row else None
+        except Exception as e:
+            logger.error(f"Error reading session ai_title: {e}")
+            return None
+
+    @retry_on_lock(retries=3, delay=0.5)
+    def update_session_ai_title(self, session_id: str, ai_title: str) -> bool:
+        """
+        Backfill SESSION.ai_title if it isn't set yet.
+
+        No-op if the session already has an ai_title — safe to call
+        repeatedly without re-writing an already-known value.
+
+        Returns:
+            bool: True if the update executed without error (regardless of whether
+            a row was actually changed)
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                UPDATE SESSION
+                SET ai_title = ?
+                WHERE session_id = ? AND (ai_title IS NULL OR ai_title = '')
+            """, (ai_title, session_id))
+
+            conn.commit()
+            return True
+
+        except Exception as e:
+            logger.error(f"Error updating session ai_title: {e}")
+            return False
+
+    @retry_on_lock(retries=3, delay=0.5)
+    def update_user_prompt_status(self, prompt_id: str, status: str) -> bool:
+        """
+        Set USER_PROMPT.status for a specific prompt - the stop hook's
+        terminal outcome for that turn ('completed' / 'aborted' for Cursor).
+
+        Unlike the backfill-style updates above, this always overwrites -
+        status reflects the final state of one specific turn, so there's
+        no "already known, don't touch" case to guard against.
+
+        Returns:
+            bool: True only if a row was actually matched and updated -
+            False if prompt_id doesn't exist yet (e.g. beforeSubmitPrompt's
+            write hasn't landed), so callers can tell a real no-op from a
+            successful update instead of both looking like success.
+        """
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE USER_PROMPT SET status = ? WHERE prompt_id = ?",
+                (status, prompt_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating user prompt status: {e}")
             return False
 
     @retry_on_lock(retries=3, delay=0.5)
@@ -189,8 +327,9 @@ class DatabaseWriter:
 
             cursor.execute("""
                 INSERT INTO USER_PROMPT
-                (prompt_id, session_id, uuid, parent_uuid, prompt, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?)
+                (prompt_id, session_id, uuid, parent_uuid, prompt, timestamp, client_version,
+                 attachments, mode, git_branch, entrypoint)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 prompt_id,
                 session_id,
@@ -198,6 +337,11 @@ class DatabaseWriter:
                 prompt_data.get("parent_uuid"),
                 prompt_text,
                 prompt_data["timestamp"],
+                prompt_data.get("client_version"),
+                prompt_data.get("attachments"),
+                prompt_data.get("mode"),
+                prompt_data.get("git_branch"),
+                prompt_data.get("entrypoint"),
             ))
 
             conn.commit()
@@ -275,8 +419,8 @@ class DatabaseWriter:
 
             cursor.execute("""
                 INSERT OR REPLACE INTO TOOL
-                (tool_id, prompt_id, uuid, parent_uuid, tool_name, model, input_json, output_json, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (tool_id, prompt_id, uuid, parent_uuid, tool_name, model, input_json, output_json, timestamp, duration_ms)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 tool_data["tool_id"],
                 tool_data["prompt_id"],
@@ -287,6 +431,7 @@ class DatabaseWriter:
                 json.dumps(tool_data.get("input_json")) if tool_data.get("input_json") else None,
                 json.dumps(tool_data.get("output_json")) if tool_data.get("output_json") else None,
                 tool_data["timestamp"],
+                tool_data.get("duration_ms"),
             ))
 
             conn.commit()
@@ -313,8 +458,8 @@ class DatabaseWriter:
 
             cursor.execute("""
                 INSERT OR REPLACE INTO THINKING
-                (thinking_id, prompt_id, uuid, parent_uuid, content, signature, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (thinking_id, prompt_id, uuid, parent_uuid, content, signature, timestamp, duration_ms)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 thinking_data["thinking_id"],
                 thinking_data["prompt_id"],
@@ -323,6 +468,7 @@ class DatabaseWriter:
                 thinking_data.get("content"),
                 thinking_data.get("signature"),
                 thinking_data["timestamp"],
+                thinking_data.get("duration_ms"),
             ))
 
             conn.commit()

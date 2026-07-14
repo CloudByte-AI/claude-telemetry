@@ -156,14 +156,14 @@
             {% endfor %}
 
             <!-- 3b. Interrupt indicator — shown when the turn was interrupted -->
-            {% if prompt.interrupt_reason %}
+            {% if prompt.status in ('tool_use', 'request', 'aborted') %}
             <div class="tl-item">
                 <div class="tl-icon interrupt">⚡</div>
                 <div class="tl-body">
                     <div class="tl-label interrupt">
                         <span>interrupted by user</span>
                         <span style="color:var(--text3);font-size:10px;">
-                            {{ 'tool use denied' if prompt.interrupt_reason == 'tool_use' else 'request cancelled' }}
+                            {{ 'tool use denied' if prompt.status == 'tool_use' else ('aborted' if prompt.status == 'aborted' else 'request cancelled') }}
                         </span>
                     </div>
                     <div class="tl-card" style="border-color:rgba(255,60,60,0.2);background:rgba(255,60,60,0.02);">
@@ -258,17 +258,17 @@
                             }}</span></div>
                     <div class="meta-row"><span class="meta-key">model</span><span class="meta-val mono dimmer"
                             style="font-size:11px;">{{ response.model if response else '—' }}</span></div>
-                    {% if prompt.interrupt_reason %}
+                    {% if prompt.status in ('tool_use', 'request', 'aborted') %}
                     <div class="meta-row" style="margin-top:4px;">
                         <span class="meta-key" style="color:#ff3c3c;">interrupted</span>
                         <span class="meta-val mono" style="font-size:10px;color:#ff3c3c;">
-                            {{ 'tool denied' if prompt.interrupt_reason == 'tool_use' else 'cancelled' }}
+                            {{ 'tool denied' if prompt.status == 'tool_use' else ('aborted' if prompt.status == 'aborted' else 'cancelled') }}
                         </span>
                     </div>
                     {% endif %}
                 </div>
                 <!-- Prompt metadata -->
-                {% if prompt.entrypoint or prompt.git_branch or prompt.claude_version or prompt.permission_mode %}
+                {% if prompt.entrypoint or prompt.git_branch or prompt.client_version or prompt.mode %}
                 <div style="padding:8px 14px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:4px;">
                     {% if prompt.entrypoint %}
                     <div class="meta-row">
@@ -276,10 +276,10 @@
                         <span class="meta-val mono dimmer" style="font-size:10px;">{{ prompt.entrypoint }}</span>
                     </div>
                     {% endif %}
-                    {% if prompt.claude_version %}
+                    {% if prompt.client_version %}
                     <div class="meta-row">
-                        <span class="meta-key">claude ver.</span>
-                        <span class="meta-val mono dimmer" style="font-size:10px;">{{ prompt.claude_version }}</span>
+                        <span class="meta-key">client ver.</span>
+                        <span class="meta-val mono dimmer" style="font-size:10px;">{{ prompt.client_version }}</span>
                     </div>
                     {% endif %}
                     {% if prompt.git_branch %}
@@ -288,10 +288,10 @@
                         <span class="meta-val mono" style="font-size:10px;color:var(--accent);">{{ prompt.git_branch }}</span>
                     </div>
                     {% endif %}
-                    {% if prompt.permission_mode %}
+                    {% if prompt.mode %}
                     <div class="meta-row">
-                        <span class="meta-key">permission</span>
-                        <span class="meta-val mono dimmer" style="font-size:10px;">{{ prompt.permission_mode }}</span>
+                        <span class="meta-key">mode</span>
+                        <span class="meta-val mono dimmer" style="font-size:10px;">{{ prompt.mode }}</span>
                     </div>
                     {% endif %}
                 </div>

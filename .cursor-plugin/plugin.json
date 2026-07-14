@@ -4,5 +4,7 @@
   "description": "Cursor Telemetry - Observability stack for Cursor - Prompt, Observability, Tokens.",
   "author": {
     "name": "CloudByte-AI"
-  }
+  },
+  "hooks": ".cursor/hooks.json",
+  "mcpServers": ".cursor/mcp.json"
 }

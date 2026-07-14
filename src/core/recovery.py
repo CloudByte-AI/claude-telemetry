@@ -40,7 +40,7 @@ logger = get_logger(__name__)
 
 MCP_OBS_TOOL = "mcp__plugin_claude-telemetry_cloudbyte__record_observation"
 
-# Maps interrupt text → interrupt_reason value stored in USER_PROMPT
+# Maps interrupt text → status value stored in USER_PROMPT
 INTERRUPT_TEXT_TO_REASON = {
     "[Request interrupted by user for tool use]": "tool_use",
     "[Request interrupted by user]": "request",
@@ -54,9 +54,9 @@ INTERRUPT_TEXTS = frozenset(INTERRUPT_TEXT_TO_REASON)
 
 def _find_interrupted_prompt_ids(events: list) -> dict:
     """
-    Return {promptId: interrupt_reason} for all interrupted turns.
+    Return {promptId: status} for all interrupted turns.
 
-    interrupt_reason values:
+    status values:
       'tool_use' — user denied a tool call
       'request'  — user hit ESC / cancelled the entire request
     """
@@ -210,7 +210,7 @@ def _find_or_create_db_prompt(
     prompt_text: str,
     prompt_event: dict,
     conn,
-    interrupt_reason: str = None,
+    status: str = None,
 ) -> str:
     """
     Find an existing USER_PROMPT record by text match (3 passes), or create one.
@@ -255,8 +255,8 @@ def _find_or_create_db_prompt(
                 """
                 INSERT INTO USER_PROMPT (
                     prompt_id, session_id, uuid, parent_uuid, prompt, timestamp,
-                    entrypoint, claude_version, git_branch, permission_mode,
-                    jsonl_prompt_id, interrupt_reason
+                    entrypoint, client_version, git_branch, mode,
+                    jsonl_prompt_id, status
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
@@ -270,7 +270,7 @@ def _find_or_create_db_prompt(
                     prompt_event.get("gitBranch"),
                     prompt_event.get("permissionMode"),
                     new_id,
-                    interrupt_reason,
+                    status,
                 ),
             )
             conn2.commit()
@@ -280,23 +280,23 @@ def _find_or_create_db_prompt(
             logger.error(f"recovery: failed to insert prompt: {exc}")
             db_prompt_id = jsonl_prompt_id  # best effort
     else:
-        # Update jsonl_prompt_id + interrupt_reason + metadata on matched record
+        # Update jsonl_prompt_id + status + metadata on matched record
         try:
             cursor.execute(
                 """
                 UPDATE USER_PROMPT
                 SET jsonl_prompt_id  = ?,
-                    interrupt_reason = COALESCE(interrupt_reason, ?),
+                    status           = COALESCE(status, ?),
                     parent_uuid      = COALESCE(parent_uuid, ?),
                     entrypoint       = COALESCE(entrypoint, ?),
-                    claude_version   = COALESCE(claude_version, ?),
+                    client_version   = COALESCE(client_version, ?),
                     git_branch       = COALESCE(git_branch, ?),
-                    permission_mode  = COALESCE(permission_mode, ?)
+                    mode             = COALESCE(mode, ?)
                 WHERE prompt_id = ?
                 """,
                 (
                     jsonl_prompt_id,
-                    interrupt_reason,
+                    status,
                     prompt_event.get("parentUuid"),
                     prompt_event.get("entrypoint"),
                     prompt_event.get("version"),
@@ -319,7 +319,7 @@ def _find_or_create_db_prompt(
 def _recover_interrupted_prompt(
     session_id: str,
     prompt_id: str,
-    interrupt_reason: str,
+    status: str,
     events: list,
     conn,
     writer: DatabaseWriter,
@@ -336,7 +336,7 @@ def _recover_interrupted_prompt(
     prompt_text = _fix_text(prompt_text_raw)
     db_prompt_id = _find_or_create_db_prompt(
         session_id, prompt_id, prompt_text, prompt_event, conn,
-        interrupt_reason=interrupt_reason,
+        status=status,
     )
 
     msg_ids = _get_assistant_msg_ids_for_prompt(events, prompt_id)
@@ -483,7 +483,7 @@ def process_missed_pairs(session_id: str, cwd: str) -> dict:
         if not events:
             return counts
 
-        # Run migrations before any writes — ensures interrupt_reason column exists
+        # Run migrations before any writes — ensures status column exists
         # even when called from UserPromptSubmit before stop() has had a chance to migrate.
         try:
             from src.db.schema import migrate_schema

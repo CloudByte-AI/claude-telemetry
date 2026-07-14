@@ -109,7 +109,7 @@ def ensure_session_initialized(session_id: str, cwd: str) -> bool:
         cursor.execute(
             """
             INSERT INTO SESSION
-            (session_id, project_id, cwd, jsonl_file, created_at)
+            (session_id, project_id, cwd, transcript_path, created_at)
             VALUES (?, ?, ?, ?, ?)
             """,
             (

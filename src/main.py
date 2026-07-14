@@ -397,7 +397,7 @@ def stop() -> None:
                         conn3.cursor().execute("""
                             INSERT INTO USER_PROMPT (
                                 prompt_id, session_id, uuid, parent_uuid, prompt, timestamp,
-                                entrypoint, claude_version, git_branch, permission_mode,
+                                entrypoint, client_version, git_branch, mode,
                                 jsonl_prompt_id
                             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """, (
@@ -438,9 +438,9 @@ def stop() -> None:
                                timestamp = ?,
                                parent_uuid = COALESCE(parent_uuid, ?),
                                entrypoint = ?,
-                               claude_version = ?,
+                               client_version = ?,
                                git_branch = ?,
-                               permission_mode = ?
+                               mode = ?
                            WHERE prompt_id = ?""",
                         (
                             jsonl_prompt_id,

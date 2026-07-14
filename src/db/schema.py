@@ -73,16 +73,24 @@ def create_tables(conn: sqlite3.Connection) -> None:
     # client: which plugin/IDE this session came from ('claude_code' | 'cursor').
     # Child tables never need their own copy — they all trace back to SESSION
     # via session_id/prompt_id, so a join is enough to attribute any row.
+    # ended_at/end_reason/final_status: no Claude Code hook gives session-end
+    # data at all - Cursor's sessionEnd hook does. duration_ms on that hook's
+    # payload isn't trustworthy (a real capture showed 0 for a session that
+    # ran for hours), so duration is computed from ended_at - created_at
+    # instead of stored directly.
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS SESSION (
         session_id TEXT PRIMARY KEY,
         project_id TEXT,
         cwd TEXT,
-        jsonl_file TEXT,
+        transcript_path TEXT,
         created_at DATETIME,
         ai_title TEXT,
         custom_title TEXT,
         client TEXT DEFAULT 'claude_code',
+        ended_at DATETIME,
+        end_reason TEXT,
+        final_status TEXT,
         FOREIGN KEY (project_id) REFERENCES PROJECT(project_id)
     );
     """)
@@ -102,13 +110,23 @@ def create_tables(conn: sqlite3.Connection) -> None:
     """)
 
     # ---------------- USER_PROMPT ----------------
-    # prompt_id      : stable auto-gen UUID — URL key, never changes
+    # prompt_id      : stable auto-gen UUID — URL key, never changes (Claude Code);
+    #                  Cursor uses the hook's generation_id directly instead
     # jsonl_prompt_id: real ID from Claude Code JSONL — stored by stop() hook
     # entrypoint     : client used for this prompt (claude-vscode, claude-terminal, etc.)
-    # claude_version : Claude Code version at time of prompt
+    # client_version : app version at time of prompt — Claude Code version or Cursor version,
+    #                  shared column across both clients (renamed from claude_version)
     # git_branch     : active git branch at time of prompt
-    # permission_mode: permission mode active for this prompt (default, auto, plan, etc.)
-    # interrupt_reason: NULL = normal, 'tool_use' = user denied tool, 'request' = user hit ESC
+    # mode           : autonomy mode for this turn — Claude Code's permission_mode
+    #                  (default, auto, plan, etc.) or Cursor's composer_mode
+    #                  (agent, ask, edit) — shared column across both clients
+    #                  (renamed from permission_mode)
+    # status         : completion status for this turn — Claude Code: NULL = normal,
+    #                  'tool_use' = user denied tool, 'request' = user hit ESC;
+    #                  Cursor: 'completed' or 'aborted' (renamed from interrupt_reason,
+    #                  broadened into a shared column — vocabularies differ by client,
+    #                  join against SESSION.client to interpret)
+    # attachments    : JSON array of context attachments (files/rules) submitted with the prompt
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS USER_PROMPT (
         prompt_id TEXT PRIMARY KEY,
@@ -119,10 +137,11 @@ def create_tables(conn: sqlite3.Connection) -> None:
         timestamp DATETIME,
         jsonl_prompt_id TEXT,
         entrypoint TEXT,
-        claude_version TEXT,
+        client_version TEXT,
         git_branch TEXT,
-        permission_mode TEXT,
-        interrupt_reason TEXT,
+        mode TEXT,
+        status TEXT,
+        attachments TEXT,
         FOREIGN KEY (session_id) REFERENCES SESSION(session_id)
     );
     """)
@@ -142,6 +161,8 @@ def create_tables(conn: sqlite3.Connection) -> None:
     """)
 
     # ---------------- THINKING ----------------
+    # duration_ms: how long the thinking block took - no Claude Code hook
+    # gives this, Cursor's afterAgentThought does
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS THINKING (
         thinking_id TEXT PRIMARY KEY,
@@ -151,11 +172,14 @@ def create_tables(conn: sqlite3.Connection) -> None:
         content TEXT,
         signature TEXT,
         timestamp DATETIME,
+        duration_ms INTEGER,
         FOREIGN KEY (prompt_id) REFERENCES USER_PROMPT(prompt_id)
     );
     """)
 
     # ---------------- TOOL ----------------
+    # duration_ms: how long the tool call took - no Claude Code hook gives this,
+    # Cursor's postToolUse/postToolUseFailure do
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS TOOL (
         tool_id TEXT PRIMARY KEY,
@@ -167,6 +191,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
         input_json TEXT,
         output_json TEXT,
         timestamp DATETIME,
+        duration_ms INTEGER,
         FOREIGN KEY (prompt_id) REFERENCES USER_PROMPT(prompt_id)
     );
     """)
@@ -316,18 +341,45 @@ def migrate_schema(conn: sqlite3.Connection) -> None:
     if "entrypoint" not in columns:
         cursor.execute("ALTER TABLE USER_PROMPT ADD COLUMN entrypoint TEXT")
         logger.info("Migration: added entrypoint column to USER_PROMPT")
-    if "claude_version" not in columns:
-        cursor.execute("ALTER TABLE USER_PROMPT ADD COLUMN claude_version TEXT")
-        logger.info("Migration: added claude_version column to USER_PROMPT")
+    if "client_version" not in columns:
+        if "claude_version" in columns:
+            cursor.execute("ALTER TABLE USER_PROMPT RENAME COLUMN claude_version TO client_version")
+            logger.info("Migration: renamed claude_version to client_version in USER_PROMPT")
+        else:
+            cursor.execute("ALTER TABLE USER_PROMPT ADD COLUMN client_version TEXT")
+            logger.info("Migration: added client_version column to USER_PROMPT")
     if "git_branch" not in columns:
         cursor.execute("ALTER TABLE USER_PROMPT ADD COLUMN git_branch TEXT")
         logger.info("Migration: added git_branch column to USER_PROMPT")
-    if "permission_mode" not in columns:
-        cursor.execute("ALTER TABLE USER_PROMPT ADD COLUMN permission_mode TEXT")
-        logger.info("Migration: added permission_mode column to USER_PROMPT")
-    if "interrupt_reason" not in columns:
-        cursor.execute("ALTER TABLE USER_PROMPT ADD COLUMN interrupt_reason TEXT")
-        logger.info("Migration: added interrupt_reason column to USER_PROMPT")
+    if "mode" not in columns:
+        if "permission_mode" in columns:
+            cursor.execute("ALTER TABLE USER_PROMPT RENAME COLUMN permission_mode TO mode")
+            logger.info("Migration: renamed permission_mode to mode in USER_PROMPT")
+        else:
+            cursor.execute("ALTER TABLE USER_PROMPT ADD COLUMN mode TEXT")
+            logger.info("Migration: added mode column to USER_PROMPT")
+    if "status" not in columns:
+        if "interrupt_reason" in columns:
+            cursor.execute("ALTER TABLE USER_PROMPT RENAME COLUMN interrupt_reason TO status")
+            logger.info("Migration: renamed interrupt_reason to status in USER_PROMPT")
+        else:
+            cursor.execute("ALTER TABLE USER_PROMPT ADD COLUMN status TEXT")
+            logger.info("Migration: added status column to USER_PROMPT")
+    if "attachments" not in columns:
+        cursor.execute("ALTER TABLE USER_PROMPT ADD COLUMN attachments TEXT")
+        logger.info("Migration: added attachments column to USER_PROMPT")
+
+    cursor.execute("PRAGMA table_info(TOOL)")
+    tool_columns = [row[1] for row in cursor.fetchall()]
+    if "duration_ms" not in tool_columns:
+        cursor.execute("ALTER TABLE TOOL ADD COLUMN duration_ms INTEGER")
+        logger.info("Migration: added duration_ms column to TOOL")
+
+    cursor.execute("PRAGMA table_info(THINKING)")
+    thinking_columns = [row[1] for row in cursor.fetchall()]
+    if "duration_ms" not in thinking_columns:
+        cursor.execute("ALTER TABLE THINKING ADD COLUMN duration_ms INTEGER")
+        logger.info("Migration: added duration_ms column to THINKING")
 
     cursor.execute("PRAGMA table_info(SESSION)")
     session_columns = [row[1] for row in cursor.fetchall()]
@@ -341,6 +393,22 @@ def migrate_schema(conn: sqlite3.Connection) -> None:
     if "client" not in session_columns:
         cursor.execute("ALTER TABLE SESSION ADD COLUMN client TEXT DEFAULT 'claude_code'")
         logger.info("Migration: added client column to SESSION (backfilled existing rows as 'claude_code')")
+    if "transcript_path" not in session_columns:
+        if "jsonl_file" in session_columns:
+            cursor.execute("ALTER TABLE SESSION RENAME COLUMN jsonl_file TO transcript_path")
+            logger.info("Migration: renamed jsonl_file to transcript_path in SESSION")
+        else:
+            cursor.execute("ALTER TABLE SESSION ADD COLUMN transcript_path TEXT")
+            logger.info("Migration: added transcript_path column to SESSION")
+    if "ended_at" not in session_columns:
+        cursor.execute("ALTER TABLE SESSION ADD COLUMN ended_at DATETIME")
+        logger.info("Migration: added ended_at column to SESSION")
+    if "end_reason" not in session_columns:
+        cursor.execute("ALTER TABLE SESSION ADD COLUMN end_reason TEXT")
+        logger.info("Migration: added end_reason column to SESSION")
+    if "final_status" not in session_columns:
+        cursor.execute("ALTER TABLE SESSION ADD COLUMN final_status TEXT")
+        logger.info("Migration: added final_status column to SESSION")
 
     # SECURITY_SCAN_EVENT table (added in 0.1.29+, renamed from SECURITY_FINDING)
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='SECURITY_FINDING'")

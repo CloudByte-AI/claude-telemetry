@@ -65,11 +65,11 @@ def get_session_detail_context(session_id: str) -> dict | None:
             "response":         dict(response_row) if response_row else None,
             "tokens":           dict(tokens_row)   if tokens_row   else None,
             "tool_tokens_agg":  dict(tool_tok_agg) if tool_tok_agg else None,
-            "interrupt_reason": pd.get("interrupt_reason"),
+            "status":           pd.get("status"),
             "entrypoint":       pd.get("entrypoint"),
-            "claude_version":   pd.get("claude_version"),
+            "client_version":   pd.get("client_version"),
             "git_branch":       pd.get("git_branch"),
-            "permission_mode":  pd.get("permission_mode"),
+            "mode":             pd.get("mode"),
         })
 
     turns.reverse()

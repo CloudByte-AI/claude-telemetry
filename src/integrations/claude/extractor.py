@@ -74,7 +74,7 @@ def extract_session_data(session_json: Dict[str, Any]) -> Dict[str, Any]:
         session_json: Session JSON from sessions/<pid>.json
 
     Returns:
-        Dict with keys: session_id, project_id, cwd, jsonl_file, created_at, kind, entrypoint
+        Dict with keys: session_id, project_id, cwd, transcript_path, created_at, kind, entrypoint
     """
     cwd = session_json.get("cwd", "")
     project_info = extract_project_info(cwd)
@@ -88,7 +88,7 @@ def extract_session_data(session_json: Dict[str, Any]) -> Dict[str, Any]:
         "session_id": session_json.get("sessionId"),
         "project_id": project_info["project_id"],
         "cwd": cwd,
-        "jsonl_file": jsonl_file,
+        "transcript_path": jsonl_file,
         "created_at": to_ist(session_json.get("startedAt", 0)),
         "kind": session_json.get("kind"),
         "entrypoint": session_json.get("entrypoint"),

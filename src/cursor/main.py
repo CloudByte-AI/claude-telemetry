@@ -19,7 +19,7 @@ src_path = Path(__file__).parent.parent
 sys.path.insert(0, str(src_path))
 
 from src.common.logging import get_logger
-from src.cursor.paths import CURSOR_TEST_DB_NAME
+from src.cursor.utils.paths import CURSOR_TEST_DB_NAME
 
 
 logger = get_logger(__name__)
@@ -47,17 +47,66 @@ def session_start() -> None:
     handle_session_start()
 
 
+def before_submit_prompt() -> None:
+    """beforeSubmitPrompt hook - writes USER_PROMPT, backfills SESSION fields."""
+    from src.cursor.handlers.before_submit_prompt import handle_before_submit_prompt
+    handle_before_submit_prompt()
+
+
+def stop() -> None:
+    """stop hook - discovery mode, logs the raw payload only."""
+    from src.cursor.handlers.stop import handle_stop
+    handle_stop()
+
+
+def after_agent_response() -> None:
+    """afterAgentResponse hook - writes RESPONSE + IO_TOKENS."""
+    from src.cursor.handlers.after_agent_response import handle_after_agent_response
+    handle_after_agent_response()
+
+
+def post_tool_use() -> None:
+    """postToolUse hook - writes TOOL."""
+    from src.cursor.handlers.post_tool_use import handle_post_tool_use
+    handle_post_tool_use()
+
+
+def after_agent_thought() -> None:
+    """afterAgentThought hook - writes THINKING."""
+    from src.cursor.handlers.after_agent_thought import handle_after_agent_thought
+    handle_after_agent_thought()
+
+
+def session_end() -> None:
+    """sessionEnd hook - writes SESSION.ended_at/end_reason/final_status."""
+    from src.cursor.handlers.session_end import handle_session_end
+    handle_session_end()
+
+
+def after_mcp_execution() -> None:
+    """afterMCPExecution hook - writes HOOK_OBSERVATION for record_observation calls."""
+    from src.cursor.handlers.after_mcp_execution import handle_after_mcp_execution
+    handle_after_mcp_execution()
+
+
 def main() -> None:
+    handlers = {
+        "session_start": session_start,
+        "before_submit_prompt": before_submit_prompt,
+        "stop": stop,
+        "after_agent_response": after_agent_response,
+        "post_tool_use": post_tool_use,
+        "after_agent_thought": after_agent_thought,
+        "session_end": session_end,
+        "after_mcp_execution": after_mcp_execution,
+    }
+
     if len(sys.argv) < 2:
         print("Usage: python -m src.cursor.main <command>")
-        print("Commands: session_start")
+        print(f"Commands: {', '.join(handlers.keys())}")
         sys.exit(1)
 
     command = sys.argv[1]
-
-    handlers = {
-        "session_start": session_start,
-    }
 
     handler = handlers.get(command)
     if handler is None:
