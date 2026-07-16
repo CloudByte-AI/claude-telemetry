@@ -62,6 +62,23 @@ def get_logs_dir() -> Path:
     return get_cloudbyte_dir() / LOGS_SUBDIR
 
 
+def get_claude_logs_dir() -> Path:
+    """
+    Get the log directory for Claude Code's own hook handlers.
+    Typically: ~/.cloudbyte/logs/claude/
+
+    Mirrors src/cursor/utils/paths.py's get_cursor_logs_dir() - Cursor's logs
+    already had their own subfolder, Claude Code's didn't, so everything was
+    landing loose in the shared logs/ root instead of a structure aligned
+    per client.
+
+    Returns:
+        Path: The Claude Code logs directory (not guaranteed to exist yet -
+        setup_logging()'s log_dir handling creates it on first use).
+    """
+    return get_logs_dir() / "claude"
+
+
 def get_db_path(db_name: Optional[str] = None) -> Path:
     """
     Get the database file path.

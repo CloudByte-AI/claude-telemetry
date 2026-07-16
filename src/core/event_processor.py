@@ -113,6 +113,7 @@ class EventProcessor:
                 "created_at": get_now_ist_iso(),
                 "kind": "interactive",
                 "entrypoint": "cli",
+                "client": "claude_code",
             }
 
             self.db_writer.write_session(extracted)

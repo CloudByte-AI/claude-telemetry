@@ -22,6 +22,7 @@ from ftfy import fix_text
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.common.logging import get_logger, setup_logging
+from src.common.paths import get_claude_logs_dir
 from src.common.time_utils import get_now_ist_iso
 from src.core.event_processor import process_user_prompt
 
@@ -109,8 +110,8 @@ def ensure_session_initialized(session_id: str, cwd: str) -> bool:
         cursor.execute(
             """
             INSERT INTO SESSION
-            (session_id, project_id, cwd, transcript_path, created_at)
-            VALUES (?, ?, ?, ?, ?)
+            (session_id, project_id, cwd, transcript_path, created_at, client)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id,
@@ -118,6 +119,7 @@ def ensure_session_initialized(session_id: str, cwd: str) -> bool:
                 cwd,
                 f"{project_info['name']}/{session_id}.jsonl",
                 get_now_ist_iso(),
+                "claude_code",
             ),
         )
 
@@ -355,7 +357,7 @@ def handle_user_prompt():
     read from the transcript file (with retry logic to avoid the race condition
     where the hook fires before Claude writes the entry to the JSONL).
     """
-    setup_logging(log_to_file=True, log_to_console=False)
+    setup_logging(log_to_file=True, log_to_console=False, log_dir=get_claude_logs_dir())
     logger.info("=== UserPromptSubmit Handler ===")
 
     # Ensure background worker is running (fast port check)
@@ -397,6 +399,18 @@ def handle_user_prompt():
         if session_id:
             retry_pending_tasks(session_id)
 
+        # ── Heartbeat this session in the shared active-session registry ─────
+        # Uses register() (not a separate "touch if exists" call) so a session
+        # that resumed without SessionStart ever firing (e.g. Claude Code
+        # started mid-session) still ends up tracked as active - register()
+        # is a safe overwrite either way.
+        if session_id:
+            try:
+                from src.common.session_registry import register
+                register(session_id, "claude_code")
+            except Exception as e:
+                logger.debug(f"session_registry.register failed: {e}")
+
         # ── Fallback: recover any missed stop-hook pairs ─────────────────────
         # Covers mid-session tool denial / interrupt where stop hook didn't fire.
         # Runs before storing the new prompt so the previous turn is recovered first.
@@ -420,7 +434,14 @@ def handle_user_prompt():
             print(json.dumps({"status": "error", "message": "No prompt content"}))
             return
 
-        # ── Security scan — runs before any DB write ─────────────────────────
+        # ── Ensure SESSION exists before any DB write (including security events) ──
+        # SessionStart may never have fired (mid-session plugin attach). The
+        # security-block path returns early and used to skip bootstrap, so
+        # write_finding() hit a SESSION FK error and the audit row was lost.
+        if session_id and cwd:
+            ensure_session_initialized(session_id, cwd)
+
+        # ── Security scan — runs before USER_PROMPT write ────────────────────
         # If scanning is enabled and a finding is detected, the prompt is
         # blocked immediately. process_user_prompt() is never called so the
         # raw secret is never written to USER_PROMPT. All findings are logged
@@ -448,7 +469,7 @@ def handle_user_prompt():
                     _masked = mask_text(prompt_text, _sec_result.findings)
                     _sec_result.masked_text = _masked
                     write_finding(
-                        session_id=session_id or "unknown",
+                        session_id=session_id,
                         scan_target="prompt",
                         result=_sec_result,
                         blocked=True,
@@ -523,10 +544,6 @@ def handle_user_prompt():
         prompt_id = None
         parent_uuid = None
         
-        # ── Ensure session record exists in DB ───────────────────────────────
-        if session_id and cwd:
-            ensure_session_initialized(session_id, cwd)
-
         # ── Store prompt in DB ───────────────────────────────────────────────
         logger.info(
             f"Storing prompt: session_id={session_id}, "

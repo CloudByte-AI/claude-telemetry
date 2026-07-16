@@ -20,7 +20,7 @@ Ordering strategy (confirmed from real DB analysis):
 import sqlite3
 from pathlib import Path
 
-DB_PATH = Path.home() / ".cloudbyte" / "data" / "cloudbyte.db"
+DB_PATH = Path.home() / ".cloudbyte" / "data" / "cloudbyte-cursor-test.db"
 
 
 def q(sql: str, params: tuple = (), one: bool = False):

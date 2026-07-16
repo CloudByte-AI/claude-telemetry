@@ -9,7 +9,6 @@ sessionStart is fire-and-forget: Cursor does not wait for or enforce a
 response, so failures are logged and swallowed rather than surfaced.
 """
 
-import hashlib
 import json
 from pathlib import Path
 
@@ -22,6 +21,7 @@ from src.cursor.utils.hook_io import (
     read_stdin_json as _read_stdin_data,
 )
 from src.cursor.utils.paths import get_cursor_logs_dir
+from src.cursor.utils.session_bootstrap import generate_project_id as _generate_project_id
 from src.db.writers import DatabaseWriter
 
 
@@ -84,17 +84,6 @@ def _emit_with_context(extra: dict | None = None) -> None:
     logger.info("=" * 60)
 
 
-def _generate_project_id(project_path: str) -> str:
-    """
-    Generate a project ID using the same algorithm as the Claude adapter
-    (src.integrations.claude.extractor.generate_project_id) so both IDEs
-    map the same folder to the same PROJECT row. Keep byte-identical to
-    the Claude version if either changes.
-    """
-    normalized = project_path.strip().lower().replace("\\", "/").rstrip("/")
-    return hashlib.md5(normalized.encode()).hexdigest()
-
-
 def handle_session_start() -> None:
     """Handle Cursor's sessionStart hook: persist PROJECT + SESSION rows."""
     _debug("sessionStart handler triggered")
@@ -145,6 +134,33 @@ def handle_session_start() -> None:
             "created_at": now,
             "client": "cursor",
         })
+
+        # Mark this session active so the shared worker/dashboard at :8765
+        # isn't torn down by a Claude Code session ending while this one
+        # is still running - see src/common/session_registry.py.
+        try:
+            from src.common.session_registry import register
+            register(session_id, "cursor")
+        except Exception as e:
+            logger.debug(f"session_registry.register failed: {e}")
+
+        # Bring up the shared worker/dashboard if it isn't already running -
+        # previously only Claude's sessionStart did this, so a Cursor-only
+        # user could never reach localhost:8765 at all.
+        try:
+            from src.workers.worker_checker import ensure_worker_quick_sync
+            ensure_worker_quick_sync()
+        except Exception as e:
+            logger.debug(f"Worker check failed: {e}")
+
+        try:
+            from src.workers.llm_client import ensure_worker_running
+            worker_started = ensure_worker_running()
+            logger.info("LLM worker started successfully" if worker_started else "LLM worker failed to start")
+        except ImportError:
+            logger.debug("Worker module not available")
+        except Exception as e:
+            logger.warning(f"Failed to start worker: {e}")
 
         _debug(f"session created - session_id={session_id}, project={project_name}")
         logger.info(f"Cursor session created: session_id={session_id}, project={project_name}")

@@ -23,6 +23,7 @@ from src.common.paths import (
     get_cloudbyte_dir,
     get_data_dir,
     get_logs_dir,
+    get_claude_logs_dir,
     get_db_path,
     ensure_directories,
     get_config_file,
@@ -49,7 +50,7 @@ def setup() -> None:
     Setup hook - Initialize database and directories.
     Called when Claude Code starts with the plugin.
     """
-    setup_logging(log_to_file=True, log_to_console=True)
+    setup_logging(log_to_file=True, log_to_console=True, log_dir=get_claude_logs_dir())
     logger.info("=== CloudByte Setup Starting ===")
 
     try:
@@ -126,7 +127,7 @@ def session_start() -> None:
     SessionStart hook - Called when a new Claude session starts.
     Delegates to the session_start handler.
     """
-    setup_logging(log_to_file=True, log_to_console=False)
+    setup_logging(log_to_file=True, log_to_console=False, log_dir=get_claude_logs_dir())
     _ensure_mcp_permission()
     handle_session_start()
 
@@ -154,7 +155,7 @@ def observation() -> None:
         if observation:
             save_observation_to_db(observation)
     """
-    setup_logging(log_to_file=True, log_to_console=False)
+    setup_logging(log_to_file=True, log_to_console=False, log_dir=get_claude_logs_dir())
     logger.debug("Observation generation hook - LLM integration ready but not yet triggered")
     # TODO: Implement observation generation timing and logic
 
@@ -165,7 +166,7 @@ def stop() -> None:
     Processes only the current (most recent) prompt's response, tools, and tokens.
     Does NOT save prompts (they are saved by UserPromptSubmit hook).
     """
-    setup_logging(log_to_file=True, log_to_console=False)
+    setup_logging(log_to_file=True, log_to_console=False, log_dir=get_claude_logs_dir())
     logger.debug("Stop signal received - processing current prompt data")
 
     try:

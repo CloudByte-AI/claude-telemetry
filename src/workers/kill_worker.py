@@ -462,6 +462,48 @@ def kill_uv_process():
             return False
 
 
+def shutdown_worker_if_no_active_sessions(session_id) -> bool:
+    """
+    Unregister this session, then kill the shared worker/dashboard ONLY if
+    no other session (Claude Code or Cursor, current or future plugin) is
+    still active.
+
+    This is the single guarded entry point both plugins' sessionEnd/
+    SessionEnd handlers should call instead of the raw kill_* functions
+    directly - calling those directly (as before) tears down the shared
+    worker even while another plugin's session is still using it.
+
+    Returns True if a shutdown was actually attempted, False if skipped
+    because another session is still active.
+    """
+    from src.common.session_registry import unregister, has_other_active_sessions
+
+    unregister(session_id)
+
+    if has_other_active_sessions(exclude_session_id=session_id):
+        logger.info(
+            "Other session(s) still active - skipping worker shutdown so their "
+            "dashboard/worker access at localhost:8765 isn't interrupted"
+        )
+        return False
+
+    logger.info("No other active sessions - proceeding with worker shutdown")
+
+    killed = kill_worker_by_pid()
+    if not killed:
+        killed = kill_worker_by_port()
+
+    all_killed = kill_all_claude_telemetry_processes()
+    uv_killed = kill_uv_process()
+
+    if killed or all_killed or uv_killed:
+        logger.info("Worker shutdown completed successfully")
+    else:
+        logger.warning("Worker shutdown attempted but no processes were killed")
+
+    return True
+
+
 if __name__ == "__main__":
     logger.info("=== Kill Worker Script ===")
 

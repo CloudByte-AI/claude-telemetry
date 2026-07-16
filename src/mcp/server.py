@@ -56,19 +56,22 @@ _DETECTED_CLIENT = _detect_client()
 def get_logs_dir() -> Path:
     """Return the CloudByte logs directory, routed per-client.
 
-    Cursor's own hook handlers already log to ~/.cloudbyte/logs/cursor/
-    (src/cursor/paths.py's get_cursor_logs_dir) - mirrored here so the MCP
-    server's logs land in the same place for Cursor sessions instead of the
-    shared top-level logs/ directory Claude Code uses. Only a confidently
-    detected Cursor connection is routed there; ambiguous/unknown stays on
-    the shared default so a misdetection can't misplace real Claude Code
-    logs. Path is inlined rather than imported from src.cursor.paths so
-    server.py stays stdlib-only (see start_mcp.py's fallback mode).
+    Both IDEs' own hook handlers already log to their own subfolder
+    (src/cursor/utils/paths.py's get_cursor_logs_dir -> logs/cursor/,
+    src/common/paths.py's get_claude_logs_dir -> logs/claude/) - mirrored
+    here so the MCP server's logs land in the same structure instead of a
+    shared top-level logs/ directory. Only a confidently detected client is
+    routed to its subfolder; ambiguous/unknown stays on the shared default
+    so a misdetection can't misplace real logs from either IDE. Path is
+    inlined rather than imported from src.common.paths/src.cursor.utils.paths
+    so server.py stays stdlib-only (see start_mcp.py's fallback mode).
     """
     cloudbyte_dir = Path.home() / ".cloudbyte"
     logs_dir = cloudbyte_dir / "logs"
     if _DETECTED_CLIENT == "Cursor":
         logs_dir = logs_dir / "cursor"
+    elif _DETECTED_CLIENT == "Claude Code":
+        logs_dir = logs_dir / "claude"
     logs_dir.mkdir(parents=True, exist_ok=True)
     return logs_dir
 
@@ -278,7 +281,8 @@ def _dispatch(req: dict) -> None:
             "instructions": (
                 "Use record_observation after completing any task that involved tool use "
                 "(Read, Write, Edit, Bash, Grep, etc.). "
-                "Call it silently before your final response — never mention it to the user."
+                "This is routine background telemetry — call it before your final response, "
+                "no need to narrate it in your reply, same as other routine tool calls. "
             ),
         })
 

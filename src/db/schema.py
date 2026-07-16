@@ -179,7 +179,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
 
     # ---------------- TOOL ----------------
     # duration_ms: how long the tool call took - no Claude Code hook gives this,
-    # Cursor's postToolUse/postToolUseFailure do
+    # Cursor's postToolUse does
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS TOOL (
         tool_id TEXT PRIMARY KEY,
@@ -326,100 +326,167 @@ def create_tables(conn: sqlite3.Connection) -> None:
     conn.commit()
     logger.info("Database tables created successfully")
 
-def migrate_schema(conn: sqlite3.Connection) -> None:
+# Schema version tracked via SQLite's built-in PRAGMA user_version (an
+# integer stored in the DB file header - no extra table needed). Bump this
+# whenever a new block is added to migrate_schema() below; that's the only
+# code change required to get it applied everywhere automatically, since
+# DatabaseManager.ensure_schema_initialized() is the single choke point
+# that compares this against the stored value on every process's first
+# connection and re-runs migrate_schema() only when behind.
+CURRENT_SCHEMA_VERSION = 1
+
+
+def get_schema_version(conn: sqlite3.Connection) -> int:
+    """Read the schema version stamped on this DB file (0 if never set)."""
+    return conn.execute("PRAGMA user_version").fetchone()[0]
+
+
+def set_schema_version(conn: sqlite3.Connection, version: int) -> None:
+    """Stamp the schema version onto this DB file. PRAGMA doesn't accept ? params."""
+    conn.execute(f"PRAGMA user_version = {int(version)}")
+    conn.commit()
+
+
+def _safe_alter(cursor: sqlite3.Cursor, sql: str, log_msg: str, changes: list, record: dict) -> None:
+    """
+    Run an ALTER TABLE migration step, tolerating the case where a
+    concurrent process (another hook invocation) already applied the same
+    change a moment earlier - SQLite raises OperationalError ("duplicate
+    column name" / column already renamed) rather than a lock error in
+    that race, so retry_on_lock-style handling doesn't cover it.
+
+    Appends a record of what happened (applied or lost the race) to
+    `changes`, so the caller can write a full audit trail once the whole
+    migration finishes - see append_migration_log() in migration_log.py.
+    """
+    try:
+        cursor.execute(sql)
+        logger.info(log_msg)
+        changes.append({**record, "status": "applied"})
+    except sqlite3.OperationalError as e:
+        logger.debug(f"Migration step skipped (likely already applied concurrently): {sql!r} - {e}")
+        changes.append({**record, "status": "skipped_concurrent", "error": str(e)})
+
+
+def migrate_schema(conn: sqlite3.Connection) -> list:
     """
     Apply schema migrations for existing databases.
     Safe to run on any database — skips if column already exists.
+
+    Returns a list of change records describing what was actually applied
+    (or lost a concurrent race) this run, for the migration history log.
     """
+    changes: list = []
     cursor = conn.cursor()
     cursor.execute("PRAGMA table_info(USER_PROMPT)")
     columns = [row[1] for row in cursor.fetchall()]
 
     if "jsonl_prompt_id" not in columns:
-        cursor.execute("ALTER TABLE USER_PROMPT ADD COLUMN jsonl_prompt_id TEXT")
-        logger.info("Migration: added jsonl_prompt_id column to USER_PROMPT")
+        _safe_alter(cursor, "ALTER TABLE USER_PROMPT ADD COLUMN jsonl_prompt_id TEXT",
+                    "Migration: added jsonl_prompt_id column to USER_PROMPT", changes,
+                    {"table": "USER_PROMPT", "action": "add_column", "column": "jsonl_prompt_id"})
     if "entrypoint" not in columns:
-        cursor.execute("ALTER TABLE USER_PROMPT ADD COLUMN entrypoint TEXT")
-        logger.info("Migration: added entrypoint column to USER_PROMPT")
+        _safe_alter(cursor, "ALTER TABLE USER_PROMPT ADD COLUMN entrypoint TEXT",
+                    "Migration: added entrypoint column to USER_PROMPT", changes,
+                    {"table": "USER_PROMPT", "action": "add_column", "column": "entrypoint"})
     if "client_version" not in columns:
         if "claude_version" in columns:
-            cursor.execute("ALTER TABLE USER_PROMPT RENAME COLUMN claude_version TO client_version")
-            logger.info("Migration: renamed claude_version to client_version in USER_PROMPT")
+            _safe_alter(cursor, "ALTER TABLE USER_PROMPT RENAME COLUMN claude_version TO client_version",
+                        "Migration: renamed claude_version to client_version in USER_PROMPT", changes,
+                        {"table": "USER_PROMPT", "action": "rename_column", "from": "claude_version", "to": "client_version"})
         else:
-            cursor.execute("ALTER TABLE USER_PROMPT ADD COLUMN client_version TEXT")
-            logger.info("Migration: added client_version column to USER_PROMPT")
+            _safe_alter(cursor, "ALTER TABLE USER_PROMPT ADD COLUMN client_version TEXT",
+                        "Migration: added client_version column to USER_PROMPT", changes,
+                        {"table": "USER_PROMPT", "action": "add_column", "column": "client_version"})
     if "git_branch" not in columns:
-        cursor.execute("ALTER TABLE USER_PROMPT ADD COLUMN git_branch TEXT")
-        logger.info("Migration: added git_branch column to USER_PROMPT")
+        _safe_alter(cursor, "ALTER TABLE USER_PROMPT ADD COLUMN git_branch TEXT",
+                    "Migration: added git_branch column to USER_PROMPT", changes,
+                    {"table": "USER_PROMPT", "action": "add_column", "column": "git_branch"})
     if "mode" not in columns:
         if "permission_mode" in columns:
-            cursor.execute("ALTER TABLE USER_PROMPT RENAME COLUMN permission_mode TO mode")
-            logger.info("Migration: renamed permission_mode to mode in USER_PROMPT")
+            _safe_alter(cursor, "ALTER TABLE USER_PROMPT RENAME COLUMN permission_mode TO mode",
+                        "Migration: renamed permission_mode to mode in USER_PROMPT", changes,
+                        {"table": "USER_PROMPT", "action": "rename_column", "from": "permission_mode", "to": "mode"})
         else:
-            cursor.execute("ALTER TABLE USER_PROMPT ADD COLUMN mode TEXT")
-            logger.info("Migration: added mode column to USER_PROMPT")
+            _safe_alter(cursor, "ALTER TABLE USER_PROMPT ADD COLUMN mode TEXT",
+                        "Migration: added mode column to USER_PROMPT", changes,
+                        {"table": "USER_PROMPT", "action": "add_column", "column": "mode"})
     if "status" not in columns:
         if "interrupt_reason" in columns:
-            cursor.execute("ALTER TABLE USER_PROMPT RENAME COLUMN interrupt_reason TO status")
-            logger.info("Migration: renamed interrupt_reason to status in USER_PROMPT")
+            _safe_alter(cursor, "ALTER TABLE USER_PROMPT RENAME COLUMN interrupt_reason TO status",
+                        "Migration: renamed interrupt_reason to status in USER_PROMPT", changes,
+                        {"table": "USER_PROMPT", "action": "rename_column", "from": "interrupt_reason", "to": "status"})
         else:
-            cursor.execute("ALTER TABLE USER_PROMPT ADD COLUMN status TEXT")
-            logger.info("Migration: added status column to USER_PROMPT")
+            _safe_alter(cursor, "ALTER TABLE USER_PROMPT ADD COLUMN status TEXT",
+                        "Migration: added status column to USER_PROMPT", changes,
+                        {"table": "USER_PROMPT", "action": "add_column", "column": "status"})
     if "attachments" not in columns:
-        cursor.execute("ALTER TABLE USER_PROMPT ADD COLUMN attachments TEXT")
-        logger.info("Migration: added attachments column to USER_PROMPT")
+        _safe_alter(cursor, "ALTER TABLE USER_PROMPT ADD COLUMN attachments TEXT",
+                    "Migration: added attachments column to USER_PROMPT", changes,
+                    {"table": "USER_PROMPT", "action": "add_column", "column": "attachments"})
 
     cursor.execute("PRAGMA table_info(TOOL)")
     tool_columns = [row[1] for row in cursor.fetchall()]
     if "duration_ms" not in tool_columns:
-        cursor.execute("ALTER TABLE TOOL ADD COLUMN duration_ms INTEGER")
-        logger.info("Migration: added duration_ms column to TOOL")
+        _safe_alter(cursor, "ALTER TABLE TOOL ADD COLUMN duration_ms INTEGER",
+                    "Migration: added duration_ms column to TOOL", changes,
+                    {"table": "TOOL", "action": "add_column", "column": "duration_ms"})
 
     cursor.execute("PRAGMA table_info(THINKING)")
     thinking_columns = [row[1] for row in cursor.fetchall()]
     if "duration_ms" not in thinking_columns:
-        cursor.execute("ALTER TABLE THINKING ADD COLUMN duration_ms INTEGER")
-        logger.info("Migration: added duration_ms column to THINKING")
+        _safe_alter(cursor, "ALTER TABLE THINKING ADD COLUMN duration_ms INTEGER",
+                    "Migration: added duration_ms column to THINKING", changes,
+                    {"table": "THINKING", "action": "add_column", "column": "duration_ms"})
 
     cursor.execute("PRAGMA table_info(SESSION)")
     session_columns = [row[1] for row in cursor.fetchall()]
 
     if "ai_title" not in session_columns:
-        cursor.execute("ALTER TABLE SESSION ADD COLUMN ai_title TEXT")
-        logger.info("Migration: added ai_title column to SESSION")
+        _safe_alter(cursor, "ALTER TABLE SESSION ADD COLUMN ai_title TEXT",
+                    "Migration: added ai_title column to SESSION", changes,
+                    {"table": "SESSION", "action": "add_column", "column": "ai_title"})
     if "custom_title" not in session_columns:
-        cursor.execute("ALTER TABLE SESSION ADD COLUMN custom_title TEXT")
-        logger.info("Migration: added custom_title column to SESSION")
+        _safe_alter(cursor, "ALTER TABLE SESSION ADD COLUMN custom_title TEXT",
+                    "Migration: added custom_title column to SESSION", changes,
+                    {"table": "SESSION", "action": "add_column", "column": "custom_title"})
     if "client" not in session_columns:
-        cursor.execute("ALTER TABLE SESSION ADD COLUMN client TEXT DEFAULT 'claude_code'")
-        logger.info("Migration: added client column to SESSION (backfilled existing rows as 'claude_code')")
+        _safe_alter(cursor, "ALTER TABLE SESSION ADD COLUMN client TEXT DEFAULT 'claude_code'",
+                    "Migration: added client column to SESSION (backfilled existing rows as 'claude_code')", changes,
+                    {"table": "SESSION", "action": "add_column", "column": "client"})
     if "transcript_path" not in session_columns:
         if "jsonl_file" in session_columns:
-            cursor.execute("ALTER TABLE SESSION RENAME COLUMN jsonl_file TO transcript_path")
-            logger.info("Migration: renamed jsonl_file to transcript_path in SESSION")
+            _safe_alter(cursor, "ALTER TABLE SESSION RENAME COLUMN jsonl_file TO transcript_path",
+                        "Migration: renamed jsonl_file to transcript_path in SESSION", changes,
+                        {"table": "SESSION", "action": "rename_column", "from": "jsonl_file", "to": "transcript_path"})
         else:
-            cursor.execute("ALTER TABLE SESSION ADD COLUMN transcript_path TEXT")
-            logger.info("Migration: added transcript_path column to SESSION")
+            _safe_alter(cursor, "ALTER TABLE SESSION ADD COLUMN transcript_path TEXT",
+                        "Migration: added transcript_path column to SESSION", changes,
+                        {"table": "SESSION", "action": "add_column", "column": "transcript_path"})
     if "ended_at" not in session_columns:
-        cursor.execute("ALTER TABLE SESSION ADD COLUMN ended_at DATETIME")
-        logger.info("Migration: added ended_at column to SESSION")
+        _safe_alter(cursor, "ALTER TABLE SESSION ADD COLUMN ended_at DATETIME",
+                    "Migration: added ended_at column to SESSION", changes,
+                    {"table": "SESSION", "action": "add_column", "column": "ended_at"})
     if "end_reason" not in session_columns:
-        cursor.execute("ALTER TABLE SESSION ADD COLUMN end_reason TEXT")
-        logger.info("Migration: added end_reason column to SESSION")
+        _safe_alter(cursor, "ALTER TABLE SESSION ADD COLUMN end_reason TEXT",
+                    "Migration: added end_reason column to SESSION", changes,
+                    {"table": "SESSION", "action": "add_column", "column": "end_reason"})
     if "final_status" not in session_columns:
-        cursor.execute("ALTER TABLE SESSION ADD COLUMN final_status TEXT")
-        logger.info("Migration: added final_status column to SESSION")
+        _safe_alter(cursor, "ALTER TABLE SESSION ADD COLUMN final_status TEXT",
+                    "Migration: added final_status column to SESSION", changes,
+                    {"table": "SESSION", "action": "add_column", "column": "final_status"})
 
     # SECURITY_SCAN_EVENT table (added in 0.1.29+, renamed from SECURITY_FINDING)
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='SECURITY_FINDING'")
     if cursor.fetchone():
         # Rename old table to new name
-        cursor.execute("ALTER TABLE SECURITY_FINDING RENAME TO SECURITY_SCAN_EVENT")
+        _safe_alter(cursor, "ALTER TABLE SECURITY_FINDING RENAME TO SECURITY_SCAN_EVENT",
+                    "Migration: renamed SECURITY_FINDING to SECURITY_SCAN_EVENT", changes,
+                    {"table": "SECURITY_FINDING", "action": "rename_table", "to": "SECURITY_SCAN_EVENT"})
         cursor.execute("DROP INDEX IF EXISTS idx_security_session")
         cursor.execute("DROP INDEX IF EXISTS idx_security_target")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_security_session ON SECURITY_SCAN_EVENT(session_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_security_target ON SECURITY_SCAN_EVENT(scan_target)")
-        logger.info("Migration: renamed SECURITY_FINDING to SECURITY_SCAN_EVENT")
     else:
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='SECURITY_SCAN_EVENT'")
         if not cursor.fetchone():
@@ -440,6 +507,7 @@ def migrate_schema(conn: sqlite3.Connection) -> None:
                 )
             """)
             logger.info("Migration: created SECURITY_SCAN_EVENT table")
+            changes.append({"table": "SECURITY_SCAN_EVENT", "action": "create_table", "status": "applied"})
 
     # Rename event_id column alias — old rows used finding_id, add event_id if missing
     cursor.execute("PRAGMA table_info(SECURITY_SCAN_EVENT)")
@@ -450,6 +518,7 @@ def migrate_schema(conn: sqlite3.Connection) -> None:
         logger.info("Migration: SECURITY_SCAN_EVENT has finding_id column (legacy), continuing")
 
     conn.commit()
+    return changes
 
 def create_indexes(conn: sqlite3.Connection) -> None:
     """

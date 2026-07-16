@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.common.logging import get_logger, setup_logging
-from src.common.paths import get_config_file
+from src.common.paths import get_config_file, get_claude_logs_dir
 from src.common.file_io import read_json
 from src.integrations.llm.db_helpers import get_all_observations
 
@@ -56,7 +56,7 @@ def handle_session_end():
     2. Queue summary task for background processing
     3. Kill worker process
     """
-    setup_logging(log_to_file=True, log_to_console=False)
+    setup_logging(log_to_file=True, log_to_console=False, log_dir=get_claude_logs_dir())
     logger.info("=== SessionEnd Handler ===")
 
     try:
@@ -140,45 +140,15 @@ def handle_session_end():
         except Exception as e:
             logger.warning(f"Could not check task queue status: {e}")
 
-        # Kill worker process - DIRECT execution only
-        logger.info("🚀 Starting worker shutdown...")
+        # Kill worker process - but only if no other session (this or another
+        # Claude Code window, or a Cursor session) is still relying on the
+        # shared worker/dashboard at localhost:8765. See
+        # src/common/session_registry.py and shutdown_worker_if_no_active_sessions().
+        logger.info("🚀 Checking whether it's safe to shut down the shared worker...")
 
         try:
-            # Import kill_worker functions directly
-            from src.workers.kill_worker import (
-                kill_worker_by_pid,
-                kill_worker_by_port,
-                kill_all_claude_telemetry_processes,
-                kill_uv_process
-            )
-
-            # Step 1: Try killing by PID first
-            logger.info("Step 1: Killing worker by PID...")
-            killed = kill_worker_by_pid()
-            logger.info(f"✓ Kill by PID result: {killed}")
-
-            # Step 2: Fallback to killing by port
-            if not killed:
-                logger.info("Step 2: Trying to kill by port...")
-                killed = kill_worker_by_port()
-                logger.info(f"✓ Kill by port result: {killed}")
-
-            # Step 3: Comprehensive cleanup of all claude-telemetry processes
-            logger.info("Step 3: Performing comprehensive cleanup of all processes...")
-            all_killed = kill_all_claude_telemetry_processes()
-            logger.info(f"✓ Comprehensive cleanup result: {all_killed}")
-
-            # Step 4: Kill uv process
-            logger.info("Step 4: Killing uv process...")
-            uv_killed = kill_uv_process()
-            logger.info(f"✓ Kill uv result: {uv_killed}")
-
-            # Overall result
-            if killed or all_killed or uv_killed:
-                logger.info("✅ Worker cleanup completed successfully")
-            else:
-                logger.warning("⚠️ No processes were killed")
-
+            from src.workers.kill_worker import shutdown_worker_if_no_active_sessions
+            shutdown_worker_if_no_active_sessions(session_id)
         except Exception as e:
             logger.error(f"❌ Failed to run kill_worker functions: {e}", exc_info=True)
 

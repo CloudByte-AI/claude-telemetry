@@ -1,15 +1,14 @@
 """
-Cursor PostToolUse / PostToolUseFailure Handler
+Cursor PostToolUse Handler
 
-Handles postToolUse (tool succeeded) and postToolUseFailure (tool failed,
-timed out, or was denied). Both write a TOOL row - preToolUse fires first
-but carries nothing that postToolUse doesn't already have, so it stays
+Handles postToolUse (tool succeeded). Writes a TOOL row - preToolUse fires
+first but carries nothing that postToolUse doesn't already have, so it stays
 discovery-only (see tool_discovery.py); no correlation across hooks needed.
 
 Field mapping:
-  tool_id     <- tool_use_id (identical across preToolUse/postToolUse/
-                 postToolUseFailure for one tool call - used directly as
-                 the primary key, same pattern as generation_id)
+  tool_id     <- tool_use_id (identical across preToolUse/postToolUse for
+                 one tool call - used directly as the primary key, same
+                 pattern as generation_id)
   prompt_id   <- generation_id
   tool_name   <- tool_name
   model       <- model
@@ -17,11 +16,8 @@ Field mapping:
                  Claude Code's own tool writes do (write_tool() itself
                  serializes again on top - matches Claude's existing
                  double-encoding rather than introducing a new format)
-  output_json <- postToolUse: tool_output (already a JSON string from
-                 Cursor, passed through as-is)
-                 postToolUseFailure: {"error": error_message,
-                 "failure_type": failure_type}, pre-serialized the same way
-                 as input_json
+  output_json <- tool_output (already a JSON string from Cursor, passed
+                 through as-is)
   duration_ms <- duration
   timestamp   <- stamped locally
   uuid, parent_uuid: left NULL - no Cursor equivalent.
@@ -127,33 +123,3 @@ def handle_post_tool_use() -> None:
         logger.error(f"Error in Cursor PostToolUse handler: {e}", exc_info=True)
 
     print(json.dumps(output))
-
-
-def handle_post_tool_use_failure() -> None:
-    """Handle Cursor's postToolUseFailure hook: persist a TOOL row with error info."""
-    debug("postToolUseFailure handler triggered")
-    setup_logging(log_to_file=True, log_to_console=False, log_dir=get_cursor_logs_dir())
-    logger.info("=== Cursor PostToolUseFailure Handler ===")
-
-    try:
-        hook_data = read_stdin_json()
-        logger.info(f"postToolUseFailure full payload: {json.dumps(hook_data, default=str)}")
-        debug(f"payload keys: {list(hook_data.keys())}")
-
-        output_json = json.dumps({
-            "error": hook_data.get("error_message"),
-            "failure_type": hook_data.get("failure_type"),
-        })
-        written = _write_tool(hook_data, output_json)
-        tool_id = hook_data.get("tool_use_id")
-        if written:
-            debug(f"tool failure stored - tool_id={tool_id}")
-            logger.info(f"Cursor tool failure stored: tool_id={tool_id}")
-        else:
-            logger.warning(f"Cursor tool failure write failed - tool_id={tool_id}")
-
-    except Exception as e:
-        debug(f"ERROR - {e}")
-        logger.error(f"Error in Cursor PostToolUseFailure handler: {e}", exc_info=True)
-
-    print(json.dumps({}))

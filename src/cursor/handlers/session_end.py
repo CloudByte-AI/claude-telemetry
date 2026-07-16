@@ -61,6 +61,16 @@ def handle_session_end() -> None:
 
         obs_state.delete_session(session_id)
 
+        # Shut down the shared worker/dashboard at localhost:8765 - but only
+        # if no other session (another Cursor session, or a Claude Code
+        # session) is still relying on it. See
+        # src/common/session_registry.py and shutdown_worker_if_no_active_sessions().
+        try:
+            from src.workers.kill_worker import shutdown_worker_if_no_active_sessions
+            shutdown_worker_if_no_active_sessions(session_id)
+        except Exception as e:
+            logger.warning(f"Cursor worker shutdown check failed: {e}")
+
     except Exception as e:
         debug(f"ERROR - {e}")
         logger.error(f"Error in Cursor SessionEnd handler: {e}", exc_info=True)
