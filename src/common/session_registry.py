@@ -3,7 +3,7 @@ Active Session Registry
 
 Tracks which sessions are currently active, across BOTH Claude Code and
 Cursor (and any future plugin), so the shared background worker/dashboard
-at localhost:8765 is never torn down while another plugin's session is
+at localhost:4723 is never torn down while another plugin's session is
 still using it.
 
 Same proven pattern as src/cursor/utils/obs_state.py - one JSON file per

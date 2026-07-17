@@ -3,6 +3,7 @@
     var COLORS = ['#fe4c02', '#ff6d31', '#ff8e5f', '#ffa783', '#ffc8b2', '#ffe4d9', '#802601', '#b33502'];
     function color(i) { return COLORS[i % COLORS.length]; }
     function toK(v) {
+        if (v === null || v === undefined) return 'not tracked';
         if (v >= 1000000) return (v / 1000000).toFixed(1) + 'M';
         if (v >= 1000) return (v / 1000).toFixed(1) + 'K';
         return String(v);

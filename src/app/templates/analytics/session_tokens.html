@@ -1,4 +1,5 @@
 {% extends "base/index.html" %}
+{% from "base/_macros.html" import not_tracked %}
 {% block title %}Token Analysis · {{ session.session_id[:8] }} — CloudByte{% endblock %}
 {% block breadcrumb %}token usage / session {{ session.session_id[:8] }}…{% endblock %}
 
@@ -90,7 +91,7 @@
                         <span class="legend-name">{{ label }}</span>
                         <span class="legend-val">
                             {% set v = donut_values[loop.index0] %}
-                            {% if v >= 1000000 %}{{ "%.1f"|format(v/1000000) }}M{% elif v >= 1000 %}{{ "%.1f"|format(v/1000) }}K{% else %}{{ v }}{% endif %}
+                            {% if v is none %}{{ not_tracked("Cursor doesn't report tool-level token usage") }}{% elif v >= 1000000 %}{{ "%.1f"|format(v/1000000) }}M{% elif v >= 1000 %}{{ "%.1f"|format(v/1000) }}K{% else %}{{ v }}{% endif %}
                         </span>
                     </div>
                     {% endfor %}

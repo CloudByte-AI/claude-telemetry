@@ -39,7 +39,7 @@ logger = get_logger(__name__)
 
 
 # Default worker configuration
-DEFAULT_WORKER_PORT = 8765
+DEFAULT_WORKER_PORT = 4723
 DEFAULT_WORKER_TIMEOUT = 15  # seconds for HTTP requests
 _worker_start_time = None  # Track when worker was started
 
@@ -248,14 +248,14 @@ def ensure_worker_running() -> bool:
 
             process = subprocess.Popen(
                 ["uv", "run", "--directory", str(project_dir),
-                 "uvicorn", "src.app.app:app", "--host", "127.0.0.1", "--port", "8765"],
+                 "uvicorn", "src.app.app:app", "--host", "127.0.0.1", "--port", "4723"],
                 creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW,
                 executable=python_exe,
             )
         else:
             # Unix-like systems
             process = subprocess.Popen(
-                ["uv", "run", "--directory", str(project_dir), "uvicorn", "src.app.app:app", "--host", "127.0.0.1", "--port", "8765"],
+                ["uv", "run", "--directory", str(project_dir), "uvicorn", "src.app.app:app", "--host", "127.0.0.1", "--port", "4723"],
                 start_new_session=True,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,

@@ -13,7 +13,9 @@ def get_all_projects():
                COALESCE(SUM(i.input_tokens),0)+COALESCE(SUM(i.output_tokens),0)+
                COALESCE(SUM(i.cache_read_tokens),0)+
                COALESCE(SUM(i.cache_creation_tokens),0) AS io_tokens,
-               MAX(substr(s.created_at,1,10)) AS last_session
+               MAX(substr(s.created_at,1,10)) AS last_session,
+               COUNT(DISTINCT CASE WHEN s.client = 'claude_code' THEN s.session_id END) AS sessions_claude_code,
+               COUNT(DISTINCT CASE WHEN s.client = 'cursor'      THEN s.session_id END) AS sessions_cursor
         FROM PROJECT p
         LEFT JOIN SESSION s      ON s.project_id  = p.project_id
         LEFT JOIN USER_PROMPT up ON up.session_id  = s.session_id

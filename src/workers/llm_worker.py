@@ -198,7 +198,7 @@ class LLMWorker:
 
     def __init__(
         self,
-        port: int = 8765,
+        port: int = 4723,
         max_workers: int = 2,
         shutdown_idle_seconds: int = 60,
         max_shutdown_wait_seconds: int = 300,
@@ -538,11 +538,11 @@ def main():
     logger.warning("=" * 60)
     logger.warning("DEPRECATION NOTICE: Standalone worker is deprecated")
     logger.warning("The worker is now integrated into the FastAPI dashboard")
-    logger.warning("Please use: uv run uvicorn src.app.app:app --port 8765")
+    logger.warning("Please use: uv run uvicorn src.app.app:app --port 4723")
     logger.warning("=" * 60)
 
     parser = argparse.ArgumentParser(description="CloudByte LLM Worker")
-    parser.add_argument("--port", type=int, default=8765, help="HTTP server port")
+    parser.add_argument("--port", type=int, default=4723, help="HTTP server port")
     parser.add_argument("--max-workers", type=int, default=2, help="Maximum concurrent workers")
     parser.add_argument("--shutdown-idle", type=int, default=60, help="Shutdown idle seconds")
     parser.add_argument("--max-shutdown-wait", type=int, default=300, help="Max shutdown wait seconds")

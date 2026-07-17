@@ -24,7 +24,8 @@ def get_worker_status():
             "running_tasks": 0,
             "shutdown_requested": False,
             "thread_alive": False,
-            "worker_exited": True
+            "worker_exited": True,
+            "by_client": {},
         }
 
 

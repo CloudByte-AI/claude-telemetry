@@ -2,7 +2,7 @@
 Dashboard Start Handler
 
 Automatically starts the FastAPI dashboard when a Claude session starts.
-Runs as a detached background process on port 8765.
+Runs as a detached background process on port 4723.
 """
 
 import json
@@ -22,7 +22,7 @@ from src.common.paths import get_cloudbyte_dir
 
 logger = get_logger(__name__)
 
-DASHBOARD_PORT = 8765
+DASHBOARD_PORT = 4723
 PID_FILE = get_cloudbyte_dir() / "dashboard.pid"
 
 

@@ -1,4 +1,5 @@
 {% extends "base/index.html" %}
+{% from "base/_macros.html" import client_badge %}
 {% block title %}Conversation #{{ turn_number }} — CloudByte{% endblock %}
 {% block breadcrumb %}sessions / {{ prompt.session_id[:8] }}… / conversation #{{ turn_number }}{% endblock %}
 
@@ -22,6 +23,7 @@
                 Conversation
                 <span style="font-family:'IBM Plex Mono',monospace;color:var(--accent);">#{{ turn_number }}</span>
                 <span style="color:var(--text3);font-size:13px;"> / {{ total_turns }}</span>
+                {{ client_badge(prompt.client, compact=true) }}
             </div>
             <div class="dimmer" style="font-size:12px;">{{ prompt.project_name or 'Unknown' }} — {{
                 prompt.session_id[:8] }}…</div>
@@ -82,7 +84,7 @@
                     <div class="tl-label think">
                         <span>thinking → {{ item.tool.tool_name }}</span>
                         <span style="color:var(--text3);font-size:10px;">step {{ loop.index }} of {{ tool_list|length
-                            }}</span>
+                            }}{% if item.thinking.duration_ms %} · {{ item.thinking.duration_ms }}ms{% endif %}</span>
                     </div>
                     <div class="tl-card" style="border-color:rgba(160,130,250,0.2);">
                         <div class="tl-collapsed-bar" onclick="toggleTl(this)"
@@ -117,6 +119,9 @@
                         <!-- Collapsed bar: tool name + tokens + status -->
                         <div class="tool-summary-bar" onclick="toggleTool(this)">
                             <span class="tool-card-name">{{ item.tool.tool_name }}</span>
+                            {% if item.tool.duration_ms %}
+                            <span class="mini-pill">{{ item.tool.duration_ms }}ms</span>
+                            {% endif %}
                             {% if item.tokens %}
                             <span class="mini-pill">in <b>{{ "{:,}".format(item.tokens.input_tokens or 0) }}</b></span>
                             <span class="mini-pill">out <b>{{ "{:,}".format(item.tokens.output_tokens or 0)

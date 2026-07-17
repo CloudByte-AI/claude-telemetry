@@ -94,7 +94,7 @@ def _build_block_user_message(findings: list, masked_text: str, scan_result) -> 
         f"────────────────────────────────────────────────────────\n\n"
         f"💡 False positive? Add the value to your allowlist so it is never\n"
         f"   flagged again:\n\n"
-        f"   http://localhost:8765/security\n\n"
+        f"   http://localhost:4723/security\n\n"
     )
 
 

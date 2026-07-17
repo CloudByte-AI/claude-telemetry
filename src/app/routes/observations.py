@@ -15,8 +15,9 @@ def observations(
     date_from:   str = "",
     date_to:     str = "",
     page:        int = 1,
+    client:      str = "all",
 ):
-    ctx = svc.get_observations_context(search, type_filter, date_from, date_to, page)
+    ctx = svc.get_observations_context(search, type_filter, date_from, date_to, page, client=client)
     if request.headers.get("HX-Request"):
         return templates.TemplateResponse(request=request, name="memory/_obs_content.html", context=ctx)
     return templates.TemplateResponse(request=request, name="memory/observations.html", context=ctx)

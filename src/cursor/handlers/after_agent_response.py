@@ -113,7 +113,7 @@ def _scan_response_for_secrets(response_text: str, session_id: str | None) -> No
             f"⚠️  Sensitive data found in agent response — "
             f"{len(scan_result.findings)} finding(s) logged. "
             f"event_id={event_id}. "
-            f"View details at http://localhost:8765/security/events"
+            f"View details at http://localhost:4723/security/events"
         )
 
     except Exception as e:

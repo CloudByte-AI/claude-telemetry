@@ -1,10 +1,11 @@
 """All SQL queries related to IO tokens and tool tokens."""
 
-from ..routers.db import q
+from ..routers.db import q, client_where
 
 
-def get_io_totals_by_date(d_from: str, d_to: str):
-    return q("""
+def get_io_totals_by_date(d_from: str, d_to: str, client: str = None):
+    where, params = client_where(client, "s")
+    return q(f"""
         SELECT COALESCE(SUM(i.input_tokens),0) AS inp,
                COALESCE(SUM(i.output_tokens),0) AS out,
                COALESCE(SUM(i.cache_read_tokens),0) AS cr,
@@ -12,55 +13,58 @@ def get_io_totals_by_date(d_from: str, d_to: str):
         FROM IO_TOKENS i
         JOIN USER_PROMPT up ON up.prompt_id = i.prompt_id
         JOIN SESSION s      ON s.session_id = up.session_id
-        WHERE substr(s.created_at, 1, 10) BETWEEN ? AND ?
-    """, (d_from, d_to), one=True)
+        WHERE substr(s.created_at, 1, 10) BETWEEN ? AND ? {where}
+    """, (d_from, d_to) + params, one=True)
 
 
-def get_tool_totals_by_date(d_from: str, d_to: str):
-    return q("""
-        SELECT COALESCE(SUM(tt.input_tokens),0) AS inp,
-               COALESCE(SUM(tt.output_tokens),0) AS out,
-               COALESCE(SUM(tt.cache_read_tokens),0) AS cr,
-               COALESCE(SUM(tt.cache_creation_tokens),0) AS cc
+def get_tool_totals_by_date(d_from: str, d_to: str, client: str = None):
+    where, params = client_where(client, "s")
+    return q(f"""
+        SELECT SUM(tt.input_tokens) AS inp,
+               SUM(tt.output_tokens) AS out,
+               SUM(tt.cache_read_tokens) AS cr,
+               SUM(tt.cache_creation_tokens) AS cc
         FROM TOOL_TOKENS tt
         JOIN TOOL t         ON t.tool_id    = tt.tool_id
         JOIN USER_PROMPT up ON up.prompt_id = t.prompt_id
         JOIN SESSION s      ON s.session_id = up.session_id
-        WHERE substr(s.created_at, 1, 10) BETWEEN ? AND ?
-    """, (d_from, d_to), one=True)
+        WHERE substr(s.created_at, 1, 10) BETWEEN ? AND ? {where}
+    """, (d_from, d_to) + params, one=True)
 
 
-def get_chart_sessions_by_date(d_from: str, d_to: str, limit: int = 10):
-    return q("""
+def get_chart_sessions_by_date(d_from: str, d_to: str, limit: int = 10, client: str = None):
+    where, params = client_where(client, "s")
+    return q(f"""
         SELECT s.session_id,
                COALESCE(SUM(i.input_tokens+i.output_tokens+
                             i.cache_read_tokens+i.cache_creation_tokens),0) AS io_total
         FROM IO_TOKENS i
         JOIN USER_PROMPT up ON up.prompt_id = i.prompt_id
         JOIN SESSION s      ON s.session_id = up.session_id
-        WHERE substr(s.created_at, 1, 10) BETWEEN ? AND ?
+        WHERE substr(s.created_at, 1, 10) BETWEEN ? AND ? {where}
         GROUP BY s.session_id
         ORDER BY io_total DESC
         LIMIT ?
-    """, (d_from, d_to, limit))
+    """, (d_from, d_to) + params + (limit,))
 
 
 def get_session_tool_total(session_id: str):
     return q("""
-        SELECT COALESCE(SUM(tt.input_tokens+tt.output_tokens+
-                            tt.cache_read_tokens+tt.cache_creation_tokens),0) AS total
+        SELECT SUM(tt.input_tokens+tt.output_tokens+
+                   tt.cache_read_tokens+tt.cache_creation_tokens) AS total
         FROM TOOL_TOKENS tt JOIN TOOL t ON t.tool_id=tt.tool_id
         WHERE t.prompt_id IN (SELECT prompt_id FROM USER_PROMPT WHERE session_id=?)
     """, (session_id,), one=True)
 
 
-def get_sessions_io_breakdown(search: str = ""):
+def get_sessions_io_breakdown(search: str = "", client: str = None):
     search_filter = ""
-    params: tuple = ()
+    search_params: tuple = ()
     if search.strip():
         search_filter = "AND (p.name LIKE ? OR s.session_id LIKE ?)"
         like = f"%{search.strip()}%"
-        params = (like, like)
+        search_params = (like, like)
+    where, where_params = client_where(client, "s")
     return q(f"""
         SELECT s.session_id, p.name AS project_name, s.cwd,
                substr(s.created_at, 1, 10) AS session_date,
@@ -73,18 +77,19 @@ def get_sessions_io_breakdown(search: str = ""):
         JOIN USER_PROMPT up ON up.prompt_id = i.prompt_id
         JOIN SESSION s      ON s.session_id = up.session_id
         LEFT JOIN PROJECT p ON p.project_id = s.project_id
-        WHERE 1=1 {search_filter}
+        WHERE 1=1 {search_filter} {where}
         GROUP BY s.session_id
         ORDER BY SUM(i.input_tokens+i.output_tokens+i.cache_read_tokens) DESC
-    """, params)
+    """, search_params + where_params)
 
 
-def get_projects_io_breakdown(search: str = ""):
+def get_projects_io_breakdown(search: str = "", client: str = None):
     search_filter = ""
-    params: tuple = ()
+    search_params: tuple = ()
     if search.strip():
         search_filter = "AND p.name LIKE ?"
-        params = (f"%{search.strip()}%",)
+        search_params = (f"%{search.strip()}%",)
+    where, where_params = client_where(client, "s")
     return q(f"""
         SELECT p.project_id, p.name AS project_name, p.path,
                COALESCE(sc.session_count, 0) AS session_count,
@@ -94,7 +99,7 @@ def get_projects_io_breakdown(search: str = ""):
                COALESCE(io.cc,  0) AS io_cache_create
         FROM PROJECT p
         LEFT JOIN (
-            SELECT project_id, COUNT(*) AS session_count FROM SESSION GROUP BY project_id
+            SELECT s.project_id, COUNT(*) AS session_count FROM SESSION s WHERE 1=1 {where} GROUP BY s.project_id
         ) sc ON sc.project_id = p.project_id
         LEFT JOIN (
             SELECT s.project_id,
@@ -103,11 +108,12 @@ def get_projects_io_breakdown(search: str = ""):
             FROM IO_TOKENS i
             JOIN USER_PROMPT up ON up.prompt_id = i.prompt_id
             JOIN SESSION s      ON s.session_id = up.session_id
+            WHERE 1=1 {where}
             GROUP BY s.project_id
         ) io ON io.project_id = p.project_id
         WHERE io.inp IS NOT NULL {search_filter}
         ORDER BY io.inp DESC
-    """, params)
+    """, where_params * 2 + search_params)
 
 
 def get_session_io_totals(session_id: str):
@@ -123,10 +129,10 @@ def get_session_io_totals(session_id: str):
 
 def get_session_tool_totals(session_id: str):
     return q("""
-        SELECT COALESCE(SUM(tt.input_tokens),0) AS inp,
-               COALESCE(SUM(tt.output_tokens),0) AS out,
-               COALESCE(SUM(tt.cache_read_tokens),0) AS cr,
-               COALESCE(SUM(tt.cache_creation_tokens),0) AS cc
+        SELECT SUM(tt.input_tokens) AS inp,
+               SUM(tt.output_tokens) AS out,
+               SUM(tt.cache_read_tokens) AS cr,
+               SUM(tt.cache_creation_tokens) AS cc
         FROM TOOL_TOKENS tt JOIN TOOL t ON t.tool_id=tt.tool_id
         JOIN USER_PROMPT up ON up.prompt_id=t.prompt_id
         WHERE up.session_id=?
@@ -164,10 +170,10 @@ def get_project_io_totals(project_id: str):
 
 def get_project_tool_totals(project_id: str):
     return q("""
-        SELECT COALESCE(SUM(tt.input_tokens),0) AS inp,
-               COALESCE(SUM(tt.output_tokens),0) AS out,
-               COALESCE(SUM(tt.cache_read_tokens),0) AS cr,
-               COALESCE(SUM(tt.cache_creation_tokens),0) AS cc
+        SELECT SUM(tt.input_tokens) AS inp,
+               SUM(tt.output_tokens) AS out,
+               SUM(tt.cache_read_tokens) AS cr,
+               SUM(tt.cache_creation_tokens) AS cc
         FROM TOOL_TOKENS tt JOIN TOOL t ON t.tool_id=tt.tool_id
         JOIN USER_PROMPT up ON up.prompt_id=t.prompt_id
         JOIN SESSION s ON s.session_id=up.session_id
@@ -180,8 +186,8 @@ def get_project_sessions_token_breakdown(project_id: str):
         SELECT s.session_id, substr(s.created_at,1,10) AS session_date,
                COALESCE(io.inp,0) AS io_input, COALESCE(io.out,0) AS io_output,
                COALESCE(io.cr,0)  AS io_cr,    COALESCE(io.cc,0)  AS io_cc,
-               COALESCE(tl.inp,0) AS tool_input, COALESCE(tl.out,0) AS tool_output,
-               COALESCE(tl.cr,0)  AS tool_cr,    COALESCE(tl.cc,0)  AS tool_cc
+               tl.inp AS tool_input, tl.out AS tool_output,
+               tl.cr  AS tool_cr,    tl.cc  AS tool_cc
         FROM SESSION s
         LEFT JOIN (
             SELECT up.session_id,

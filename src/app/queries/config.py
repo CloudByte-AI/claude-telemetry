@@ -26,7 +26,7 @@ _EMPTY_CONFIG = {
     },
     "worker": {
         "enabled": True,
-        "port":    8765,
+        "port":    4723,
     },
 }
 

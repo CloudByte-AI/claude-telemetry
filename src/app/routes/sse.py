@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 
 router = APIRouter()
 
-DB_PATH  = Path.home() / ".cloudbyte" / "data" / "cloudbyte.db"
+DB_PATH  = Path.home() / ".cloudbyte" / "data" / "cloudbyte-cursor-test.db"
 WAL_PATH = Path(str(DB_PATH) + "-wal")
 SHM_PATH = Path(str(DB_PATH) + "-shm")
 

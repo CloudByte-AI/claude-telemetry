@@ -11,19 +11,20 @@ def get_tools_page_context(
     tool_search: str, sess_search: str, proj_search: str,
     tool_page: int, sess_page: int, proj_page: int,
     per_page: int,
+    client: str = None,
 ) -> dict:
     d_from, d_to = resolve_dates(dr, date_from, date_to)
 
     # Chart data — date-filtered, top 5 + others
-    all_tools   = list(tq.get_tools_stats_by_date(d_from, d_to))
+    all_tools   = list(tq.get_tools_stats_by_date(d_from, d_to, client))
     total_calls = sum(r["call_count"] for r in all_tools) or 1
 
     tool_rows_full = []
     for row in all_tools:
         d = dict(row)
         d["call_pct"]     = round(d["call_count"] / total_calls * 100)
-        d["total_tokens"] = (d["input_tokens"] + d["output_tokens"] +
-                             d["cache_read_tokens"] + d["cache_creation_tokens"])
+        d["total_tokens"] = ((d["input_tokens"] or 0) + (d["output_tokens"] or 0) +
+                             (d["cache_read_tokens"] or 0) + (d["cache_creation_tokens"] or 0))
         tool_rows_full.append(d)
 
     chart_rows = tool_rows_full[:5]
@@ -31,15 +32,15 @@ def get_tools_page_context(
     if others:
         chart_rows = list(chart_rows) + [{
             "tool_name":             "others",
-            "call_count":            sum(r["call_count"]             for r in others),
-            "input_tokens":          sum(r["input_tokens"]           for r in others),
-            "output_tokens":         sum(r["output_tokens"]          for r in others),
-            "cache_read_tokens":     sum(r["cache_read_tokens"]      for r in others),
-            "cache_creation_tokens": sum(r["cache_creation_tokens"]  for r in others),
+            "call_count":            sum(r["call_count"]                  for r in others),
+            "input_tokens":          sum(r["input_tokens"] or 0           for r in others),
+            "output_tokens":         sum(r["output_tokens"] or 0          for r in others),
+            "cache_read_tokens":     sum(r["cache_read_tokens"] or 0      for r in others),
+            "cache_creation_tokens": sum(r["cache_creation_tokens"] or 0  for r in others),
         }]
 
     # Per-tool table — all time, searchable
-    all_tools_full = list(tq.get_all_tools_stats())
+    all_tools_full = list(tq.get_all_tools_stats(client))
     total_all      = sum(r["call_count"] for r in all_tools_full) or 1
     tool_rows_enriched = []
     for row in all_tools_full:
@@ -54,16 +55,17 @@ def get_tools_page_context(
         filtered_tools = tool_rows_enriched
     tool_paged, tool_pg = paginate(filtered_tools, tool_page, per_page)
 
-    sess_rows = list(tq.get_sessions_tool_breakdown(sess_search))
+    sess_rows = list(tq.get_sessions_tool_breakdown(sess_search, client))
     sess_paged, sess_pg = paginate(sess_rows, sess_page, per_page)
 
-    proj_rows = list(tq.get_projects_tool_breakdown(proj_search))
+    proj_rows = list(tq.get_projects_tool_breakdown(proj_search, client))
     proj_paged, proj_pg = paginate(proj_rows, proj_page, per_page)
 
-    summary = tq.get_tools_overall_summary()
+    summary = tq.get_tools_overall_summary(client)
 
     return {
         "active":  "tools",
+        "client_filter": client or "all",
         "summary": dict(summary),
         "dr": dr, "d_from": d_from, "d_to": d_to,
         "chart_labels":     [r["tool_name"]            for r in chart_rows],
@@ -88,7 +90,7 @@ def get_session_tool_context(session_id: str) -> dict | None:
     token_totals = dict(tq.get_session_tool_token_totals(session_id) or
                         {"input_tokens":0,"output_tokens":0,
                          "cache_read_tokens":0,"cache_creation_tokens":0})
-    total_tool_tokens = sum(token_totals.values())
+    total_tool_tokens = sum(v or 0 for v in token_totals.values())
 
     tool_rows = list(tq.get_session_tools_breakdown(session_id))
     raw_count = stats["total_calls"] or 1
@@ -146,8 +148,8 @@ def get_project_tool_context(project_id: str) -> dict | None:
     for row in tool_rows:
         d = dict(row)
         d["call_pct"]     = round(d["call_count"] / raw_count * 100)
-        d["total_tokens"] = (d["input_tokens"] + d["output_tokens"] +
-                             d["cache_read_tokens"] + d["cache_creation_tokens"])
+        d["total_tokens"] = ((d["input_tokens"] or 0) + (d["output_tokens"] or 0) +
+                             (d["cache_read_tokens"] or 0) + (d["cache_creation_tokens"] or 0))
         tool_rows_enriched.append(d)
 
     proj_stats = {
@@ -162,7 +164,7 @@ def get_project_tool_context(project_id: str) -> dict | None:
         "project":           dict(project),
         "stats":             proj_stats,
         "token_totals":      token_totals,
-        "total_tool_tokens": sum(token_totals.values()),
+        "total_tool_tokens": sum(v or 0 for v in token_totals.values()),
         "tool_rows":         tool_rows_enriched,
         "session_rows":      session_rows,
         "chart_labels":     [r["tool_name"]            for r in tool_rows_enriched],

@@ -190,6 +190,71 @@ body {
 }
 .breadcrumb span { color: var(--text); font-weight: 700; }
 
+/* ── Sidebar data-source switcher (client filter) ──
+   Lives under the sidebar logo, not the topbar - this is a persistent scope
+   selector (which plugin's data you're looking at), not a page-level action,
+   so it belongs alongside nav, not next to the theme toggle. ── */
+/* Lives in the topbar's left slot (.page-info), inline alongside the label -
+   a horizontal row, not the stacked block a sidebar placement would use. */
+.client-scope {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.client-scope-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    white-space: nowrap;
+}
+
+.client-scope-options {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: nowrap;
+}
+
+.scope-opt {
+    cursor: pointer;
+    border: none;
+    font-family: inherit;
+    opacity: 0.4;
+    transform: scale(0.96);
+    transition: opacity 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.scope-opt:hover { opacity: 0.75; }
+
+.scope-opt.active {
+    opacity: 1;
+    transform: scale(1);
+    box-shadow: 0 0 0 2px var(--bg-surface), 0 0 0 4px var(--accent-glow);
+}
+
+/* The "All" option isn't a brand - neutral pill matching the chips' shape/size */
+.scope-opt.scope-opt-all {
+    padding: 4px 12px;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: 'Inter', sans-serif;
+    border-radius: 6px;
+    background: var(--bg-alt);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+}
+
+.scope-opt.scope-opt-all.active {
+    background: var(--text);
+    color: var(--bg);
+    border-color: var(--text);
+    box-shadow: 0 0 0 2px var(--bg-surface), 0 0 0 4px rgba(128, 128, 128, 0.25);
+}
+
 /* ── Industrial Theme Slider ── */
 .theme-slider {
     background: var(--bg-alt);
@@ -381,6 +446,50 @@ tr:hover td { background: var(--bg-alt); }
     background: var(--bg-alt);
     color: var(--text-muted);
     border: 1px solid var(--border);
+}
+
+/* ── Client badge — which plugin (Claude Code / Cursor / future) produced
+   this session. Rendered as a solid rounded-rect wordmark chip matching each
+   product's own brand look, not the app's usual outlined/translucent pills -
+   deliberately theme-invariant (no dark/light overrides) since a brand mark
+   should look the same regardless of surrounding UI theme.
+   New clients only need a new .client-badge.<client> color variant here,
+   driven by the CLIENT_META lookup in base/_macros.html. ── */
+.client-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 12px;
+    font-family: 'Inter', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 1.4;
+    border-radius: 7px;
+    border: none;
+    white-space: nowrap;
+}
+.client-badge.compact {
+    padding: 2px 9px;
+    font-size: 9px;
+    border-radius: 5px;
+}
+/* Claude — warm terracotta chip, white wordmark */
+.client-badge.claude_code { background: #CC785C; color: #ffffff; }
+/* Cursor — near-black chip, silver wordmark, same monochrome vibe as its logo.
+   Needs its own subtle border: the app's dark theme surface color (#1a1a1a)
+   is close enough to this chip's near-black fill (#0A0A0A) that without an
+   edge, the chip nearly disappears against a dark card/sidebar background. */
+.client-badge.cursor      { background: #0A0A0A; color: #C9C9C9; border: 1px solid rgba(255, 255, 255, 0.14); }
+
+/* ── "Not tracked" indicator — for data a client legitimately never reports
+   (e.g. Cursor's missing per-tool-call token usage), distinct from a
+   genuine zero. Always paired with a title attribute for the full reason. ── */
+.not-tracked {
+    font-style: italic;
+    font-size: 10px;
+    color: var(--text-dim);
+    white-space: nowrap;
 }
 
 /* ── Search ── */

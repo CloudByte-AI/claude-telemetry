@@ -43,7 +43,7 @@
 <div class="pagination">
     <span class="pg-info">showing {{ ((sess_pg.page-1)*sess_pg.per_page)+1 }}–{{ [sess_pg.page*sess_pg.per_page, sess_pg.total]|min }} of {{ sess_pg.total }}</span>
     <div class="pg-btns">
-        {% set base = '/tokens?dr='~dr~'&date_from='~date_from~'&date_to='~date_to~'&sess_search='~sess_search~'&proj_search='~proj_search %}
+        {% set base = '/tokens?dr='~dr~'&date_from='~date_from~'&date_to='~date_to~'&sess_search='~sess_search~'&proj_search='~proj_search~'&client='~client_filter %}
         <a href="{{ base }}&sess_page={{ sess_pg.page-1 }}" class="pg-btn {% if sess_pg.page<=1 %}disabled{% endif %}">← prev</a>
         {% if sess_pg.pg_start > 1 %}<a href="{{ base }}&sess_page=1" class="pg-btn">1</a>{% if sess_pg.pg_start > 2 %}<span class="pg-dots">…</span>{% endif %}{% endif %}
         {% for pn in sess_pg.page_nums %}<a href="{{ base }}&sess_page={{ pn }}" class="pg-btn {% if pn==sess_pg.page %}active{% endif %}">{{ pn }}</a>{% endfor %}

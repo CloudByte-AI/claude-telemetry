@@ -1,0 +1,16 @@
+{% macro not_tracked(reason='Not tracked for this session') %}<span class="not-tracked" title="{{ reason }}">not tracked</span>{% endmacro %}
+
+{# Client badge: one dict entry per plugin. Add a future third plugin here only — never edit callers.
+   Rendered as a branded rounded-rect chip matching each product's own look
+   (black/silver for Cursor, orange/white for Claude) - see .client-badge in base.css.
+   `short` is the on-chip wordmark text; both are short enough to show in full
+   everywhere, so `compact` only changes chip size, not which text is shown. #}
+{% set CLIENT_META = {
+    'claude_code': {'label': 'Claude Code', 'short': 'Claude'},
+    'cursor':      {'label': 'Cursor',      'short': 'Cursor'},
+} %}
+{% macro client_badge(client, compact=false) %}
+{%- set c = client or 'claude_code' -%}
+{%- set meta = CLIENT_META.get(c, {'label': c, 'short': c}) -%}
+<span class="client-badge {{ c }}{{ ' compact' if compact }}" title="{{ meta.label }}">{{ meta.short }}</span>
+{%- endmacro %}

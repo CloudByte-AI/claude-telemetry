@@ -8,6 +8,6 @@ router = APIRouter()
 
 
 @router.get("/projects", response_class=HTMLResponse)
-def projects(request: Request):
-    ctx = svc.get_projects_context()
+def projects(request: Request, client: str = "all"):
+    ctx = svc.get_projects_context(client)
     return templates.TemplateResponse(request=request, name="projects/projects.html", context=ctx)

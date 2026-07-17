@@ -16,7 +16,8 @@ from typing import Optional
 CLOUDBYTE_DIR = ".cloudbyte"
 DATA_SUBDIR = "data"
 LOGS_SUBDIR = "logs"
-DB_FILENAME = "cloudbyte.db"
+SECURITY_SUBDIR = "security"
+DB_FILENAME = "cloudbyte-cursor-test.db"
 
 
 def get_home_dir() -> Path:
@@ -60,6 +61,24 @@ def get_logs_dir() -> Path:
         Path: The logs directory path
     """
     return get_cloudbyte_dir() / LOGS_SUBDIR
+
+
+def get_security_dir() -> Path:
+    """
+    Get the directory for security scanning config, shared by both plugins.
+    Typically: C:\\Users\\<username>\\.cloudbyte\\security
+
+    Unlike get_claude_logs_dir()/get_cursor_logs_dir(), this is NOT split per
+    client - the security profile is one shared config governing both
+    plugins' scanning behavior, by design. This just gives it its own
+    subdirectory instead of sitting loose at the .cloudbyte root, matching
+    the data/ and logs/ organizational convention.
+
+    Returns:
+        Path: The security config directory (not guaranteed to exist yet -
+        callers that write into it should mkdir(parents=True, exist_ok=True)).
+    """
+    return get_cloudbyte_dir() / SECURITY_SUBDIR
 
 
 def get_claude_logs_dir() -> Path:

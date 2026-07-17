@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+{% from "base/_macros.html" import client_badge %}
 <html lang="en" data-theme="dark">
 
 <head>
@@ -71,7 +72,7 @@
                     <div class="nav-label">Memory</div>
                     <a href="/observations" class="nav-link {% if '/observations' in request.path %}active{% endif %}">
                         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M2 3h6a4 4v14a3 3 0 0 0-3-3H2z" />
+                            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
                             <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
                         </svg>
                         Observations
@@ -110,14 +111,28 @@
             </nav>
 
             <div class="sidebar-footer"
-                style="padding: 20px; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between;">
-                <div class="mono" style="font-size: 10px; font-weight: 700; color: var(--accent);">v0.1.36</div>
-                <div style="display: flex; align-items: center; gap: 6px;">
-                    <button id="update-btn" onclick="applyUpdate()"
-                        style="display:none; font-size:9px; font-weight:700; color: var(--bg); background: var(--accent); border: none; border-radius: 4px; padding: 3px 7px; cursor: pointer; letter-spacing: 0.05em;"></button>
-                    <div
-                        style="width: 6px; height: 6px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 8px var(--accent);">
+                style="padding: 14px 20px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px;">
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                    <span class="client-scope-label">Plugin Version</span>
+                    <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
+                        <button id="update-btn" onclick="applyUpdate()"
+                            style="display:none; font-size:9px; font-weight:700; color: var(--bg); background: var(--accent); border: none; border-radius: 4px; padding: 3px 7px; cursor: pointer; letter-spacing: 0.05em;"></button>
+                        <div
+                            style="width: 6px; height: 6px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 8px var(--accent);">
+                        </div>
                     </div>
+                </div>
+                {% set plugin_versions = get_active_plugin_versions() %}
+                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; row-gap: 6px;">
+                    {% for pv in plugin_versions %}
+                    <div style="display: flex; align-items: center; gap: 4px;"
+                        title="{{ 'Claude Code' if pv.client == 'claude_code' else 'Cursor' }} plugin (claude-telemetry) version — not the {{ 'Claude Code CLI' if pv.client == 'claude_code' else 'Cursor IDE' }}'s own version">
+                        {{ client_badge(pv.client, compact=true) }}
+                        <span class="mono" style="font-size: 10px; font-weight: 700; color: var(--accent);">v{{ pv.version }}</span>
+                    </div>
+                    {% else %}
+                    <div class="mono" style="font-size: 10px; font-weight: 700; color: var(--accent);">v0.1.36</div>
+                    {% endfor %}
                 </div>
             </div>
         </aside>
@@ -125,6 +140,18 @@
         <div class="main">
             <header class="topbar">
                 <div class="page-info">
+                    {% set current_client = request.query_params.get('client', 'all') %}
+                    <div class="client-scope">
+                        <div class="client-scope-label">Data Source</div>
+                        <div class="client-scope-options">
+                            <button type="button" class="scope-opt scope-opt-all {% if current_client == 'all' %}active{% endif %}"
+                                onclick="setClientFilter('all')" title="Show both Claude Code and Cursor data">All</button>
+                            <button type="button" class="scope-opt client-badge claude_code {% if current_client == 'claude_code' %}active{% endif %}"
+                                onclick="setClientFilter('claude_code')" title="Claude Code only">Claude</button>
+                            <button type="button" class="scope-opt client-badge cursor {% if current_client == 'cursor' %}active{% endif %}"
+                                onclick="setClientFilter('cursor')" title="Cursor only">Cursor</button>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="topbar-actions">
@@ -164,6 +191,58 @@
             const next = curr === 'dark' ? 'light' : 'dark';
             setTheme(next);
         }
+
+        var CB_CLIENT_KEY = 'cb_client_filter';
+
+        function setClientFilter(value) {
+            localStorage.setItem(CB_CLIENT_KEY, value);
+            const url = new URL(window.location.href);
+            if (value === 'all') {
+                url.searchParams.delete('client');
+            } else {
+                url.searchParams.set('client', value);
+            }
+            // Result set changes with the filter - start back at page 1.
+            url.searchParams.delete('page');
+            url.searchParams.delete('tool_page');
+            url.searchParams.delete('sess_page');
+            url.searchParams.delete('proj_page');
+            window.location.href = url.toString();
+        }
+
+        // Keep the selected data source across plain nav-link clicks (sidebar,
+        // "view session" buttons, etc.) instead of it silently resetting to
+        // "all" on every page that doesn't already carry ?client= itself.
+        // Pagination/search links on filterable pages already thread the
+        // filter through server-side - this only fills the gap for links
+        // that don't know about it at all.
+        (function () {
+            const urlClient = new URL(window.location.href).searchParams.get('client');
+            if (urlClient) {
+                // An explicit ?client= on this page (a real filter choice, or a
+                // shared/bookmarked link) is the new source of truth going forward.
+                localStorage.setItem(CB_CLIENT_KEY, urlClient);
+            }
+
+            // Capture phase so this runs before htmx's own click handling reads href.
+            document.addEventListener('click', function (e) {
+                const link = e.target.closest('a[href]');
+                if (!link || link.target === '_blank') return;
+
+                const href = link.getAttribute('href');
+                // Only same-origin, path-relative links (skip "//host/...", "http...", "#...", "mailto:...").
+                if (!href || href.charAt(0) !== '/' || href.charAt(1) === '/') return;
+
+                const remembered = localStorage.getItem(CB_CLIENT_KEY);
+                if (!remembered || remembered === 'all') return;
+
+                const url = new URL(href, window.location.origin);
+                if (!url.searchParams.has('client')) {
+                    url.searchParams.set('client', remembered);
+                    link.setAttribute('href', url.pathname + url.search + url.hash);
+                }
+            }, true);
+        })();
     </script>
     {% block scripts %}{% endblock %}
 </body>

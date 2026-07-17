@@ -83,7 +83,7 @@ def setup() -> None:
                 },
                 "worker": {
                     "enabled": True,
-                    "port": 8765,
+                    "port": 4723,
                     "timeout": 120,
                     "shutdown_idle_seconds": 60,
                     "max_shutdown_wait_seconds": 300,
@@ -598,7 +598,7 @@ def stop() -> None:
                                     f" in Claude's response ({_summary})."
                                     f" Event logged to telemetry."
                                     f" To suppress known-safe or test values, manage your allowlist at"
-                                    f" http://localhost:8765/security"
+                                    f" http://localhost:4723/security"
                                 )
                             }))
         except Exception as _sec_err:

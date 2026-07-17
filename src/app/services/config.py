@@ -71,7 +71,7 @@ def update_config(form: dict) -> tuple[bool, str]:
         # ── Worker port ───────────────────────────────────────────────────────
         new_port = form.get("worker_port", "").strip()
         if new_port:
-            cfg["worker"]["port"] = _int(new_port, cfg["worker"].get("port", 8765))
+            cfg["worker"]["port"] = _int(new_port, cfg["worker"].get("port", 4723))
 
         save_config(cfg)
 

@@ -1,4 +1,5 @@
 {% extends "base/index.html" %}
+{% from "base/_macros.html" import client_badge %}
 {% block title %}Session {{ session.session_id[:8] }} — CloudByte{% endblock %}
 {% block breadcrumb %}sessions / {{ session.session_id[:8] }}…{% endblock %}
 
@@ -125,6 +126,7 @@
 
             <!-- Token panel -->
             <div class="token-panel-inline">
+                {% if turn.tokens %}
                 <div class="tp-grid">
                     <div class="tp-cell">
                         <div class="tp-label">Input</div>
@@ -143,11 +145,14 @@
                         <div class="tp-val purple-text">{{ "{:,}".format(turn.tokens.cache_read_tokens or 0) }}</div>
                     </div>
                 </div>
+                {% else %}
+                <div class="no-data" style="padding:12px;">No token data for this turn.</div>
+                {% endif %}
             </div>
         </div>
         {% else %}
         <div class="empty-card card">
-            <div class="empty">No conversation turns recorded.</div>
+            <div class="no-data">No conversation turns recorded.</div>
         </div>
         {% endfor %}
     </div>
@@ -164,6 +169,10 @@
             </div>
             <div class="card-body">
                 <div class="detail-row">
+                    <span class="detail-label">Client</span>
+                    <span class="detail-val">{{ client_badge(session.client, compact=true) }}</span>
+                </div>
+                <div class="detail-row">
                     <span class="detail-label">Project</span>
                     <span class="detail-val accent-text" style="color:#fe4c02;">{{ proj_display }}</span>
                 </div>
@@ -171,10 +180,29 @@
                     <span class="detail-label">Started</span>
                     <span class="detail-val mono dimmer">{{ session.created_at[:16].replace('T',' ') }}</span>
                 </div>
+                {% if session.ended_at %}
+                <div class="detail-row">
+                    <span class="detail-label">Ended</span>
+                    <span class="detail-val mono dimmer">{{ session.ended_at[:16].replace('T',' ') }}</span>
+                </div>
+                {% if session.duration_display %}
+                <div class="detail-row">
+                    <span class="detail-label">Duration</span>
+                    <span class="detail-val mono">{{ session.duration_display }}</span>
+                </div>
+                {% endif %}
+                {% if session.end_reason %}
+                <div class="detail-row">
+                    <span class="detail-label">End Reason</span>
+                    <span class="detail-val mono dimmer" style="font-size:10px;">{{ session.end_reason }}</span>
+                </div>
+                {% endif %}
+                {% endif %}
                 <div class="detail-row" style="align-items:flex-start;">
                     <span class="detail-label" style="padding-top:2px;">Directory</span>
                     <span class="detail-val mono dimmer" style="font-size:10px; word-break:break-all; overflow-wrap:break-word; text-align:right;">{{ session.cwd }}</span>
                 </div>
+                {% if not session.client or session.client == 'claude_code' %}
                 <div class="divider"></div>
                 <div class="detail-row" style="flex-direction: column; align-items: flex-start; gap: 10px; border-bottom: 1px solid var(--border); padding: 16px 0;">
                     <span class="detail-label">Resume Session</span>
@@ -182,7 +210,7 @@
                         <div class="mono resume-cmd" style="font-size: 10px; background: var(--bg-alt); padding: 10px 12px; border: 1px solid var(--border); flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); border-radius: 2px; user-select: all; cursor: text;">
                             claude --resume {{ session.session_id }}
                         </div>
-                        <button class="btn btn-ghost copy-btn" onclick="copyResumeCommand('{{ session.session_id }}', this)" 
+                        <button class="btn btn-ghost copy-btn" onclick="copyResumeCommand('{{ session.session_id }}', this)"
                                 style="padding: 10px; height: 34px; width: 34px; display: flex; align-items: center; justify-content: center; background: var(--bg-alt); border: 1px solid var(--border); border-radius: 2px;"
                                 title="Copy resume command">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:14px; height:14px;">
@@ -192,6 +220,7 @@
                         </button>
                     </div>
                 </div>
+                {% endif %}
                 <div class="divider"></div>
                 <div class="detail-row">
                     <span class="detail-label">Total Turns</span>

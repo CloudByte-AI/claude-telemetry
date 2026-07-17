@@ -9,6 +9,7 @@
     var heatData = JSON.parse(dd.getAttribute('data-heat'));
     var heatMax = parseInt(dd.getAttribute('data-heat-max')) || 1;
     var heatMonths = JSON.parse(dd.getAttribute('data-heat-months'));
+    var heatByClient = JSON.parse(dd.getAttribute('data-heat-by-client') || '{}');
 
     /* Intercom Chart Defaults */
     Chart.defaults.font.family = "'Inter', sans-serif";
@@ -41,7 +42,10 @@
 
     var todayStr = dateKey(today);
 
-    /* Fin Orange heatmap palette */
+    /* Fin Orange heatmap palette — one color regardless of client. The
+       per-client breakdown is still shown in the tooltip (see ghTipShow),
+       just not as a tile color split - keeps the heatmap reading as one
+       consistent "activity" signal rather than a client-comparison chart. */
     function ghColor(count) {
         if (!count) return 'var(--bg-alt)';
         var t = Math.max(0.15, Math.min(1.0, count / heatMax));
@@ -132,6 +136,7 @@
                 var inYear = (date.getFullYear() === year);
                 var key = dateKey(date);
                 var count = heatData[key] || 0;
+                var breakdown = heatByClient[key] || {};
                 var bg = inYear ? ghColor(count) : 'transparent';
                 var border = (key === todayStr) ? '1px solid var(--accent)' : '1px solid transparent';
                 var cur = inYear ? 'pointer' : 'default';
@@ -139,6 +144,7 @@
                 gHtml += '<div style="width:' + CELL + 'px;height:' + CELL + 'px;'
                     + 'border-radius:2px;background:' + bg + ';border:' + border + ';cursor:' + cur + ';"'
                     + (inYear ? ' data-date="' + key + '" data-count="' + count + '"'
+                        + ' data-cc="' + (breakdown['claude_code'] || 0) + '" data-cursor="' + (breakdown['cursor'] || 0) + '"'
                         + ' onmouseenter="ghTipShow(this,event)" onmouseleave="ghTipHide()"' : '')
                     + '></div>';
             }
@@ -196,8 +202,14 @@
         var tDate = document.getElementById('tt-date');
         var tVal = document.getElementById('tt-val');
         var count = parseInt(el.getAttribute('data-count')) || 0;
+        var cc = parseInt(el.getAttribute('data-cc')) || 0;
+        var cursorN = parseInt(el.getAttribute('data-cursor')) || 0;
         tDate.textContent = el.getAttribute('data-date');
-        tVal.textContent = count ? count + ' prompt' + (count !== 1 ? 's' : '') : 'no activity';
+        var label = count ? count + ' prompt' + (count !== 1 ? 's' : '') : 'no activity';
+        if (count && cc > 0 && cursorN > 0) {
+            label += ' (Claude Code ' + cc + ', Cursor ' + cursorN + ')';
+        }
+        tVal.textContent = label;
         tt.style.display = 'block';
         tt.style.left = (ev.clientX + 14) + 'px';
         tt.style.top = (ev.clientY - 36) + 'px';
@@ -247,8 +259,17 @@
                     callbacks: {
                         label: function (ctx) {
                             var raw = ctx.dataset.raw;
-                            if (raw) return ' ' + ctx.dataset.label + ' — ' + labels[ctx.dataIndex] + ': ' + raw[ctx.dataIndex];
-                            return ' ' + ctx.dataset.label + ': ' + ctx.parsed.r;
+                            if (!raw) return ' ' + ctx.dataset.label + ': ' + ctx.parsed.r;
+                            var text = ' ' + ctx.dataset.label + ' — ' + labels[ctx.dataIndex] + ': ' + raw[ctx.dataIndex];
+                            var byClient = ctx.dataset.rawByClient && ctx.dataset.rawByClient[ctx.dataIndex];
+                            if (byClient) {
+                                var cc = byClient['claude_code'] || 0;
+                                var cur = byClient['cursor'] || 0;
+                                if (cc > 0 && cur > 0) {
+                                    text += ' (Claude Code ' + cc + ', Cursor ' + cur + ')';
+                                }
+                            }
+                            return text;
                         }
                     }
                 }

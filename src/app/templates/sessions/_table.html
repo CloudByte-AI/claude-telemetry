@@ -1,8 +1,10 @@
+{% from "base/_macros.html" import client_badge %}
 <div class="table-wrap">
     <table>
         <thead>
             <tr>
                 <th>Session ID</th>
+                <th>Client</th>
                 <th>Project</th>
                 <th>Working Dir</th>
                 <th>Prompts</th>
@@ -19,6 +21,7 @@
                 <td style="white-space:nowrap;">
                     <span class="mono accent-text" style="font-size:11px;">{{ s.session_id[:12] }}…</span>
                 </td>
+                <td style="white-space:nowrap;">{{ client_badge(s.client, compact=true) }}</td>
                 <td style="max-width:160px;">
                     <div style="font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:155px;"
                          title="{{ s.cwd or '' }}">{{ last_dir }}</div>
@@ -40,8 +43,8 @@
             </tr>
             {% else %}
             <tr>
-                <td colspan="7">
-                    <div class="empty">
+                <td colspan="8">
+                    <div class="no-data">
                         {% if search %}no sessions matching "{{ search }}"{% else %}no sessions found{% endif %}
                     </div>
                 </td>
@@ -57,21 +60,21 @@
         showing {{ ((page-1)*per_page)+1 }}–{{ [page*per_page, total_records]|min }} of {{ total_records }}
     </span>
     <div class="pg-btns">
-        <a href="/sessions?search={{ search }}&project={{ project_id or '' }}&page={{ page-1 }}&per_page={{ per_page }}"
+        <a href="/sessions?search={{ search }}&project={{ project_id or '' }}&page={{ page-1 }}&per_page={{ per_page }}&client={{ client_filter }}"
            class="pg-btn {% if page <= 1 %}disabled{% endif %}">← prev</a>
         {% if pg_start > 1 %}
-            <a href="/sessions?search={{ search }}&project={{ project_id or '' }}&page=1&per_page={{ per_page }}" class="pg-btn">1</a>
+            <a href="/sessions?search={{ search }}&project={{ project_id or '' }}&page=1&per_page={{ per_page }}&client={{ client_filter }}" class="pg-btn">1</a>
             {% if pg_start > 2 %}<span class="pg-dots">…</span>{% endif %}
         {% endif %}
         {% for pn in page_nums %}
-        <a href="/sessions?search={{ search }}&project={{ project_id or '' }}&page={{ pn }}&per_page={{ per_page }}"
+        <a href="/sessions?search={{ search }}&project={{ project_id or '' }}&page={{ pn }}&per_page={{ per_page }}&client={{ client_filter }}"
            class="pg-btn {% if pn == page %}active{% endif %}">{{ pn }}</a>
         {% endfor %}
         {% if pg_end < total_pages %}
             {% if pg_end < total_pages - 1 %}<span class="pg-dots">…</span>{% endif %}
-            <a href="/sessions?search={{ search }}&project={{ project_id or '' }}&page={{ total_pages }}&per_page={{ per_page }}" class="pg-btn">{{ total_pages }}</a>
+            <a href="/sessions?search={{ search }}&project={{ project_id or '' }}&page={{ total_pages }}&per_page={{ per_page }}&client={{ client_filter }}" class="pg-btn">{{ total_pages }}</a>
         {% endif %}
-        <a href="/sessions?search={{ search }}&project={{ project_id or '' }}&page={{ page+1 }}&per_page={{ per_page }}"
+        <a href="/sessions?search={{ search }}&project={{ project_id or '' }}&page={{ page+1 }}&per_page={{ per_page }}&client={{ client_filter }}"
            class="pg-btn {% if page >= total_pages %}disabled{% endif %}">next →</a>
     </div>
 </div>

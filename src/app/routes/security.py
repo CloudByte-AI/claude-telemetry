@@ -43,6 +43,7 @@ def security_events(
     target: str = "",
     blocked: str = "",
     page: int = 1,
+    client: str = "all",
 ):
     try:
         ctx = svc.get_events_context(
@@ -50,6 +51,7 @@ def security_events(
             scan_target=target or None,
             blocked_only=(blocked == "1"),
             page=page,
+            client=client,
         )
         return templates.TemplateResponse(request=request, name="security/events.html", context=ctx)
     except Exception:

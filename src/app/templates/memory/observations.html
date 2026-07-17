@@ -96,6 +96,7 @@
                        hx-get="/observations"
                        hx-trigger="keyup changed delay:400ms"
                        hx-target="#obs-content"
+                       hx-vals='{"client": "{{ client_filter }}"}'
                        name="search">
             </div>
 
@@ -145,7 +146,8 @@ function applyFilters() {
     window.location.href = '/observations?search=' + encodeURIComponent(s)
         + '&type_filter=' + encodeURIComponent(tf)
         + '&date_from=' + encodeURIComponent(df)
-        + '&date_to='   + encodeURIComponent(dt);
+        + '&date_to='   + encodeURIComponent(dt)
+        + '&client='    + encodeURIComponent('{{ client_filter }}');
 }
 
 function clearDates() {

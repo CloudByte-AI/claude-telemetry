@@ -44,10 +44,10 @@
         <div style="display: flex; align-items: center; gap: 16px;">
             <span class="filter-label">Range</span>
             <div class="dr-pills">
-                <a href="/tools?dr=all" class="dr-pill {% if dr == 'all' %}active{% endif %}">All</a>
-                <a href="/tools?dr=today" class="dr-pill {% if dr == 'today' %}active{% endif %}">Today</a>
-                <a href="/tools?dr=7days" class="dr-pill {% if dr == '7days' %}active{% endif %}">7D</a>
-                <a href="/tools?dr=30days" class="dr-pill {% if dr == '30days' %}active{% endif %}">30D</a>
+                <a href="/tools?dr=all&client={{ client_filter }}" class="dr-pill {% if dr == 'all' %}active{% endif %}">All</a>
+                <a href="/tools?dr=today&client={{ client_filter }}" class="dr-pill {% if dr == 'today' %}active{% endif %}">Today</a>
+                <a href="/tools?dr=7days&client={{ client_filter }}" class="dr-pill {% if dr == '7days' %}active{% endif %}">7D</a>
+                <a href="/tools?dr=30days&client={{ client_filter }}" class="dr-pill {% if dr == '30days' %}active{% endif %}">30D</a>
             </div>
         </div>
         <div class="dimmer mono" style="font-size: 10px;">Filters apply to charts above</div>
@@ -115,7 +115,8 @@
                 </svg>
                 <input type="text" id="tool-search" name="tool_search" class="search-input" value="{{ tool_search }}"
                        placeholder="Filter tools..."
-                       hx-get="/tools" hx-target="#tool-table-wrap" hx-trigger="keyup changed delay:400ms">
+                       hx-get="/tools" hx-target="#tool-table-wrap" hx-trigger="keyup changed delay:400ms"
+                       hx-vals='{"client": "{{ client_filter }}"}'>
             </div>
         </div>
         <div id="tool-table-wrap">

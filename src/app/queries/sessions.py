@@ -1,9 +1,9 @@
 """All SQL queries related to sessions, prompts, responses, observations."""
 
-from ..routers.db import q, build_tool_list
+from ..routers.db import q, build_tool_list, client_where
 
 
-def get_sessions_list(search: str = "", project_id: str = None):
+def get_sessions_list(search: str = "", project_id: str = None, client: str = None):
     search_filter = ""
     project_filter = ""
     params: tuple = ()
@@ -17,8 +17,11 @@ def get_sessions_list(search: str = "", project_id: str = None):
         project_filter = "AND s.project_id = ?"
         params = params + (project_id,) if params else (project_id,)
 
+    client_filter, client_params = client_where(client, "s")
+    params = params + client_params
+
     return q(f"""
-        SELECT s.session_id, s.cwd, s.created_at,
+        SELECT s.session_id, s.cwd, s.created_at, s.client,
                p.name                       AS project_name,
                COALESCE(pc.prompt_count, 0) AS prompt_count,
                COALESCE(tc.tool_count,   0) AS tool_count
@@ -35,7 +38,7 @@ def get_sessions_list(search: str = "", project_id: str = None):
             JOIN USER_PROMPT up ON up.prompt_id = t.prompt_id
             GROUP BY up.session_id
         ) tc ON tc.session_id = s.session_id
-        WHERE 1=1 {search_filter} {project_filter}
+        WHERE 1=1 {search_filter} {project_filter} {client_filter}
         ORDER BY s.created_at DESC
     """, params)
 
@@ -98,7 +101,7 @@ def get_all_observations():
 
 def get_conversation_prompt(prompt_id: str):
     return q("""
-        SELECT up.*, s.session_id, s.cwd, p.name AS project_name
+        SELECT up.*, s.session_id, s.cwd, s.client, p.name AS project_name
         FROM USER_PROMPT up
         JOIN SESSION s      ON s.session_id = up.session_id
         LEFT JOIN PROJECT p ON p.project_id = s.project_id
@@ -121,6 +124,19 @@ def get_prompt_observation(prompt_id: str):
         "SELECT id, type, title, subtitle FROM HOOK_OBSERVATION WHERE prompt_id = ? LIMIT 1",
         (prompt_id,), one=True
     )
+
+
+def get_task_counts_by_client():
+    """Pending/running TASK_QUEUE counts broken down by SESSION.client, for the worker status card."""
+    return q("""
+        SELECT s.client                                                AS client,
+               COUNT(CASE WHEN tq.status = 'pending' THEN 1 END)        AS pending,
+               COUNT(CASE WHEN tq.status = 'running' THEN 1 END)        AS running
+        FROM TASK_QUEUE tq
+        LEFT JOIN SESSION s ON s.session_id = tq.session_id
+        WHERE tq.status IN ('pending', 'running')
+        GROUP BY s.client
+    """)
 
 
 def get_session_task_queue_status(session_id: str):

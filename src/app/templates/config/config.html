@@ -1,4 +1,5 @@
 {% extends "base/index.html" %}
+{% from "base/_macros.html" import client_badge %}
 {% block title %}System Configuration — CloudByte{% endblock %}
 {% block breadcrumb %}system / configuration{% endblock %}
 
@@ -167,7 +168,7 @@
         <div style="display:flex; gap:32px; align-items:flex-start;">
             <div class="field-group" style="width: 240px;">
                 <label class="field-label">Worker Interface Port</label>
-                <input type="text" name="worker_port" class="field-input" value="{{ worker.port if worker.port is not none else '8765' }}">
+                <input type="text" name="worker_port" class="field-input" value="{{ worker.port if worker.port is not none else '4723' }}">
             </div>
             <div style="padding-top:34px;">
                 <div style="font-family:'IBM Plex Mono'; font-size:11px; color:var(--amber); font-weight:700;">⚠ SERVICE RESTART REQUIRED</div>
@@ -234,6 +235,18 @@
                     <span class="badge" style="color:var(--red); border-color:var(--red);">Exited</span>
                     {% endif %}
                 </div>
+
+                {% set by_client = worker_status.get('by_client', {}) if worker_status else {} %}
+                {% if by_client %}
+                <div style="display:flex; gap:16px; flex-wrap:wrap; margin-top:12px; padding-top:12px; border-top:1px solid var(--border);">
+                    {% for client, counts in by_client.items() %}
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        {{ client_badge(client, compact=true) }}
+                        <span class="mono dimmer" style="font-size:11px;">{{ counts.pending }} pending · {{ counts.running }} running</span>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
             </div>
 
             <!-- Worker Control Buttons -->

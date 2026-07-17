@@ -26,6 +26,7 @@ from src.integrations.llm.generators import (
     save_summary_to_db,
 )
 from src.integrations.llm.db_helpers import get_tool_calls, get_all_observations
+from ..queries.sessions import get_task_counts_by_client
 
 
 router = APIRouter(prefix="/worker", tags=["worker"])
@@ -80,6 +81,21 @@ class WorkerState:
         """Check if the worker thread is alive."""
         return self.worker_thread is not None and self.worker_thread.is_alive()
 
+    def _get_client_breakdown(self) -> dict:
+        """Pending/running task counts per SESSION.client, straight from TASK_QUEUE.
+
+        Best-effort diagnostic only, independent of the in-memory pending/running
+        counts above - falls back to empty on any DB error rather than breaking
+        worker status reporting.
+        """
+        try:
+            return {
+                (row["client"] or "claude_code"): {"pending": row["pending"], "running": row["running"]}
+                for row in get_task_counts_by_client()
+            }
+        except Exception:
+            return {}
+
     def get_status(self) -> dict:
         """Get current worker status."""
         if self.task_queue is None:
@@ -90,6 +106,7 @@ class WorkerState:
                 "shutdown_requested": False,
                 "thread_alive": self.is_thread_alive(),
                 "worker_exited": self.worker_exited,
+                "by_client": self._get_client_breakdown(),
             }
         return {
             "running": self.running,
@@ -98,6 +115,7 @@ class WorkerState:
             "shutdown_requested": self.shutdown_requested,
             "thread_alive": self.is_thread_alive(),
             "worker_exited": self.worker_exited,
+            "by_client": self._get_client_breakdown(),
         }
 
 
@@ -119,6 +137,7 @@ class StatusResponse(BaseModel):
     shutdown_requested: bool
     thread_alive: bool
     worker_exited: bool
+    by_client: dict = {}
 
 
 class QueueTaskRequest(BaseModel):
@@ -148,7 +167,7 @@ async def health_check():
     return HealthResponse(
         status="healthy",
         running=_worker_state.running,
-        port=8765,
+        port=4723,
     )
 
 
@@ -500,7 +519,7 @@ async def start_worker_processing():
         pid_file = get_cloudbyte_dir() / "worker.pid"
         pid_data = {
             "pid": os.getpid(),
-            "port": 8765,
+            "port": 4723,
             "start_time": time.time(),
             "type": "fastapi-integrated"
         }

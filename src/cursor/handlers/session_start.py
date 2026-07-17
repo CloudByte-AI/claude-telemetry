@@ -135,7 +135,7 @@ def handle_session_start() -> None:
             "client": "cursor",
         })
 
-        # Mark this session active so the shared worker/dashboard at :8765
+        # Mark this session active so the shared worker/dashboard at :4723
         # isn't torn down by a Claude Code session ending while this one
         # is still running - see src/common/session_registry.py.
         try:
@@ -146,7 +146,7 @@ def handle_session_start() -> None:
 
         # Bring up the shared worker/dashboard if it isn't already running -
         # previously only Claude's sessionStart did this, so a Cursor-only
-        # user could never reach localhost:8765 at all.
+        # user could never reach localhost:4723 at all.
         try:
             from src.workers.worker_checker import ensure_worker_quick_sync
             ensure_worker_quick_sync()

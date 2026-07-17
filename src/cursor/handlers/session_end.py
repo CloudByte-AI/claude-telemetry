@@ -61,7 +61,7 @@ def handle_session_end() -> None:
 
         obs_state.delete_session(session_id)
 
-        # Shut down the shared worker/dashboard at localhost:8765 - but only
+        # Shut down the shared worker/dashboard at localhost:4723 - but only
         # if no other session (another Cursor session, or a Claude Code
         # session) is still relying on it. See
         # src/common/session_registry.py and shutdown_worker_if_no_active_sessions().

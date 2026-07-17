@@ -1,4 +1,5 @@
 {% extends "base/index.html" %}
+{% from "base/_macros.html" import not_tracked %}
 {% block title %}Tool Analysis · {{ session.session_id[:8] }} — CloudByte{% endblock %}
 {% block breadcrumb %}tool calls / session {{ session.session_id[:8] }}…{% endblock %}
 
@@ -146,9 +147,9 @@
                                 <span class="mono dimmer" style="font-size:10px;">{{ row.call_pct }}%</span>
                             </div>
                         </td>
-                        <td class="mono" style="color:var(--text); font-weight:700;">{{ "{:,}".format(row.input_tokens or 0) }}</td>
-                        <td class="mono" style="color:#fe4c02; font-weight:600;">{{ "{:,}".format(row.output_tokens or 0) }}</td>
-                        <td class="mono" style="color:#ff8e5f; font-weight:500;">{{ "{:,}".format(row.cache_read_tokens or 0) }}</td>
+                        <td class="mono" style="color:var(--text); font-weight:700;">{% if row.input_tokens is none %}{{ not_tracked("Cursor doesn't report tool-level token usage") }}{% else %}{{ "{:,}".format(row.input_tokens) }}{% endif %}</td>
+                        <td class="mono" style="color:#fe4c02; font-weight:600;">{% if row.output_tokens is none %}{{ not_tracked("Cursor doesn't report tool-level token usage") }}{% else %}{{ "{:,}".format(row.output_tokens) }}{% endif %}</td>
+                        <td class="mono" style="color:#ff8e5f; font-weight:500;">{% if row.cache_read_tokens is none %}{{ not_tracked("Cursor doesn't report tool-level token usage") }}{% else %}{{ "{:,}".format(row.cache_read_tokens) }}{% endif %}</td>
                         <td style="text-align:right;">
                             {% if row.errors > 0 %}
                                 <span style="font-family:'IBM Plex Mono'; font-size:10px; font-weight:800; color:#ff4d4d; border:1px solid #ff4d4d; padding:2px 6px;">ERR {{ row.errors }}</span>
@@ -195,7 +196,8 @@
                         <td style="text-align:center;"><span class="mono dimmer">{{ row.unique_tools }}</span></td>
                         <td>
                             <span class="mono" style="color:var(--text); font-weight:600;">
-                                {% set v = row.turn_tokens %}{% if v >= 1000 %}{{ "%.1f"|format(v/1000) }}K{% else %}{{ v }}{% endif %}
+                                {% set v = row.turn_tokens %}
+                                {% if v is none %}{{ not_tracked("Cursor doesn't report tool-level token usage") }}{% elif v >= 1000 %}{{ "%.1f"|format(v/1000) }}K{% else %}{{ v }}{% endif %}
                             </span>
                         </td>
                         <td style="text-align:right;">

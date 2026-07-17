@@ -1,3 +1,4 @@
+{% from "base/_macros.html" import client_badge %}
 {% if observations %}
 <div class="obs-list" style="display:flex; flex-direction:column; gap:1px; background:var(--border); border:1px solid var(--border); border-top:0;">
     {% for obs in observations %}
@@ -21,11 +22,13 @@
             {% endif %}
             
             <!-- Context Bar -->
-            <div style="display:flex; align-items:center; gap:20px; background:var(--bg-alt); padding:8px 16px; border:1px solid var(--border); width:fit-content;">
+            <div style="display:flex; align-items:center; flex-wrap:wrap; row-gap:8px; column-gap:20px; background:var(--bg-alt); padding:8px 16px; border:1px solid var(--border); width:fit-content; max-width:100%;">
                 <div style="display:flex; align-items:center; gap:8px; white-space:nowrap;">
                     <span class="mono dimmer" style="font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:0.05em;">Context:</span>
                     <a href="/sessions/{{ obs.session_id }}" class="mono" style="text-decoration:none; font-weight:700; font-size:10px; color:#fe4c02;">{{ obs.session_id[:12] }}…</a>
                 </div>
+                <div style="width:1px; height:12px; background:var(--border);"></div>
+                {{ client_badge(obs.client, compact=true) }}
                 <div style="width:1px; height:12px; background:var(--border);"></div>
                 <div style="display:flex; align-items:center; gap:8px; white-space:nowrap; overflow:hidden;">
                     <span class="mono dimmer" style="font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:0.05em;">Project:</span>
@@ -52,7 +55,7 @@
 <div class="pagination">
     <span class="pg-info">Insights {{ ((pg.page-1)*pg.per_page)+1 }}–{{ [pg.page*pg.per_page, pg.total]|min }} of {{ pg.total }}</span>
     <div class="pg-btns">
-        {% set base = '/observations?search='~search~'&type_filter='~type_filter~'&date_from='~date_from~'&date_to='~date_to %}
+        {% set base = '/observations?search='~search~'&type_filter='~type_filter~'&date_from='~date_from~'&date_to='~date_to~'&client='~client_filter %}
         <a href="{{ base }}&page={{ pg.page-1 }}" class="pg-btn {% if pg.page<=1 %}disabled{% endif %}">← PREV</a>
         {% for pn in pg.page_nums %}<a href="{{ base }}&page={{ pn }}" class="pg-btn {% if pn==pg.page %}active{% endif %}">{{ pn }}</a>{% endfor %}
         <a href="{{ base }}&page={{ pg.page+1 }}" class="pg-btn {% if pg.page>=pg.pages %}disabled{% endif %}">NEXT →</a>

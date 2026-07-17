@@ -1,7 +1,7 @@
 """
 Security scanning configuration loader.
 
-Reads ~/.cloudbyte/security_profile.yaml on every invocation.
+Reads ~/.cloudbyte/security/security_profile.yaml on every invocation.
 Falls back to standard preset if the file is missing or malformed.
 
 Config format:
@@ -33,11 +33,12 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.common.logging import get_logger
+from src.common.paths import get_security_dir
 
 logger = get_logger(__name__)
 
 PROFILES_DIR    = Path(__file__).parent / "profiles"
-USER_CONFIG_PATH = Path.home() / ".cloudbyte" / "security_profile.yaml"
+USER_CONFIG_PATH = get_security_dir() / "security_profile.yaml"
 
 
 @dataclass

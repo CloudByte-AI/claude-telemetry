@@ -142,7 +142,7 @@ def handle_session_end():
 
         # Kill worker process - but only if no other session (this or another
         # Claude Code window, or a Cursor session) is still relying on the
-        # shared worker/dashboard at localhost:8765. See
+        # shared worker/dashboard at localhost:4723. See
         # src/common/session_registry.py and shutdown_worker_if_no_active_sessions().
         logger.info("🚀 Checking whether it's safe to shut down the shared worker...")
 

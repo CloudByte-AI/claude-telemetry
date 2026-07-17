@@ -1,6 +1,6 @@
 """Shared utility functions used across services."""
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 
 def resolve_dates(dr: str, date_from: str, date_to: str) -> tuple[str, str]:
@@ -48,3 +48,29 @@ def format_token_total(v: int) -> str:
     elif v >= 1_000:
         return f"{v/1_000:.1f}K"
     return str(v)
+
+
+def format_duration(started_at: str | None, ended_at: str | None) -> str | None:
+    """Human-readable session duration from ended_at - created_at.
+
+    Computed from timestamps rather than a client-reported duration_ms field
+    since a long-idle session (open for hours between prompts) would make a
+    raw hook-reported duration misleading.
+    """
+    if not started_at or not ended_at:
+        return None
+    try:
+        start = datetime.fromisoformat(started_at)
+        end   = datetime.fromisoformat(ended_at)
+    except ValueError:
+        return None
+    seconds = int((end - start).total_seconds())
+    if seconds < 0:
+        return None
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, seconds = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m {seconds}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes}m"
