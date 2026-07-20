@@ -1,0 +1,20 @@
+{
+  "name": "cursor-telemetry",
+  "owner": {
+    "name": "CloudByte-AI"
+  },
+  "metadata": {
+    "description": "Observability stack for Cursor - Prompt, Observability, Tokens."
+  },
+  "plugins": [
+    {
+      "name": "cursor-telemetry",
+      "source": ".",
+      "description": "Cursor Telemetry - Observability stack for Cursor - Prompt, Observability, Tokens.",
+      "version": "0.1.0",
+      "author": {
+        "name": "CloudByte-AI"
+      }
+    }
+  ]
+}
