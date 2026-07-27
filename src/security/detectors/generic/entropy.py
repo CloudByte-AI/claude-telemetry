@@ -25,6 +25,11 @@ the same character range - making entropy a true fallback.
 import math
 import re
 from src.security.detectors.base import BaseDetector, TokenDefinition
+from src.security.detectors.generic.value_filters import (
+    base64_decodes_to_text,
+    is_nonsecret_value,
+    looks_like_hash,
+)
 from src.security.registry import register_detector
 
 
@@ -138,15 +143,33 @@ class EntropyDetector(BaseDetector):
         return []
 
     def _post_filter(self, value: str, definition: TokenDefinition) -> bool:
-        """Apply per-mode entropy threshold; True = keep the finding."""
-        h = _shannon_entropy(value)
+        """
+        Value validation + per-mode entropy threshold; True = keep the finding.
+
+        Entropy is necessary but not sufficient - high character-diversity is
+        common in non-secrets (hashes, URLs, base64 text), so each mode first
+        rejects the shapes that entropy alone would misclassify:
+
+          context   - shares the keyword negative filters (placeholder / env-ref
+                      / stopword / URL-path shape).
+          bare hex  - rejects exact digest-length hex + UUIDs (checksums, shas).
+          bare b64  - rejects base64 that decodes to printable text (encoded
+                      sentences/JSON), plus hash/UUID shapes.
+        """
         if definition.label == "HIGH_ENTROPY_HEX":
+            if looks_like_hash(value):
+                return False
             threshold = _ENTROPY_THRESHOLD_HEX
         elif definition.label == "HIGH_ENTROPY_B64":
+            if looks_like_hash(value) or base64_decodes_to_text(value):
+                return False
             threshold = _ENTROPY_THRESHOLD_B64
-        else:
+        else:  # HIGH_ENTROPY_SECRET (context-anchored)
+            if is_nonsecret_value(value):
+                return False
             threshold = _ENTROPY_THRESHOLD_CONTEXT
-        return h >= threshold and len(value) >= _MIN_SECRET_LEN
+
+        return _shannon_entropy(value) >= threshold and len(value) >= _MIN_SECRET_LEN
 
 
 # Make entropy helper importable for scanner
