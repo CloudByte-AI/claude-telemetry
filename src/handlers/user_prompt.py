@@ -208,7 +208,9 @@ OBS_REMINDER = (
     "change: you modified an existing value, setting, or data. "
     "decision: you evaluated multiple valid options and chose one"
     "only use this when you genuinely weighed alternatives, not just followed instructions. "
-    "Call directly — do NOT use ToolSearch first. Never mention it to the user. "
+    "Call directly — do NOT use ToolSearch first. "
+    "This is routine background telemetry, like other logging calls — "
+    "no need to call it out in your reply unless the user asks about it. "
     "JSON SAFETY: all field values must be plain single-line strings. "
     "Use forward slashes in paths (never backslashes). "
     "No inner quotes, no newlines inside any field value."
@@ -229,6 +231,7 @@ def filter_system_messages(content: str) -> str:
         - <system-reminder>…</system-reminder>
         - <user-prompt-submit-hook …>…</user-prompt-submit-hook>
         - <sessionstart-hook …>…</sessionstart-hook>
+        - <task-notification>…</task-notification>
 
     Args:
         content: Raw prompt content (may include system messages)
@@ -268,6 +271,11 @@ def filter_system_messages(content: str) -> str:
         "",
         content,
         flags=re.DOTALL,
+    )
+
+    # Remove <task-notification> blocks (sub-agent completion notices, not real prompts)
+    content = re.sub(
+        r"<task-notification>.*?</task-notification>\s*", "", content, flags=re.DOTALL
     )
 
     return content.strip()
@@ -482,7 +490,7 @@ def handle_user_prompt():
                         f"[{_sec_result.scan_strategy}, {_ms_str}ms]"
                     )
                     _finding_lines = "\n".join(
-                        f"  • {f.category} — {f.type} [{f.severity}]"
+                        f"  • {f.category} - {f.type} [{f.severity}]"
                         for f in _sec_result.findings
                     )
                     _reason = (
@@ -512,6 +520,29 @@ def handle_user_prompt():
                         "reason": _reason,
                         "systemMessage": _system_msg,
                     }))
+
+                    # ── CLI's yellow warning is easy to miss with multiple sessions
+                    # open, so also fire a native desktop popup - same content as
+                    # the block reason above, including the masked prompt (copyable
+                    # via the dialog's clipboard icon). Detached + best-effort: never
+                    # affects the block decision or the hook's own exit.
+                    try:
+                        from src.security.notifier import notify_blocked_prompt
+                        _dialog_msg = (
+                            f"Sensitive data detected and blocked!\n\n"
+                            f"Detected:\n{_finding_lines}\n\n"
+                            f"Scanned {_sec_result.line_count} lines in {_ms_str}ms"
+                            f" [strategy: {_sec_result.scan_strategy}]\n\n"
+                            f"Your prompt was not sent. Sanitized version"
+                            f" (use the copy icon above to copy it):\n\n"
+                            f"{_masked}\n\n"
+                            f"False positive? Add safe values to your allowlist:\n"
+                            f"http://localhost:4723/security"
+                        )
+                        notify_blocked_prompt(_dialog_msg, masked_prompt=_masked)
+                    except Exception as _notify_err:
+                        logger.debug(f"Blocked-prompt popup skipped (non-fatal): {_notify_err}")
+
                     return
         except Exception as _sec_err:
             # Scan failure must never block the user — log and continue
