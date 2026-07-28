@@ -21,7 +21,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-DB_PATH = Path.home() / ".cloudbyte" / "data" / "cloudbyte-cursor-test.db"
+DB_PATH = Path.home() / ".cloudbyte" / "data" / "cloudbyte.db"
 
 # This repo ships both a Claude Code plugin manifest and a Cursor plugin manifest
 # side by side, since both plugins share one codebase - a full clone always has

@@ -17,7 +17,7 @@ CLOUDBYTE_DIR = ".cloudbyte"
 DATA_SUBDIR = "data"
 LOGS_SUBDIR = "logs"
 SECURITY_SUBDIR = "security"
-DB_FILENAME = "cloudbyte-cursor-test.db"
+DB_FILENAME = "cloudbyte.db"
 
 
 def get_home_dir() -> Path:
@@ -109,12 +109,15 @@ def get_db_path(db_name: Optional[str] = None) -> Path:
         Path: The full path to the database file
 
     Note:
+        Both plugins (Claude Code and Cursor) share this one database -
+        PROJECT/SESSION and friends are a single cross-IDE store, with
+        SESSION.client distinguishing which plugin produced each row.
+
         The CLOUDBYTE_DB_NAME environment variable, if set, always wins over
         both the db_name argument and the default - this is a local testing
-        escape hatch (e.g. point a hook at "cloudbyte-cursor-test" so test
-        writes don't land in the real cloudbyte.db) and isn't read anywhere
-        else in the codebase. Unset by default, so existing behavior is
-        unchanged unless someone opts in.
+        escape hatch (point a hook at a scratch DB so test writes don't land
+        in the real cloudbyte.db) and is not set anywhere in the codebase.
+        Unset by default, so the shared DB is what every caller gets.
     """
     db_name = os.environ.get("CLOUDBYTE_DB_NAME") or db_name or DB_FILENAME
 
