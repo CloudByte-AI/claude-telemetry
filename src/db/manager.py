@@ -105,8 +105,13 @@ class DatabaseManager:
 
     def ensure_schema_initialized(self) -> None:
         """
-        Ensure database tables are initialized.
-        Creates tables if they don't exist.
+        Ensure database tables exist and are on the current schema version.
+
+        This is the single choke point every hook process passes through on
+        its first get_connection() call (Claude Code and Cursor both go
+        through DatabaseManager) - so it's where migrate_schema() is
+        guaranteed to run at least once against an out-of-date DB, rather
+        than depending on which specific hook happens to fire first.
 
         Note: This method must be called explicitly after initialization
         to avoid circular import issues.
@@ -115,21 +120,38 @@ class DatabaseManager:
             return
 
         try:
-            from src.db.schema import DatabaseSchema
+            from src.db.schema import (
+                DatabaseSchema, create_tables, create_indexes,
+                migrate_schema, get_schema_version, set_schema_version,
+                CURRENT_SCHEMA_VERSION,
+            )
 
-            # Check if schema is already initialized
-            if DatabaseSchema.verify_schema(self._connection):
-                logger.debug("Database schema already initialized")
-                self._schema_checked = True
-                return
+            if not DatabaseSchema.verify_schema(self._connection):
+                logger.info("Database schema not found, initializing...")
+                create_tables(self._connection)
+                create_indexes(self._connection)
+                logger.info("Database schema initialized successfully")
 
-            # Initialize schema
-            logger.info("Database schema not found, initializing...")
-            from src.db.schema import create_tables, create_indexes
+            from_version = get_schema_version(self._connection)
+            if from_version < CURRENT_SCHEMA_VERSION:
+                logger.info(f"Database schema version {from_version} < {CURRENT_SCHEMA_VERSION}, migrating...")
+                _start = time.time()
+                changes = migrate_schema(self._connection)
+                create_indexes(self._connection)  # in case migration added indexed columns
+                set_schema_version(self._connection, CURRENT_SCHEMA_VERSION)
+                logger.info(f"Database schema migrated to version {CURRENT_SCHEMA_VERSION}")
 
-            create_tables(self._connection)
-            create_indexes(self._connection)
-            logger.info("Database schema initialized successfully")
+                from src.db.migration_log import append_migration_log
+                append_migration_log(
+                    db_path=self.db_path,
+                    from_version=from_version,
+                    to_version=CURRENT_SCHEMA_VERSION,
+                    changes=changes,
+                    duration_ms=(time.time() - _start) * 1000,
+                )
+            else:
+                logger.debug("Database schema already at current version")
+
             self._schema_checked = True
 
         except Exception as e:

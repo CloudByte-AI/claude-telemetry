@@ -572,11 +572,13 @@
 .er-list {
     border: 1px solid var(--border);
     margin-bottom: 16px;
+    overflow-x: auto;
 }
 
 .er-list-head {
     display: grid;
-    grid-template-columns: 88px 82px 1fr 50px 90px 68px 32px;
+    grid-template-columns: 88px 48px 82px minmax(120px, 1fr) 50px 90px 68px 32px;
+    column-gap: 12px;
     padding: 8px 16px;
     background: var(--bg-alt);
     border-bottom: 1px solid var(--border);
@@ -606,11 +608,21 @@
 
 .er-row {
     display: grid;
-    grid-template-columns: 88px 82px 1fr 50px 90px 68px 32px;
+    grid-template-columns: 88px 48px 82px minmax(120px, 1fr) 50px 90px 68px 32px;
+    column-gap: 12px;
     padding: 12px 16px;
     cursor: pointer;
     align-items: center;
     transition: background 0.1s;
+}
+
+/* Each cell needs to be a flex container itself for .er-th-r's
+   justify-content:flex-end to actually right-align its value - without this,
+   HITS/MS values render left-aligned under their right-aligned headers. */
+.er-row > div {
+    display: flex;
+    align-items: center;
+    min-width: 0;
 }
 .er-row:hover { background: var(--bg-alt); }
 .er-event-open .er-row { background: var(--bg-alt); }
@@ -641,8 +653,10 @@
 .er-target-prompt { color: var(--text-muted); border-color: var(--border-alt); }
 .er-target-resp   { color: var(--blue);       border-color: var(--blue); background: rgba(101,181,255,0.05); }
 
-/* Detector chips */
-.er-dets { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+/* Detector chips — min-width:0 lets this grid cell actually shrink to the
+   column's allotted space instead of forcing the whole row wider than its
+   container (grid items default to min-width:auto, i.e. their content size). */
+.er-dets { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; min-width: 0; }
 
 .er-det {
     font-family: 'IBM Plex Mono', monospace;

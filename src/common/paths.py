@@ -16,7 +16,8 @@ from typing import Optional
 CLOUDBYTE_DIR = ".cloudbyte"
 DATA_SUBDIR = "data"
 LOGS_SUBDIR = "logs"
-DB_FILENAME = "cloudbyte.db"
+SECURITY_SUBDIR = "security"
+DB_FILENAME = "cloudbyte-cursor-test.db"
 
 
 def get_home_dir() -> Path:
@@ -62,6 +63,41 @@ def get_logs_dir() -> Path:
     return get_cloudbyte_dir() / LOGS_SUBDIR
 
 
+def get_security_dir() -> Path:
+    """
+    Get the directory for security scanning config, shared by both plugins.
+    Typically: C:\\Users\\<username>\\.cloudbyte\\security
+
+    Unlike get_claude_logs_dir()/get_cursor_logs_dir(), this is NOT split per
+    client - the security profile is one shared config governing both
+    plugins' scanning behavior, by design. This just gives it its own
+    subdirectory instead of sitting loose at the .cloudbyte root, matching
+    the data/ and logs/ organizational convention.
+
+    Returns:
+        Path: The security config directory (not guaranteed to exist yet -
+        callers that write into it should mkdir(parents=True, exist_ok=True)).
+    """
+    return get_cloudbyte_dir() / SECURITY_SUBDIR
+
+
+def get_claude_logs_dir() -> Path:
+    """
+    Get the log directory for Claude Code's own hook handlers.
+    Typically: ~/.cloudbyte/logs/claude/
+
+    Mirrors src/cursor/utils/paths.py's get_cursor_logs_dir() - Cursor's logs
+    already had their own subfolder, Claude Code's didn't, so everything was
+    landing loose in the shared logs/ root instead of a structure aligned
+    per client.
+
+    Returns:
+        Path: The Claude Code logs directory (not guaranteed to exist yet -
+        setup_logging()'s log_dir handling creates it on first use).
+    """
+    return get_logs_dir() / "claude"
+
+
 def get_db_path(db_name: Optional[str] = None) -> Path:
     """
     Get the database file path.
@@ -71,9 +107,16 @@ def get_db_path(db_name: Optional[str] = None) -> Path:
 
     Returns:
         Path: The full path to the database file
+
+    Note:
+        The CLOUDBYTE_DB_NAME environment variable, if set, always wins over
+        both the db_name argument and the default - this is a local testing
+        escape hatch (e.g. point a hook at "cloudbyte-cursor-test" so test
+        writes don't land in the real cloudbyte.db) and isn't read anywhere
+        else in the codebase. Unset by default, so existing behavior is
+        unchanged unless someone opts in.
     """
-    if db_name is None:
-        db_name = DB_FILENAME
+    db_name = os.environ.get("CLOUDBYTE_DB_NAME") or db_name or DB_FILENAME
 
     if not db_name.endswith(".db"):
         db_name += ".db"

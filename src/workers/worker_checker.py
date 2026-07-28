@@ -16,7 +16,7 @@ from src.common.logging import get_logger
 logger = get_logger(__name__)
 
 
-def is_port_open(host: str = "localhost", port: int = 8765, timeout: float = 0.5) -> bool:
+def is_port_open(host: str = "localhost", port: int = 4723, timeout: float = 0.5) -> bool:
     """
     Quick check if a port is open.
 
@@ -50,7 +50,7 @@ def ensure_worker_quick() -> bool:
     """
     # Quick port check
     if not is_port_open():
-        logger.info("Port 8765 not open, starting worker...")
+        logger.info("Port 4723 not open, starting worker...")
         try:
             from src.workers.llm_client import ensure_worker_running
             return ensure_worker_running()
@@ -65,7 +65,7 @@ def ensure_worker_quick() -> bool:
             logger.debug("Worker is running and healthy")
             return True
         else:
-            logger.warning("Port 8765 is open but worker not responding, trying to start...")
+            logger.warning("Port 4723 is open but worker not responding, trying to start...")
             from src.workers.llm_client import ensure_worker_running
             return ensure_worker_running()
     except Exception as e:
@@ -95,7 +95,7 @@ def ensure_worker_quick_sync() -> bool:
 
         if sys.platform == "win32":
             # Windows: Use start /B to run in background without new window
-            cmd = f'start /B "" uv run --directory "{project_dir}" uvicorn src.app.app:app --host 127.0.0.1 --port 8765 >nul 2>&1'
+            cmd = f'start /B "" uv run --directory "{project_dir}" uvicorn src.app.app:app --host 127.0.0.1 --port 4723 >nul 2>&1'
             subprocess.Popen(
                 cmd,
                 shell=True,
@@ -104,7 +104,7 @@ def ensure_worker_quick_sync() -> bool:
         else:
             subprocess.Popen(
                 ["uv", "run", "--directory", str(project_dir),
-                 "uvicorn", "src.app.app:app", "--host", "127.0.0.1", "--port", "8765"],
+                 "uvicorn", "src.app.app:app", "--host", "127.0.0.1", "--port", "4723"],
                 start_new_session=True,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,

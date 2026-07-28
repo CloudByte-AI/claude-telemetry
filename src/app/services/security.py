@@ -8,8 +8,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from ..queries.security import get_scan_events, get_scan_stats, get_recent_events
+from src.common.paths import get_security_dir
 
-SECURITY_CONFIG_PATH = Path.home() / ".cloudbyte" / "security_profile.yaml"
+SECURITY_CONFIG_PATH = get_security_dir() / "security_profile.yaml"
 PROFILES_DIR = Path(__file__).parent.parent.parent / "security" / "profiles"
 
 
@@ -207,12 +208,16 @@ def _finding_label(f: dict) -> str:
     return f.get("label") or f.get("detector") or f.get("category") or ""
 
 
-def _get_threat_breakdown(period: str = "7d", limit: int = 8) -> list[dict]:
-    from ..routers.db import q as _q
+def _get_threat_breakdown(period: str = "7d", limit: int = 8, client: str | None = None) -> list[dict]:
+    from ..routers.db import q as _q, client_where
     clause = _period_clause(period)
+    cwhere, cparams = client_where(client, "s")
     try:
         rows = _q(
-            f"SELECT findings_json FROM SECURITY_SCAN_EVENT WHERE {clause} AND findings_json IS NOT NULL"
+            f"""SELECT findings_json FROM SECURITY_SCAN_EVENT
+                LEFT JOIN SESSION s ON s.session_id = SECURITY_SCAN_EVENT.session_id
+                WHERE {clause} AND findings_json IS NOT NULL {cwhere}""",
+            cparams,
         )
         counts: dict[str, int] = {}
         for row in rows:
@@ -238,17 +243,22 @@ def _get_threat_breakdown(period: str = "7d", limit: int = 8) -> list[dict]:
         return []
 
 
-def _get_daily_activity(period_days: int = 7) -> list[dict]:
+def _get_daily_activity(period_days: int = 7, client: str | None = None) -> list[dict]:
     from datetime import datetime, timezone, timedelta
-    from ..routers.db import q as _q
+    from ..routers.db import q as _q, client_where
+    cwhere, cparams = client_where(client, "s")
     today = datetime.now(timezone.utc).date()
     days  = []
     for i in range(period_days - 1, -1, -1):
         d  = today - timedelta(days=i)
         ds = d.isoformat()
         try:
-            br  = _q("SELECT COUNT(*) as n FROM SECURITY_SCAN_EVENT WHERE date(timestamp)=? AND blocked=1",   (ds,), one=True)
-            dr  = _q("SELECT COUNT(*) as n FROM SECURITY_SCAN_EVENT WHERE date(timestamp)=? AND blocked=0",   (ds,), one=True)
+            br  = _q(f"""SELECT COUNT(*) as n FROM SECURITY_SCAN_EVENT
+                         LEFT JOIN SESSION s ON s.session_id = SECURITY_SCAN_EVENT.session_id
+                         WHERE date(timestamp)=? AND blocked=1 {cwhere}""",   (ds,) + cparams, one=True)
+            dr  = _q(f"""SELECT COUNT(*) as n FROM SECURITY_SCAN_EVENT
+                         LEFT JOIN SESSION s ON s.session_id = SECURITY_SCAN_EVENT.session_id
+                         WHERE date(timestamp)=? AND blocked=0 {cwhere}""",   (ds,) + cparams, one=True)
             b   = (dict(br)["n"]  if br  else 0)
             det = (dict(dr)["n"]  if dr  else 0)
         except Exception:
@@ -267,10 +277,12 @@ def _generate_insights(
     period: str,
     stats: dict,
     threat_breakdown: list[dict],
+    client: str | None = None,
 ) -> list[dict]:
     """Generate 4-6 narrative intelligence bullets from aggregated event data."""
-    from ..routers.db import q as _q
+    from ..routers.db import q as _q, client_where
     clause  = _period_clause(period)
+    cwhere, cparams = client_where(client, "s")
     total   = stats.get("total", 0)
     blocked = stats.get("blocked", 0)
     resp    = stats.get("response_hits", 0)
@@ -292,11 +304,12 @@ def _generate_insights(
             FROM SECURITY_SCAN_EVENT e
             LEFT JOIN SESSION s  ON e.session_id = s.session_id
             LEFT JOIN PROJECT p  ON s.project_id = p.project_id
-            WHERE {clause}
+            WHERE {clause} {cwhere}
             GROUP BY s.project_id
             ORDER BY event_count DESC
             LIMIT 3
-            """
+            """,
+            cparams,
         )
         total_projects = len(proj_rows)
         if proj_rows:
@@ -342,7 +355,7 @@ def _generate_insights(
                 "tag":   "BLOCKED",
                 "text":  f"<b>100% interception rate.</b> All {blocked} detected "
                          f"secret{'s' if blocked != 1 else ''} "
-                         f"{'were' if blocked != 1 else 'was'} stopped before reaching Claude.",
+                         f"{'were' if blocked != 1 else 'was'} stopped before reaching your assistant.",
             })
         else:
             missed = total - blocked
@@ -361,14 +374,14 @@ def _generate_insights(
             "level": "amber",
             "tag":   "RESPONSE",
             "text":  f"Response scanning surfaced <b>{resp}</b> credential "
-                     f"{'exposures' if resp != 1 else 'exposure'} inside Claude's replies. "
+                     f"{'exposures' if resp != 1 else 'exposure'} inside your coding assistant's replies. "
                      f"These were logged as warnings. Consider reviewing what context you send.",
         })
     else:
         items.append({
             "level": "green",
             "tag":   "RESPONSE",
-            "text":  "Claude's responses were clean this period. "
+            "text":  "Your coding assistant's responses were clean this period. "
                      "No secrets detected in any reply. Response scanning is working as expected.",
         })
 
@@ -376,7 +389,8 @@ def _generate_insights(
     try:
         perf = _q(
             f"SELECT ROUND(AVG(scan_ms)) as avg_ms, MAX(scan_ms) as max_ms "
-            f"FROM SECURITY_SCAN_EVENT WHERE {clause}", one=True
+            f"FROM SECURITY_SCAN_EVENT LEFT JOIN SESSION s ON s.session_id = SECURITY_SCAN_EVENT.session_id "
+            f"WHERE {clause} {cwhere}", cparams, one=True
         )
         if perf:
             p      = dict(perf)
@@ -397,7 +411,9 @@ def _generate_insights(
     # ── 6. Last event timeline ────────────────────────────────
     try:
         last = _q(
-            f"SELECT timestamp FROM SECURITY_SCAN_EVENT WHERE {clause} ORDER BY timestamp DESC LIMIT 1", one=True
+            f"""SELECT timestamp FROM SECURITY_SCAN_EVENT
+                LEFT JOIN SESSION s ON s.session_id = SECURITY_SCAN_EVENT.session_id
+                WHERE {clause} {cwhere} ORDER BY timestamp DESC LIMIT 1""", cparams, one=True
         )
         if last:
             ago = _time_ago(dict(last).get("timestamp", ""))
@@ -467,9 +483,10 @@ def get_events_context(
     blocked_only: bool = False,
     page: int = 1,
     per_page: int = 25,
+    client: str | None = None,
 ) -> dict:
     """Context for the /security/events page."""
-    from ..routers.db import q as _q
+    from ..routers.db import q as _q, client_where
 
     offset     = (page - 1) * per_page
     events_raw = get_scan_events(
@@ -477,6 +494,7 @@ def get_events_context(
         offset=offset,
         scan_target=scan_target,
         blocked_only=blocked_only,
+        client=client,
     )
 
     events = []
@@ -501,10 +519,11 @@ def get_events_context(
 
     stats: dict = {}
     clause = _period_clause(period)
+    cwhere, cparams = client_where(client, "s")
     try:
-        total_r = _q(f"SELECT COUNT(*) as n FROM SECURITY_SCAN_EVENT WHERE {clause}", one=True)
-        blk_r   = _q(f"SELECT COUNT(*) as n FROM SECURITY_SCAN_EVENT WHERE {clause} AND blocked=1", one=True)
-        resp_r  = _q(f"SELECT COUNT(*) as n FROM SECURITY_SCAN_EVENT WHERE {clause} AND scan_target='response'", one=True)
+        total_r = _q(f"SELECT COUNT(*) as n FROM SECURITY_SCAN_EVENT LEFT JOIN SESSION s ON s.session_id = SECURITY_SCAN_EVENT.session_id WHERE {clause} {cwhere}", cparams, one=True)
+        blk_r   = _q(f"SELECT COUNT(*) as n FROM SECURITY_SCAN_EVENT LEFT JOIN SESSION s ON s.session_id = SECURITY_SCAN_EVENT.session_id WHERE {clause} AND blocked=1 {cwhere}", cparams, one=True)
+        resp_r  = _q(f"SELECT COUNT(*) as n FROM SECURITY_SCAN_EVENT LEFT JOIN SESSION s ON s.session_id = SECURITY_SCAN_EVENT.session_id WHERE {clause} AND scan_target='response' {cwhere}", cparams, one=True)
         total   = (dict(total_r)["n"] if total_r else 0)
         blocked = (dict(blk_r)["n"]   if blk_r   else 0)
         resp    = (dict(resp_r)["n"]   if resp_r  else 0)
@@ -527,7 +546,7 @@ def get_events_context(
 
     threat_breakdown: list = []
     try:
-        threat_breakdown = _get_threat_breakdown(period)
+        threat_breakdown = _get_threat_breakdown(period, client=client)
     except Exception:
         pass
 
@@ -535,7 +554,7 @@ def get_events_context(
     daily_activity: list = []
     max_daily = 1
     try:
-        daily_activity = _get_daily_activity(period_days)
+        daily_activity = _get_daily_activity(period_days, client=client)
         max_daily = max((d["total"] for d in daily_activity), default=1) or 1
     except Exception:
         pass
@@ -546,6 +565,7 @@ def get_events_context(
 
     return {
         "active":            "security",
+        "client_filter":     client or "all",
         "period":            period,
         "events":            events,
         "stats":             stats,
@@ -562,7 +582,7 @@ def get_events_context(
         "blocked_count":     blocked_count,
         "detected_count":    detected_count,
         "chart_data":        _get_chart_data(period, daily_activity),
-        "security_insights": _generate_insights(period, stats, threat_breakdown),
+        "security_insights": _generate_insights(period, stats, threat_breakdown, client=client),
     }
 
 

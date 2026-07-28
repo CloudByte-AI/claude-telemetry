@@ -109,10 +109,11 @@ class EventProcessor:
                 "session_id": session_id,
                 "project_id": project_info["project_id"],
                 "cwd": cwd,
-                "jsonl_file": f"{project_info['name']}/{session_id}.jsonl",
+                "transcript_path": f"{project_info['name']}/{session_id}.jsonl",
                 "created_at": get_now_ist_iso(),
                 "kind": "interactive",
                 "entrypoint": "cli",
+                "client": "claude_code",
             }
 
             self.db_writer.write_session(extracted)

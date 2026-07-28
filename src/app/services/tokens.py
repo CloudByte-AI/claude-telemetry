@@ -9,21 +9,22 @@ def get_token_usage_context(
     dr: str, date_from: str, date_to: str,
     sess_search: str, proj_search: str,
     sess_page: int, proj_page: int, per_page: int,
+    client: str = None,
 ) -> dict:
     d_from, d_to = resolve_dates(dr, date_from, date_to)
 
     # Chart data — date-filtered
-    io_t   = tq.get_io_totals_by_date(d_from, d_to)
-    tool_t = tq.get_tool_totals_by_date(d_from, d_to)
+    io_t   = tq.get_io_totals_by_date(d_from, d_to, client)
+    tool_t = tq.get_tool_totals_by_date(d_from, d_to, client)
 
     chart_labels = ["IO Input", "IO Output", "IO Cache Rd",
                     "Tool Input", "Tool Output", "Tool Cache Rd"]
     chart_values = [
         io_t["inp"] or 0, io_t["out"] or 0, io_t["cr"] or 0,
-        tool_t["inp"] or 0, tool_t["out"] or 0, tool_t["cr"] or 0,
+        tool_t["inp"], tool_t["out"], tool_t["cr"],
     ]
 
-    chart_sessions = tq.get_chart_sessions_by_date(d_from, d_to, limit=10)
+    chart_sessions = tq.get_chart_sessions_by_date(d_from, d_to, limit=10, client=client)
     bar_labels, bar_io, bar_tool, bar_sess_ids = [], [], [], []
     for row in chart_sessions:
         sid  = row["session_id"]
@@ -34,15 +35,16 @@ def get_token_usage_context(
         bar_sess_ids.append(sid)
 
     # Session breakdown — all sessions, IO only
-    sess_rows       = list(tq.get_sessions_io_breakdown(sess_search))
+    sess_rows       = list(tq.get_sessions_io_breakdown(sess_search, client))
     sess_paged, sess_pg = paginate(sess_rows, sess_page, per_page)
 
     # Project breakdown — all projects, IO only
-    proj_rows       = list(tq.get_projects_io_breakdown(proj_search))
+    proj_rows       = list(tq.get_projects_io_breakdown(proj_search, client))
     proj_paged, proj_pg = paginate(proj_rows, proj_page, per_page)
 
     return {
         "active": "tokens",
+        "client_filter": client or "all",
         "dr": dr, "date_from": date_from, "date_to": date_to,
         "d_from": d_from, "d_to": d_to,
         "chart_labels": chart_labels, "chart_values": chart_values,
@@ -82,7 +84,7 @@ def get_session_token_context(session_id: str) -> dict | None:
                     "Tool Input", "Tool Output", "Tool Cache Rd"]
     donut_values = [
         io_t["inp"] or 0, io_t["out"] or 0, io_t["cr"] or 0,
-        tool_t["inp"] or 0, tool_t["out"] or 0, tool_t["cr"] or 0,
+        tool_t["inp"], tool_t["out"], tool_t["cr"],
     ]
 
     return {
@@ -125,7 +127,8 @@ def get_project_token_context(project_id: str) -> dict | None:
     for row in session_rows:
         d = dict(row)
         d["io_total"]    = d["io_input"] + d["io_output"] + d["io_cr"] + d["io_cc"]
-        d["tool_total"]  = d["tool_input"] + d["tool_output"] + d["tool_cr"] + d["tool_cc"]
+        d["tool_total"]  = ((d["tool_input"] or 0) + (d["tool_output"] or 0) +
+                            (d["tool_cr"] or 0) + (d["tool_cc"] or 0))
         d["grand_total"] = d["io_total"] + d["tool_total"]
         sess_list.append(d)
 
@@ -133,7 +136,7 @@ def get_project_token_context(project_id: str) -> dict | None:
                     "Tool Input", "Tool Output", "Tool Cache Rd"]
     donut_values = [
         io_t["inp"] or 0, io_t["out"] or 0, io_t["cr"] or 0,
-        tool_t["inp"] or 0, tool_t["out"] or 0, tool_t["cr"] or 0,
+        tool_t["inp"], tool_t["out"], tool_t["cr"],
     ]
 
     return {

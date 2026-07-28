@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "uv run --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main session_start",
+        "type": "command",
+        "timeout": 30
+      }
+    ],
+    "beforeSubmitPrompt": [
+      {
+        "command": "uv run --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main before_submit_prompt",
+        "type": "command",
+        "timeout": 30
+      }
+    ],
+    "stop": [
+      {
+        "command": "uv run --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main stop",
+        "type": "command",
+        "timeout": 30
+      }
+    ],
+    "afterAgentResponse": [
+      {
+        "command": "uv run --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main after_agent_response",
+        "type": "command",
+        "timeout": 30
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "uv run --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main post_tool_use",
+        "type": "command",
+        "timeout": 30
+      }
+    ],
+    "afterMCPExecution": [
+      {
+        "command": "uv run --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main after_mcp_execution",
+        "type": "command",
+        "timeout": 30
+      }
+    ],
+    "afterAgentThought": [
+      {
+        "command": "uv run --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main after_agent_thought",
+        "type": "command",
+        "timeout": 30
+      }
+    ],
+    "sessionEnd": [
+      {
+        "command": "uv run --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main session_end",
+        "type": "command",
+        "timeout": 30
+      }
+    ]
+  }
+}

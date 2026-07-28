@@ -15,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.common.logging import get_logger, setup_logging
+from src.common.paths import get_claude_logs_dir
 from src.core.event_processor import process_session_start
 
 
@@ -216,7 +217,7 @@ def handle_session_start():
         "entrypoint": "cli"
     }
     """
-    setup_logging(log_to_file=True, log_to_console=False)
+    setup_logging(log_to_file=True, log_to_console=False, log_dir=get_claude_logs_dir())
     logger.info("=== SessionStart Handler ===")
 
     try:
@@ -229,6 +230,17 @@ def handle_session_start():
         cwd = hook_data.get("cwd") or os.environ.get("PWD") or os.environ.get("cwd")
 
         logger.info(f"Session start data: session_id={session_id}, pid={pid}, cwd={cwd}")
+
+        # Mark this session active in the shared registry so a Cursor session
+        # (or another Claude Code window) sharing the same worker/dashboard
+        # isn't torn down when this session ends first - see
+        # src/common/session_registry.py.
+        if session_id:
+            try:
+                from src.common.session_registry import register
+                register(session_id, "claude_code")
+            except Exception as e:
+                logger.debug(f"session_registry.register failed: {e}")
 
         # Quick check: ensure worker is running
         try:

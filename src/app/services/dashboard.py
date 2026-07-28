@@ -30,18 +30,25 @@ def _norm(values: list) -> list:
     return [round(v / mx * 100) for v in values]
 
 
-def get_dashboard_context() -> dict:
-    stats = dict(dq.get_dashboard_stats())
+def get_dashboard_context(client: str = None) -> dict:
+    stats = dict(dq.get_dashboard_stats(client))
 
     # ── Heatmap — raw day → prompt count dict passed to JS ───────────────────
-    raw_heat   = list(dq.get_activity_heatmap())
+    raw_heat   = list(dq.get_activity_heatmap(client))
     heat_data  = {r["day"]: r["prompts"] for r in raw_heat}
     heat_max   = max(heat_data.values()) if heat_data else 1
     # Pass all active months so JS can build the month navigator
     heat_months = sorted(set(d[:7] for d in heat_data.keys()))
 
+    # Per-client breakdown for the same days, for the dual-color heatmap treatment.
+    # heat_data stays the source of truth for color intensity/backward compat;
+    # this is purely additive per-day client detail for the tooltip + split-cell render.
+    heat_by_client: dict = {}
+    for r in dq.get_activity_heatmap_by_client():
+        heat_by_client.setdefault(r["day"], {})[r["client"] or "claude_code"] = r["prompts"]
+
     # ── Project Profile Radar: edges = Sessions, Prompts, Observations ────────
-    proj_rows      = list(dq.get_projects_radar())
+    proj_rows      = list(dq.get_projects_radar(client))
     proj_radar_datasets = []
     proj_labels    = ["Sessions", "Prompts", "Observations"]
 
@@ -61,6 +68,11 @@ def get_dashboard_context() -> dict:
                 round(d["observations"] / max_obs      * 100),
             ],
             "raw":                [d["sessions"], d["prompts"], d["observations"]],
+            "rawByClient":        [
+                {"claude_code": d["sessions_claude_code"],     "cursor": d["sessions_cursor"]},
+                {"claude_code": d["prompts_claude_code"],      "cursor": d["prompts_cursor"]},
+                {"claude_code": d["observations_claude_code"], "cursor": d["observations_cursor"]},
+            ],
             "backgroundColor":    col[0],
             "borderColor":        col[1],
             "pointBackgroundColor": col[2],
@@ -69,7 +81,7 @@ def get_dashboard_context() -> dict:
         })
 
     # ── Observation Types Radar: edges = obs types, one dataset per project ───
-    obs_rows = list(dq.get_obs_types_per_project())
+    obs_rows = list(dq.get_obs_types_per_project(client))
     # Build {project: {type: count}}
     obs_by_proj: dict = {}
     for r in obs_rows:
@@ -96,10 +108,12 @@ def get_dashboard_context() -> dict:
 
     return {
         "active":               "dashboard",
+        "client_filter":        client or "all",
         "stats":                stats,
         "total_tokens_fmt":     _tok(stats.get("total_tokens", 0)),
         # Heatmap
         "heat_data_json":       heat_data,
+        "heat_by_client_json":  heat_by_client,
         "heat_max":             heat_max,
         "heat_months":          heat_months,
         # Project radar
@@ -110,6 +124,6 @@ def get_dashboard_context() -> dict:
         "obs_radar_labels":     OBS_LABELS,
         "has_obs_data":         has_obs_data,
         # Lists
-        "recent_sessions":      list(dq.get_recent_sessions(5)),
-        "latest_obs":           list(dq.get_latest_observations(5)),
+        "recent_sessions":      list(dq.get_recent_sessions(5, client)),
+        "latest_obs":           list(dq.get_latest_observations(5, client)),
     }

@@ -145,8 +145,8 @@ def kill_worker_by_pid():
 
 
 def kill_worker_by_port():
-    """Kill any process listening on port 8765 with retry logic."""
-    logger.info("Checking for processes on port 8765...")
+    """Kill any process listening on port 4723 with retry logic."""
+    logger.info("Checking for processes on port 4723...")
 
     if sys.platform == "win32":
         import subprocess
@@ -162,7 +162,7 @@ def kill_worker_by_port():
 
             pids_found = []
             for line in result.stdout.splitlines():
-                if ":8765" in line and "LISTENING" in line:
+                if ":4723" in line and "LISTENING" in line:
                     parts = line.split()
                     if len(parts) >= 5:
                         pid = parts[-1]
@@ -170,14 +170,14 @@ def kill_worker_by_port():
                             pids_found.append(pid)
 
             if not pids_found:
-                logger.info("No processes found on port 8765")
+                logger.info("No processes found on port 4723")
                 killed = True
                 break
 
-            logger.info(f"Attempt {attempt + 1}: Found {len(pids_found)} process(es) on port 8765")
+            logger.info(f"Attempt {attempt + 1}: Found {len(pids_found)} process(es) on port 4723")
 
             for pid in pids_found:
-                logger.info(f"Killing process {pid} on port 8765...")
+                logger.info(f"Killing process {pid} on port 4723...")
                 result = subprocess.run(
                     ["taskkill", "/F", "/PID", pid],
                     capture_output=True,
@@ -199,11 +199,11 @@ def kill_worker_by_port():
                     text=True,
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
-                if ":8765" not in verify.stdout:
-                    logger.info("Port 8765 is now free")
+                if ":4723" not in verify.stdout:
+                    logger.info("Port 4723 is now free")
                     break
                 else:
-                    logger.warning(f"Port 8765 still in use, retrying...")
+                    logger.warning(f"Port 4723 still in use, retrying...")
                     killed = False
             else:
                 break
@@ -216,7 +216,7 @@ def kill_worker_by_port():
         killed = False
         for attempt in range(3):  # Retry up to 3 times
             result = subprocess.run(
-                ["lsof", "-ti", ":8765"],
+                ["lsof", "-ti", ":4723"],
                 capture_output=True,
                 text=True
             )
@@ -225,14 +225,14 @@ def kill_worker_by_port():
             pids = [p for p in pids if p]  # Remove empty strings
 
             if not pids:
-                logger.info("No processes found on port 8765")
+                logger.info("No processes found on port 4723")
                 killed = True
                 break
 
-            logger.info(f"Attempt {attempt + 1}: Found {len(pids)} process(es) on port 8765")
+            logger.info(f"Attempt {attempt + 1}: Found {len(pids)} process(es) on port 4723")
 
             for pid in pids:
-                logger.info(f"Killing process {pid} on port 8765")
+                logger.info(f"Killing process {pid} on port 4723")
                 subprocess.run(["kill", "-9", pid], capture_output=True)
                 killed = True
 
@@ -240,15 +240,15 @@ def kill_worker_by_port():
                 # Wait and verify
                 time.sleep(0.5)
                 verify = subprocess.run(
-                    ["lsof", "-ti", ":8765"],
+                    ["lsof", "-ti", ":4723"],
                     capture_output=True,
                     text=True
                 )
                 if not verify.stdout.strip():
-                    logger.info("Port 8765 is now free")
+                    logger.info("Port 4723 is now free")
                     break
                 else:
-                    logger.warning(f"Port 8765 still in use, retrying...")
+                    logger.warning(f"Port 4723 still in use, retrying...")
                     killed = False
             else:
                 break
@@ -460,6 +460,48 @@ def kill_uv_process():
         except Exception as e:
             logger.warning(f"Error killing uv process: {e}")
             return False
+
+
+def shutdown_worker_if_no_active_sessions(session_id) -> bool:
+    """
+    Unregister this session, then kill the shared worker/dashboard ONLY if
+    no other session (Claude Code or Cursor, current or future plugin) is
+    still active.
+
+    This is the single guarded entry point both plugins' sessionEnd/
+    SessionEnd handlers should call instead of the raw kill_* functions
+    directly - calling those directly (as before) tears down the shared
+    worker even while another plugin's session is still using it.
+
+    Returns True if a shutdown was actually attempted, False if skipped
+    because another session is still active.
+    """
+    from src.common.session_registry import unregister, has_other_active_sessions
+
+    unregister(session_id)
+
+    if has_other_active_sessions(exclude_session_id=session_id):
+        logger.info(
+            "Other session(s) still active - skipping worker shutdown so their "
+            "dashboard/worker access at localhost:4723 isn't interrupted"
+        )
+        return False
+
+    logger.info("No other active sessions - proceeding with worker shutdown")
+
+    killed = kill_worker_by_pid()
+    if not killed:
+        killed = kill_worker_by_port()
+
+    all_killed = kill_all_claude_telemetry_processes()
+    uv_killed = kill_uv_process()
+
+    if killed or all_killed or uv_killed:
+        logger.info("Worker shutdown completed successfully")
+    else:
+        logger.warning("Worker shutdown attempted but no processes were killed")
+
+    return True
 
 
 if __name__ == "__main__":

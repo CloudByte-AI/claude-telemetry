@@ -1,11 +1,11 @@
 """All SQL queries for observations and session summaries."""
 
-from ..routers.db import q
+from ..routers.db import q, client_where
 
 
 # ── Observations ───────────────────────────────────────────────────────────────
 
-def get_observations_list(search: str = "", type_filter: str = "", date_from: str = "", date_to: str = ""):
+def get_observations_list(search: str = "", type_filter: str = "", date_from: str = "", date_to: str = "", client: str = None):
     filters = ["1=1"]
     params: list = []
 
@@ -25,13 +25,17 @@ def get_observations_list(search: str = "", type_filter: str = "", date_from: st
         filters.append("substr(o.created_at,1,10) <= ?")
         params.append(date_to)
 
-    where = " AND ".join(filters)
+    client_filter, client_params = client_where(client, "s")
+    params += list(client_params)
+
+    where = " AND ".join(filters) + f" {client_filter}"
     return q(f"""
         SELECT o.id, o.session_id, o.prompt_id,
                o.type, o.title, o.subtitle, o.narrative,
                o.facts, o.concepts, o.files_read, o.files_modified,
                o.created_at,
                p.name AS project_name, p.project_id,
+               s.client,
                (
                    SELECT COUNT(*) FROM USER_PROMPT up2
                    WHERE up2.session_id = o.session_id
@@ -65,6 +69,7 @@ def get_bubble_chart_data(date_from: str = "", date_to: str = ""):
         SELECT o.session_id, o.type,
                COUNT(*) AS count,
                p.name   AS project_name,
+               s.client,
                substr(o.created_at,1,10) AS obs_date
         FROM HOOK_OBSERVATION o
         LEFT JOIN SESSION s ON s.session_id = o.session_id
@@ -83,6 +88,7 @@ def get_observation(obs_id: str):
                p.project_id,
                s.created_at AS session_started,
                s.cwd,
+               s.client,
                (
                    SELECT COUNT(*) FROM USER_PROMPT up2
                    WHERE up2.session_id = o.session_id
@@ -117,30 +123,38 @@ def get_observations_stats() -> dict:
             "refactor": 0, "change": 0, "discovery": 0, "decision": 0}
 
 
-def get_observation_type_counts():
-    return q("""
-        SELECT type, COUNT(*) AS count
-        FROM HOOK_OBSERVATION
-        WHERE type IS NOT NULL
-        GROUP BY type
+def get_observation_type_counts(client: str = None):
+    """Per-type counts of observations, for the type pills + donut chart on the
+    bare /observations list page. Filtered by the same client selector as the
+    list itself so the chips/donut match what's shown."""
+    where, params = client_where(client, "s")
+    return q(f"""
+        SELECT o.type AS type, COUNT(*) AS count
+        FROM HOOK_OBSERVATION o
+        LEFT JOIN SESSION s ON s.session_id = o.session_id
+        WHERE o.type IS NOT NULL {where}
+        GROUP BY o.type
         ORDER BY count DESC
-    """)
+    """, params)
 
 
 def get_session_observations_full(session_id: str):
     return q("""
-        SELECT id, session_id, prompt_id, type, title, subtitle,
-               narrative, text, facts, concepts,
-               files_read, files_modified, content_hash, created_at
-        FROM HOOK_OBSERVATION
-        WHERE session_id = ?
-        ORDER BY created_at DESC
+        SELECT o.id, o.session_id, o.prompt_id, o.type, o.title, o.subtitle,
+               o.narrative, o.text, o.facts, o.concepts,
+               o.files_read, o.files_modified, o.content_hash, o.created_at,
+               s.client
+        FROM HOOK_OBSERVATION o
+        LEFT JOIN SESSION s ON s.session_id = o.session_id
+        WHERE o.session_id = ?
+        ORDER BY o.created_at DESC
     """, (session_id,))
 
 
 def get_nearby_observations(session_id: str, limit: int = 10):
     return q("""
         SELECT o.id, o.type, o.title, o.subtitle, o.created_at,
+               s.client,
                (
                    SELECT COUNT(*) FROM USER_PROMPT up2
                    WHERE up2.session_id = o.session_id
@@ -150,6 +164,7 @@ def get_nearby_observations(session_id: str, limit: int = 10):
                    )
                ) AS turn_number
         FROM HOOK_OBSERVATION o
+        LEFT JOIN SESSION s ON s.session_id = o.session_id
         WHERE o.session_id = ?
         ORDER BY turn_number DESC
         LIMIT ?

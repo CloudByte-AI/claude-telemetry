@@ -64,10 +64,11 @@ def get_observations_context(
     date_to: str = "",
     page: int = 1,
     per_page: int = 15,
+    client: str = None,
 ) -> dict:
-    all_rows    = [_enrich_observation(r) for r in oq.get_observations_list(search, type_filter, date_from, date_to)]
+    all_rows    = [_enrich_observation(r) for r in oq.get_observations_list(search, type_filter, date_from, date_to, client)]
     paged, pg   = paginate(all_rows, page, per_page)
-    type_counts = {r["type"]: r["count"] for r in oq.get_observation_type_counts()}
+    type_counts = {r["type"]: r["count"] for r in oq.get_observation_type_counts(client)}
 
     # Timeline Data
     end_dt = datetime.now()
@@ -115,6 +116,7 @@ def get_observations_context(
 
     return {
         "active":          "observations",
+        "client_filter":   client or "all",
         "observations":    paged,
         "pg":              pg,
         "search":          search,

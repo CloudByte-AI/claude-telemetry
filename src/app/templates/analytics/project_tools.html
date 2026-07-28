@@ -1,4 +1,5 @@
 {% extends "base/index.html" %}
+{% from "base/_macros.html" import not_tracked %}
 {% block title %}Tool Analysis · {{ project.name }} — CloudByte{% endblock %}
 {% block breadcrumb %}tool calls / project {{ project.name | truncate(30) }}{% endblock %}
 
@@ -164,10 +165,10 @@
                         <td>
                             <span class="sessions-used-pill">{{ row.sessions_used_in }} session{{ 's' if row.sessions_used_in != 1 }}</span>
                         </td>
-                        <td class="mono accent-text">{{ "{:,}".format(row.input_tokens or 0) }}</td>
-                        <td class="mono green-text">{{ "{:,}".format(row.output_tokens or 0) }}</td>
-                        <td class="mono" style="color:var(--purple);">{{ "{:,}".format(row.cache_read_tokens or 0) }}</td>
-                        <td class="mono amber-text">{{ "{:,}".format(row.cache_creation_tokens or 0) }}</td>
+                        <td class="mono accent-text">{% if row.input_tokens is none %}{{ not_tracked("Cursor doesn't report tool-level token usage") }}{% else %}{{ "{:,}".format(row.input_tokens) }}{% endif %}</td>
+                        <td class="mono green-text">{% if row.output_tokens is none %}{{ not_tracked("Cursor doesn't report tool-level token usage") }}{% else %}{{ "{:,}".format(row.output_tokens) }}{% endif %}</td>
+                        <td class="mono" style="color:var(--purple);">{% if row.cache_read_tokens is none %}{{ not_tracked("Cursor doesn't report tool-level token usage") }}{% else %}{{ "{:,}".format(row.cache_read_tokens) }}{% endif %}</td>
+                        <td class="mono amber-text">{% if row.cache_creation_tokens is none %}{{ not_tracked("Cursor doesn't report tool-level token usage") }}{% else %}{{ "{:,}".format(row.cache_creation_tokens) }}{% endif %}</td>
                         <td style="text-align:center;">
                             {% if row.errors > 0 %}
                                 <span class="error-badge">✗ {{ row.errors }}</span>
@@ -177,7 +178,7 @@
                         </td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="9"><div class="empty">no tool data</div></td></tr>
+                    <tr><td colspan="9"><div class="no-data">no tool data</div></td></tr>
                     {% endfor %}
                 </tbody>
             </table>
@@ -225,10 +226,10 @@
                             <span class="tool-badge">{{ row.tool_calls }} calls</span>
                         </td>
                         <td class="mono dimmer" style="text-align:center;">{{ row.unique_tools }} types</td>
-                        <td class="mono accent-text">{{ "{:,}".format(row.input_tokens or 0) }}</td>
-                        <td class="mono green-text">{{ "{:,}".format(row.output_tokens or 0) }}</td>
-                        <td class="mono" style="color:var(--purple);">{{ "{:,}".format(row.cache_read_tokens or 0) }}</td>
-                        <td class="mono amber-text">{{ "{:,}".format(row.cache_creation_tokens or 0) }}</td>
+                        <td class="mono accent-text">{% if row.input_tokens is none %}{{ not_tracked("Cursor doesn't report tool-level token usage") }}{% else %}{{ "{:,}".format(row.input_tokens) }}{% endif %}</td>
+                        <td class="mono green-text">{% if row.output_tokens is none %}{{ not_tracked("Cursor doesn't report tool-level token usage") }}{% else %}{{ "{:,}".format(row.output_tokens) }}{% endif %}</td>
+                        <td class="mono" style="color:var(--purple);">{% if row.cache_read_tokens is none %}{{ not_tracked("Cursor doesn't report tool-level token usage") }}{% else %}{{ "{:,}".format(row.cache_read_tokens) }}{% endif %}</td>
+                        <td class="mono amber-text">{% if row.cache_creation_tokens is none %}{{ not_tracked("Cursor doesn't report tool-level token usage") }}{% else %}{{ "{:,}".format(row.cache_creation_tokens) }}{% endif %}</td>
                         <td style="text-align:right;">
                             <a href="/tools/session/{{ row.session_id }}"
                                class="btn btn-ghost"
@@ -238,7 +239,7 @@
                         </td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="9"><div class="empty">no session data</div></td></tr>
+                    <tr><td colspan="9"><div class="no-data">no session data</div></td></tr>
                     {% endfor %}
                 </tbody>
             </table>

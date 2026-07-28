@@ -1,4 +1,5 @@
 {% extends "base/index.html" %}
+{% from "base/_macros.html" import not_tracked %}
 {% block title %}Token Analysis · {{ project.name }} — CloudByte{% endblock %}
 {% block breadcrumb %}token intelligence / {{ project.name | truncate(28) }}{% endblock %}
 
@@ -83,7 +84,7 @@
                         <span class="legend-name">{{ label }}</span>
                         <span class="legend-val">
                             {% set v = donut_values[loop.index0] %}
-                            {% if v >= 1000000 %}{{ "%.1f"|format(v/1000000) }}M{% elif v >= 1000 %}{{ "%.1f"|format(v/1000) }}K{% else %}{{ v }}{% endif %}
+                            {% if v is none %}{{ not_tracked("Cursor doesn't report tool-level token usage") }}{% elif v >= 1000000 %}{{ "%.1f"|format(v/1000000) }}M{% elif v >= 1000 %}{{ "%.1f"|format(v/1000) }}K{% else %}{{ v }}{% endif %}
                         </span>
                     </div>
                     {% endfor %}
@@ -133,8 +134,8 @@
                         <td class="mono" style="font-weight:700;">{{ "{:,}".format(row.io_input or 0) }}</td>
                         <td class="mono" style="color:#fe4c02;">{{ "{:,}".format(row.io_output or 0) }}</td>
                         <td class="mono dimmer">{{ "{:,}".format(row.io_cr or 0) }}</td>
-                        <td class="mono dimmer">{{ "{:,}".format(row.tool_input or 0) }}</td>
-                        <td class="mono dimmer">{{ "{:,}".format(row.tool_output or 0) }}</td>
+                        <td class="mono dimmer">{% if row.tool_input is none %}{{ not_tracked("Cursor doesn't report tool-level token usage") }}{% else %}{{ "{:,}".format(row.tool_input) }}{% endif %}</td>
+                        <td class="mono dimmer">{% if row.tool_output is none %}{{ not_tracked("Cursor doesn't report tool-level token usage") }}{% else %}{{ "{:,}".format(row.tool_output) }}{% endif %}</td>
                         <td class="mono" style="text-align:right; font-weight:700; color:var(--text);">{{ "{:,}".format(row.grand_total or 0) }}</td>
                         <td style="text-align:right;">
                             <a href="/tokens/session/{{ row.session_id }}" class="tbl-btn analyse">AUDIT ↗</a>

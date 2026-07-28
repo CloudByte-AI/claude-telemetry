@@ -8,8 +8,8 @@ router = APIRouter()
 
 
 @router.get("/sessions", response_class=HTMLResponse)
-def sessions_list(request: Request, search: str = "", page: int = 1, per_page: int = 10, project: str = None):
-    ctx = svc.get_sessions_list_context(search, page, per_page, project)
+def sessions_list(request: Request, search: str = "", page: int = 1, per_page: int = 10, project: str = None, client: str = "all"):
+    ctx = svc.get_sessions_list_context(search, page, per_page, project, client)
     if request.headers.get("HX-Request"):
         return templates.TemplateResponse(request=request, name="sessions/_table.html", context=ctx)
     return templates.TemplateResponse(request=request, name="sessions/list.html", context=ctx)

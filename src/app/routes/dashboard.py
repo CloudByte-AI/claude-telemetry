@@ -8,6 +8,6 @@ router = APIRouter()
 
 
 @router.get("/", response_class=HTMLResponse)
-def dashboard(request: Request):
-    ctx = svc.get_dashboard_context()
+def dashboard(request: Request, client: str = "all"):
+    ctx = svc.get_dashboard_context(client)
     return templates.TemplateResponse(request=request, name="dashboard/dashboard.html", context=ctx)

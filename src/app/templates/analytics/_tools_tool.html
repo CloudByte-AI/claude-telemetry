@@ -1,3 +1,4 @@
+{% from "base/_macros.html" import not_tracked %}
 <div class="table-wrap">
     <table>
         <thead>
@@ -30,15 +31,15 @@
                         <span class="mono dimmer" style="font-size:11px;">{{ row.call_pct }}%</span>
                     </div>
                 </td>
-                <td class="mono accent-text">{{ "{:,}".format(row.input_tokens or 0) }}</td>
-                <td class="mono green-text">{{ "{:,}".format(row.output_tokens or 0) }}</td>
-                <td class="mono" style="color:var(--purple);">{{ "{:,}".format(row.cache_read_tokens or 0) }}</td>
-                <td class="mono amber-text">{{ "{:,}".format(row.cache_creation_tokens or 0) }}</td>
+                <td class="mono accent-text">{% if row.input_tokens is none %}{{ not_tracked("Cursor doesn't report tool-level token usage") }}{% else %}{{ "{:,}".format(row.input_tokens) }}{% endif %}</td>
+                <td class="mono green-text">{% if row.output_tokens is none %}{{ not_tracked("Cursor doesn't report tool-level token usage") }}{% else %}{{ "{:,}".format(row.output_tokens) }}{% endif %}</td>
+                <td class="mono" style="color:var(--purple);">{% if row.cache_read_tokens is none %}{{ not_tracked("Cursor doesn't report tool-level token usage") }}{% else %}{{ "{:,}".format(row.cache_read_tokens) }}{% endif %}</td>
+                <td class="mono amber-text">{% if row.cache_creation_tokens is none %}{{ not_tracked("Cursor doesn't report tool-level token usage") }}{% else %}{{ "{:,}".format(row.cache_creation_tokens) }}{% endif %}</td>
             </tr>
             {% else %}
             <tr>
                 <td colspan="7">
-                    <div class="empty">{% if tool_search %}no tools matching "{{ tool_search }}"{% else %}no tool data{%
+                    <div class="no-data">{% if tool_search %}no tools matching "{{ tool_search }}"{% else %}no tool data{%
                         endif %}</div>
                 </td>
             </tr>
@@ -46,7 +47,7 @@
         </tbody>
     </table>
 </div>
-{% set base = '/tools?top_n='~top_n~'&tool_search='~tool_search~'&sess_search='~sess_search~'&proj_search='~proj_search
+{% set base = '/tools?top_n='~top_n~'&tool_search='~tool_search~'&sess_search='~sess_search~'&proj_search='~proj_search~'&client='~client_filter
 %}
 {% if tool_pg.total > 0 %}
 <div class="pagination">

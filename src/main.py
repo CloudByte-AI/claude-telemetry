@@ -23,6 +23,7 @@ from src.common.paths import (
     get_cloudbyte_dir,
     get_data_dir,
     get_logs_dir,
+    get_claude_logs_dir,
     get_db_path,
     ensure_directories,
     get_config_file,
@@ -49,7 +50,7 @@ def setup() -> None:
     Setup hook - Initialize database and directories.
     Called when Claude Code starts with the plugin.
     """
-    setup_logging(log_to_file=True, log_to_console=True)
+    setup_logging(log_to_file=True, log_to_console=True, log_dir=get_claude_logs_dir())
     logger.info("=== CloudByte Setup Starting ===")
 
     try:
@@ -73,7 +74,7 @@ def setup() -> None:
         config_file = get_config_file()
         if not config_file.exists():
             default_config = {
-                "version": "0.1.39",
+                "version": "0.1.36",
                 "created_at": get_now_ist_iso(),
                 "settings": {
                     "log_level": "INFO",
@@ -82,7 +83,7 @@ def setup() -> None:
                 },
                 "worker": {
                     "enabled": True,
-                    "port": 8765,
+                    "port": 4723,
                     "timeout": 120,
                     "shutdown_idle_seconds": 60,
                     "max_shutdown_wait_seconds": 300,
@@ -126,7 +127,7 @@ def session_start() -> None:
     SessionStart hook - Called when a new Claude session starts.
     Delegates to the session_start handler.
     """
-    setup_logging(log_to_file=True, log_to_console=False)
+    setup_logging(log_to_file=True, log_to_console=False, log_dir=get_claude_logs_dir())
     _ensure_mcp_permission()
     handle_session_start()
 
@@ -154,7 +155,7 @@ def observation() -> None:
         if observation:
             save_observation_to_db(observation)
     """
-    setup_logging(log_to_file=True, log_to_console=False)
+    setup_logging(log_to_file=True, log_to_console=False, log_dir=get_claude_logs_dir())
     logger.debug("Observation generation hook - LLM integration ready but not yet triggered")
     # TODO: Implement observation generation timing and logic
 
@@ -165,7 +166,7 @@ def stop() -> None:
     Processes only the current (most recent) prompt's response, tools, and tokens.
     Does NOT save prompts (they are saved by UserPromptSubmit hook).
     """
-    setup_logging(log_to_file=True, log_to_console=False)
+    setup_logging(log_to_file=True, log_to_console=False, log_dir=get_claude_logs_dir())
     logger.debug("Stop signal received - processing current prompt data")
 
     try:
@@ -289,8 +290,6 @@ def stop() -> None:
                 return True
             if text_stripped.startswith("⎿"):
                 return True
-            if text_stripped.startswith("<task-notification>"):
-                return True
             return False
 
         # Filter out hook output from pairs
@@ -399,7 +398,7 @@ def stop() -> None:
                         conn3.cursor().execute("""
                             INSERT INTO USER_PROMPT (
                                 prompt_id, session_id, uuid, parent_uuid, prompt, timestamp,
-                                entrypoint, claude_version, git_branch, permission_mode,
+                                entrypoint, client_version, git_branch, mode,
                                 jsonl_prompt_id
                             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """, (
@@ -440,9 +439,9 @@ def stop() -> None:
                                timestamp = ?,
                                parent_uuid = COALESCE(parent_uuid, ?),
                                entrypoint = ?,
-                               claude_version = ?,
+                               client_version = ?,
                                git_branch = ?,
-                               permission_mode = ?
+                               mode = ?
                            WHERE prompt_id = ?""",
                         (
                             jsonl_prompt_id,
@@ -599,7 +598,7 @@ def stop() -> None:
                                     f" in Claude's response ({_summary})."
                                     f" Event logged to telemetry."
                                     f" To suppress known-safe or test values, manage your allowlist at"
-                                    f" http://localhost:8765/security"
+                                    f" http://localhost:4723/security"
                                 )
                             }))
         except Exception as _sec_err:

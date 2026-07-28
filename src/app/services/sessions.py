@@ -4,13 +4,13 @@ import json
 
 from ..routers.db import build_tool_list
 from ..queries import sessions as sq
-from .utils import paginate
+from .utils import paginate, format_duration
 
 
-def get_sessions_list_context(search: str, page: int, per_page: int, project_id: str = None) -> dict:
+def get_sessions_list_context(search: str, page: int, per_page: int, project_id: str = None, client: str = None) -> dict:
     from ..queries import projects as pq
 
-    all_sessions = list(sq.get_sessions_list(search, project_id))
+    all_sessions = list(sq.get_sessions_list(search, project_id, client))
     total_records = len(all_sessions)
     total_pages   = max(1, (total_records + per_page - 1) // per_page)
     page          = max(1, min(page, total_pages))
@@ -35,6 +35,7 @@ def get_sessions_list_context(search: str, page: int, per_page: int, project_id:
         "pg_end":        pg_end,
         "project_id":    project_id,
         "projects":      all_projects,
+        "client_filter": client or "all",
     }
 
 
@@ -65,11 +66,11 @@ def get_session_detail_context(session_id: str) -> dict | None:
             "response":         dict(response_row) if response_row else None,
             "tokens":           dict(tokens_row)   if tokens_row   else None,
             "tool_tokens_agg":  dict(tool_tok_agg) if tool_tok_agg else None,
-            "interrupt_reason": pd.get("interrupt_reason"),
+            "status":           pd.get("status"),
             "entrypoint":       pd.get("entrypoint"),
-            "claude_version":   pd.get("claude_version"),
+            "client_version":   pd.get("client_version"),
             "git_branch":       pd.get("git_branch"),
-            "permission_mode":  pd.get("permission_mode"),
+            "mode":             pd.get("mode"),
         })
 
     turns.reverse()
@@ -87,9 +88,12 @@ def get_session_detail_context(session_id: str) -> dict | None:
         if d.get("prompt_id"):
             obs_by_prompt[d["prompt_id"]] = d
 
+    session_dict = dict(session)
+    session_dict["duration_display"] = format_duration(session_dict.get("created_at"), session_dict.get("ended_at"))
+
     return {
         "active":           "sessions",
-        "session":          dict(session),
+        "session":          session_dict,
         "turns":            turns,
         "total_tool_count": total_tool_count,
         "observations":     observations,

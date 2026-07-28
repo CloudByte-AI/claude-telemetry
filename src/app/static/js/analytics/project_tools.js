@@ -4,6 +4,7 @@
     function color(i) { return COLORS[i % COLORS.length]; }
 
     function toK(v) {
+        if (v === null || v === undefined) return 'not tracked';
         return v >= 1000000 ? (v/1000000).toFixed(1)+'M'
              : v >= 1000    ? (v/1000).toFixed(1)+'K'
              : String(v);

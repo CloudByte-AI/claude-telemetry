@@ -1,7 +1,7 @@
 """DB queries for the security scanning feature."""
 
 import json
-from ..routers.db import q
+from ..routers.db import q, client_where
 
 
 def get_scan_events(
@@ -9,6 +9,7 @@ def get_scan_events(
     offset: int = 0,
     scan_target: str | None = None,
     blocked_only: bool = False,
+    client: str | None = None,
 ) -> list[dict]:
     try:
         conditions = []
@@ -20,18 +21,21 @@ def get_scan_events(
         if blocked_only:
             conditions.append("blocked = 1")
 
-        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        extra = (" AND " + " AND ".join(conditions)) if conditions else ""
+        client_extra, client_params = client_where(client, "s")
         rows = q(
             f"""
-            SELECT event_id, session_id, scan_target, prompt_hash,
-                   masked_text, findings_json, finding_count,
-                   blocked, scan_ms, scan_strategy, timestamp
-            FROM SECURITY_SCAN_EVENT
-            {where}
-            ORDER BY timestamp DESC
+            SELECT e.event_id, e.session_id, e.scan_target, e.prompt_hash,
+                   e.masked_text, e.findings_json, e.finding_count,
+                   e.blocked, e.scan_ms, e.scan_strategy, e.timestamp,
+                   s.client
+            FROM SECURITY_SCAN_EVENT e
+            LEFT JOIN SESSION s ON s.session_id = e.session_id
+            WHERE 1=1 {extra} {client_extra}
+            ORDER BY e.timestamp DESC
             LIMIT ? OFFSET ?
             """,
-            tuple(params) + (limit, offset),
+            tuple(params) + client_params + (limit, offset),
         )
         return [dict(r) for r in rows]
     except Exception:
@@ -41,7 +45,12 @@ def get_scan_events(
 def get_scan_event(event_id: str) -> dict | None:
     try:
         row = q(
-            "SELECT * FROM SECURITY_SCAN_EVENT WHERE event_id = ? LIMIT 1",
+            """
+            SELECT e.*, s.client
+            FROM SECURITY_SCAN_EVENT e
+            LEFT JOIN SESSION s ON s.session_id = e.session_id
+            WHERE e.event_id = ? LIMIT 1
+            """,
             (event_id,),
             one=True,
         )
@@ -94,10 +103,11 @@ def get_recent_events(limit: int = 5) -> list[dict]:
     try:
         rows = q(
             """
-            SELECT event_id, scan_target, finding_count, blocked, timestamp,
-                   findings_json
-            FROM SECURITY_SCAN_EVENT
-            ORDER BY timestamp DESC
+            SELECT e.event_id, e.scan_target, e.finding_count, e.blocked, e.timestamp,
+                   e.findings_json, s.client
+            FROM SECURITY_SCAN_EVENT e
+            LEFT JOIN SESSION s ON s.session_id = e.session_id
+            ORDER BY e.timestamp DESC
             LIMIT ?
             """,
             (limit,),

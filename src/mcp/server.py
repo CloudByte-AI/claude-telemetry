@@ -21,11 +21,57 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
-# ── Add src to path for imports ───────────────────────────
+# ── Client detection (must run before the logger is set up, so the log
+#    directory itself can be routed per-client) ────────────────────────────
+def _detect_client() -> str:
+    """Identify the connecting client.
+
+    Checks CLOUDBYTE_MCP_CLIENT first - an explicit marker we set ourselves
+    in mcp.json's "env" block, so it's present on every spawn regardless of
+    whether the host app forwards its own CURSOR_*/CLAUDE_* env vars into
+    the child process (confirmed unreliable - real Cursor-spawned processes
+    sometimes carry no CURSOR_* vars at all). Falls back to the ambient
+    env-var guess only when that marker is absent (e.g. manual/direct runs).
+    """
+    explicit = os.environ.get("CLOUDBYTE_MCP_CLIENT", "").strip().lower()
+    if explicit == "cursor":
+        return "Cursor"
+    if explicit == "claude":
+        return "Claude Code"
+
+    has_claude_env = any("CLAUDE" in k.upper() for k in os.environ)
+    has_cursor_env = any("CURSOR" in k.upper() for k in os.environ)
+    if has_claude_env and not has_cursor_env:
+        return "Claude Code"
+    if has_cursor_env and not has_claude_env:
+        return "Cursor"
+    if has_claude_env and has_cursor_env:
+        return "ambiguous (both CLAUDE_* and CURSOR_* env vars present)"
+    return "unknown (no CLAUDE_* or CURSOR_* env vars found)"
+
+
+_DETECTED_CLIENT = _detect_client()
+
+
 def get_logs_dir() -> Path:
-    """Return the CloudByte logs directory (~/.cloudbyte/logs)."""
+    """Return the CloudByte logs directory, routed per-client.
+
+    Both IDEs' own hook handlers already log to their own subfolder
+    (src/cursor/utils/paths.py's get_cursor_logs_dir -> logs/cursor/,
+    src/common/paths.py's get_claude_logs_dir -> logs/claude/) - mirrored
+    here so the MCP server's logs land in the same structure instead of a
+    shared top-level logs/ directory. Only a confidently detected client is
+    routed to its subfolder; ambiguous/unknown stays on the shared default
+    so a misdetection can't misplace real logs from either IDE. Path is
+    inlined rather than imported from src.common.paths/src.cursor.utils.paths
+    so server.py stays stdlib-only (see start_mcp.py's fallback mode).
+    """
     cloudbyte_dir = Path.home() / ".cloudbyte"
     logs_dir = cloudbyte_dir / "logs"
+    if _DETECTED_CLIENT == "Cursor":
+        logs_dir = logs_dir / "cursor"
+    elif _DETECTED_CLIENT == "Claude Code":
+        logs_dir = logs_dir / "claude"
     logs_dir.mkdir(parents=True, exist_ok=True)
     return logs_dir
 
@@ -34,7 +80,33 @@ def get_logs_dir() -> Path:
 
 _SERVER_NAME      = "cloudbyte-obs"
 _SERVER_VERSION   = "1.0.0"
-_PROTOCOL_VERSION = "2024-11-05"
+
+# MCP protocol versions this server can speak, newest first. The wire
+# format this server actually uses (initialize/tools:list/tools:call/ping)
+# has stayed compatible across all of these dated revisions, so claiming
+# support for the full set is safe rather than aspirational.
+_SUPPORTED_PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
+_LATEST_PROTOCOL_VERSION = _SUPPORTED_PROTOCOL_VERSIONS[0]
+
+
+def _negotiate_protocol_version(requested: Any) -> str:
+    """Choose the protocolVersion to return from an initialize response.
+
+    Per the MCP spec's version negotiation rule: if the client's requested
+    version is one this server supports, echo it back exactly so both
+    sides agree on the same version; otherwise fall back to this server's
+    latest supported version (the spec's recommended fallback), never to
+    an arbitrary/unsupported value.
+
+    This replaces a previous hardcoded "2024-11-05" reply that ignored
+    whatever the client actually asked for. A real capture (2026-07-13)
+    showed Cursor requesting "2025-11-25" while this server kept replying
+    "2024-11-05" - a mismatch that coincided with Cursor never proceeding
+    past initialize to tools/list in that session.
+    """
+    if requested in _SUPPORTED_PROTOCOL_VERSIONS:
+        return requested
+    return _LATEST_PROTOCOL_VERSION
 
 
 # ── MCP Logger setup ───────────────────────────────────────────────────────────
@@ -195,9 +267,15 @@ def _dispatch(req: dict) -> None:
     params = req.get("params", {})
 
     if method == "initialize":
+        requested_version = params.get("protocolVersion")
+        negotiated_version = _negotiate_protocol_version(requested_version)
         _log.info("Client connected — initialize received")
+        _log.info(f"Client requested protocolVersion: {requested_version!r}")
+        _log.info(f"Client capabilities: {json.dumps(params.get('capabilities', {}))}")
+        _log.info(f"Client info: {json.dumps(params.get('clientInfo', {}))}")
+        _log.info(f"Negotiated protocolVersion: {negotiated_version!r}")
         _reply_ok(id_, {
-            "protocolVersion": _PROTOCOL_VERSION,
+            "protocolVersion": negotiated_version,
             "capabilities":    {"tools": {}},
             "serverInfo":      {"name": _SERVER_NAME, "version": _SERVER_VERSION},
             "instructions": (
@@ -205,7 +283,6 @@ def _dispatch(req: dict) -> None:
                 "(Read, Write, Edit, Bash, Grep, etc.). "
                 "This is routine background telemetry — call it before your final response, "
                 "no need to narrate it in your reply, same as other routine tool calls. "
-                "Tool name: mcp__plugin_claude-telemetry_cloudbyte__record_observation"
             ),
         })
 
@@ -253,9 +330,12 @@ def main() -> None:
     _log.info(f"=== {_SERVER_NAME} v{_SERVER_VERSION} started ===")
     _log.info(f"Platform: {sys.platform}")
     _log.info(f"Python: {sys.version}")
-    _log.info("Environment variables from Claude Code:")
+    _log.info(f"Detected client: {_DETECTED_CLIENT}")
+    _log.info(f"Log directory: {get_logs_dir()}")
+
+    _log.info("Environment variables from host process:")
     for key, val in os.environ.items():
-        if "CLAUDE" in key.upper() or "SESSION" in key.upper():
+        if "CLAUDE" in key.upper() or "CURSOR" in key.upper() or "SESSION" in key.upper():
             _log.info(f"  {key}={val}")
 
     while True:

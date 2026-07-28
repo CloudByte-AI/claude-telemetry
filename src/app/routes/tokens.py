@@ -18,8 +18,9 @@ def token_usage(
     sess_page:   int = 1,
     proj_page:   int = 1,
     per_page:    int = 10,
+    client:      str = "all",
 ):
-    ctx    = svc.get_token_usage_context(dr, date_from, date_to, sess_search, proj_search, sess_page, proj_page, per_page)
+    ctx    = svc.get_token_usage_context(dr, date_from, date_to, sess_search, proj_search, sess_page, proj_page, per_page, client)
     target = request.headers.get("HX-Target", "")
     if request.headers.get("HX-Request"):
         if target == "sess-table-wrap":

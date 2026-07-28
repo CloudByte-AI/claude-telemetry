@@ -20,8 +20,9 @@ def tool_calls(
     sess_page:    int = 1,
     proj_page:    int = 1,
     per_page:     int = 5,
+    client:       str = "all",
 ):
-    ctx    = svc.get_tools_page_context(dr, date_from, date_to, tool_search, sess_search, proj_search, tool_page, sess_page, proj_page, per_page)
+    ctx    = svc.get_tools_page_context(dr, date_from, date_to, tool_search, sess_search, proj_search, tool_page, sess_page, proj_page, per_page, client)
     target = request.headers.get("HX-Target", "")
     if request.headers.get("HX-Request"):
         if target == "tool-table-wrap":

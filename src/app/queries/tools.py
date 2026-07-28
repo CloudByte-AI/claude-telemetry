@@ -1,44 +1,49 @@
 """All SQL queries related to tool calls and tool tokens."""
 
-from ..routers.db import q
+from ..routers.db import q, client_where
 
 
-def get_all_tools_stats():
-    return q("""
+def get_all_tools_stats(client: str = None):
+    where, params = client_where(client, "s")
+    return q(f"""
         SELECT t.tool_name,
-               COUNT(*)                                     AS call_count,
-               COALESCE(SUM(tt.input_tokens),          0)   AS input_tokens,
-               COALESCE(SUM(tt.output_tokens),         0)   AS output_tokens,
-               COALESCE(SUM(tt.cache_read_tokens),     0)   AS cache_read_tokens,
-               COALESCE(SUM(tt.cache_creation_tokens), 0)   AS cache_creation_tokens
+               COUNT(*)                          AS call_count,
+               SUM(tt.input_tokens)               AS input_tokens,
+               SUM(tt.output_tokens)              AS output_tokens,
+               SUM(tt.cache_read_tokens)          AS cache_read_tokens,
+               SUM(tt.cache_creation_tokens)      AS cache_creation_tokens
         FROM TOOL t
         JOIN USER_PROMPT up ON up.prompt_id = t.prompt_id
+        JOIN SESSION s      ON s.session_id = up.session_id
         LEFT JOIN TOOL_TOKENS tt ON tt.tool_id = t.tool_id
-        WHERE 1=1
+        WHERE 1=1 {where}
         GROUP BY t.tool_name
         ORDER BY call_count DESC
-    """)
+    """, params)
 
 
-def get_tools_stats_by_date(d_from: str, d_to: str):
-    return q("""
+def get_tools_stats_by_date(d_from: str, d_to: str, client: str = None):
+    where, params = client_where(client, "s")
+    return q(f"""
         SELECT t.tool_name,
-               COUNT(*)                                     AS call_count,
-               COALESCE(SUM(tt.input_tokens),          0)   AS input_tokens,
-               COALESCE(SUM(tt.output_tokens),         0)   AS output_tokens,
-               COALESCE(SUM(tt.cache_read_tokens),     0)   AS cache_read_tokens,
-               COALESCE(SUM(tt.cache_creation_tokens), 0)   AS cache_creation_tokens
+               COUNT(*)                     AS call_count,
+               SUM(tt.input_tokens)          AS input_tokens,
+               SUM(tt.output_tokens)         AS output_tokens,
+               SUM(tt.cache_read_tokens)     AS cache_read_tokens,
+               SUM(tt.cache_creation_tokens) AS cache_creation_tokens
         FROM TOOL t
         JOIN USER_PROMPT up ON up.prompt_id = t.prompt_id
+        JOIN SESSION s      ON s.session_id = up.session_id
         LEFT JOIN TOOL_TOKENS tt ON tt.tool_id = t.tool_id
-        WHERE substr(up.timestamp, 1, 10) BETWEEN ? AND ?
+        WHERE substr(up.timestamp, 1, 10) BETWEEN ? AND ? {where}
         GROUP BY t.tool_name
         ORDER BY call_count DESC
-    """, (d_from, d_to))
+    """, (d_from, d_to) + params)
 
 
-def get_tools_overall_summary():
-    return q("""
+def get_tools_overall_summary(client: str = None):
+    where, params = client_where(client, "s")
+    return q(f"""
         SELECT COUNT(*)                       AS total_calls,
                COUNT(DISTINCT tool_name)      AS unique_tools,
                COUNT(DISTINCT up.session_id)  AS sessions_with_tools,
@@ -46,25 +51,27 @@ def get_tools_overall_summary():
         FROM TOOL t
         JOIN USER_PROMPT up ON up.prompt_id = t.prompt_id
         JOIN SESSION s      ON s.session_id = up.session_id
-    """, one=True)
+        WHERE 1=1 {where}
+    """, params, one=True)
 
 
-def get_sessions_tool_breakdown(search: str = ""):
+def get_sessions_tool_breakdown(search: str = "", client: str = None):
     search_filter = ""
-    params: tuple = ()
+    search_params: tuple = ()
     if search.strip():
         search_filter = "AND (p.name LIKE ? OR s.session_id LIKE ?)"
         like = f"%{search.strip()}%"
-        params = (like, like)
+        search_params = (like, like)
+    where, where_params = client_where(client, "s")
     return q(f"""
         SELECT s.session_id, p.name AS project_name,
                substr(s.created_at, 1, 10)  AS session_date,
                COALESCE(tc.tool_calls,   0) AS tool_calls,
                COALESCE(tc.unique_tools, 0) AS unique_tools,
-               COALESCE(tk.input_tokens,          0) AS input_tokens,
-               COALESCE(tk.output_tokens,         0) AS output_tokens,
-               COALESCE(tk.cache_read_tokens,     0) AS cache_read_tokens,
-               COALESCE(tk.cache_creation_tokens, 0) AS cache_creation_tokens
+               tk.input_tokens          AS input_tokens,
+               tk.output_tokens         AS output_tokens,
+               tk.cache_read_tokens     AS cache_read_tokens,
+               tk.cache_creation_tokens AS cache_creation_tokens
         FROM SESSION s
         LEFT JOIN PROJECT p ON p.project_id = s.project_id
         LEFT JOIN (
@@ -84,34 +91,36 @@ def get_sessions_tool_breakdown(search: str = ""):
             JOIN USER_PROMPT up ON up.prompt_id=t.prompt_id
             GROUP BY up.session_id
         ) tk ON tk.session_id = s.session_id
-        WHERE tc.tool_calls > 0 {search_filter}
+        WHERE tc.tool_calls > 0 {search_filter} {where}
         ORDER BY tc.tool_calls DESC
-    """, params)
+    """, search_params + where_params)
 
 
-def get_projects_tool_breakdown(search: str = ""):
+def get_projects_tool_breakdown(search: str = "", client: str = None):
     search_filter = ""
-    params: tuple = ()
+    search_params: tuple = ()
     if search.strip():
         search_filter = "AND p.name LIKE ?"
-        params = (f"%{search.strip()}%",)
+        search_params = (f"%{search.strip()}%",)
+    where, where_params = client_where(client, "s")
     return q(f"""
         SELECT p.project_id, p.name AS project_name,
                COALESCE(sc.session_count, 0) AS session_count,
                COALESCE(tc.tool_calls,    0) AS tool_calls,
                COALESCE(tc.unique_tools,  0) AS unique_tools,
-               COALESCE(tk.input_tokens,          0) AS input_tokens,
-               COALESCE(tk.output_tokens,         0) AS output_tokens,
-               COALESCE(tk.cache_read_tokens,     0) AS cache_read_tokens,
-               COALESCE(tk.cache_creation_tokens, 0) AS cache_creation_tokens
+               tk.input_tokens          AS input_tokens,
+               tk.output_tokens         AS output_tokens,
+               tk.cache_read_tokens     AS cache_read_tokens,
+               tk.cache_creation_tokens AS cache_creation_tokens
         FROM PROJECT p
-        LEFT JOIN (SELECT project_id, COUNT(*) AS session_count FROM SESSION GROUP BY project_id) sc ON sc.project_id = p.project_id
+        LEFT JOIN (SELECT s.project_id, COUNT(*) AS session_count FROM SESSION s WHERE 1=1 {where} GROUP BY s.project_id) sc ON sc.project_id = p.project_id
         LEFT JOIN (
             SELECT s.project_id,
                    COUNT(t.tool_id)            AS tool_calls,
                    COUNT(DISTINCT t.tool_name) AS unique_tools
             FROM TOOL t JOIN USER_PROMPT up ON up.prompt_id=t.prompt_id
             JOIN SESSION s ON s.session_id=up.session_id
+            WHERE 1=1 {where}
             GROUP BY s.project_id
         ) tc ON tc.project_id = p.project_id
         LEFT JOIN (
@@ -123,11 +132,12 @@ def get_projects_tool_breakdown(search: str = ""):
             FROM TOOL_TOKENS tt JOIN TOOL t ON t.tool_id=tt.tool_id
             JOIN USER_PROMPT up ON up.prompt_id=t.prompt_id
             JOIN SESSION s ON s.session_id=up.session_id
+            WHERE 1=1 {where}
             GROUP BY s.project_id
         ) tk ON tk.project_id = p.project_id
         WHERE tc.tool_calls > 0 {search_filter}
         ORDER BY tc.tool_calls DESC
-    """, params)
+    """, where_params * 3 + search_params)
 
 
 def get_session_tool_stats(session_id: str):
@@ -142,11 +152,11 @@ def get_session_tool_stats(session_id: str):
 def get_session_tools_breakdown(session_id: str):
     return q("""
         SELECT t.tool_name,
-               COUNT(*)                                     AS call_count,
-               COALESCE(SUM(tt.input_tokens),          0)   AS input_tokens,
-               COALESCE(SUM(tt.output_tokens),         0)   AS output_tokens,
-               COALESCE(SUM(tt.cache_read_tokens),     0)   AS cache_read_tokens,
-               COALESCE(SUM(tt.cache_creation_tokens), 0)   AS cache_creation_tokens,
+               COUNT(*)                     AS call_count,
+               SUM(tt.input_tokens)          AS input_tokens,
+               SUM(tt.output_tokens)         AS output_tokens,
+               SUM(tt.cache_read_tokens)     AS cache_read_tokens,
+               SUM(tt.cache_creation_tokens) AS cache_creation_tokens,
                SUM(CASE WHEN t.output_json LIKE '%"error"%' THEN 1 ELSE 0 END) AS errors
         FROM TOOL t
         JOIN USER_PROMPT up ON up.prompt_id = t.prompt_id
@@ -163,7 +173,7 @@ def get_session_turns_tool_breakdown(session_id: str):
                substr(up.timestamp, 1, 16) AS ts,
                COALESCE(tc.tool_count,   0) AS tool_count,
                COALESCE(tc.unique_tools, 0) AS unique_tools,
-               COALESCE(tk.turn_tokens,  0) AS turn_tokens
+               tk.turn_tokens AS turn_tokens
         FROM USER_PROMPT up
         LEFT JOIN (
             SELECT prompt_id, COUNT(*) AS tool_count, COUNT(DISTINCT tool_name) AS unique_tools
@@ -194,12 +204,12 @@ def get_project_tool_stats(project_id: str):
 def get_project_tools_breakdown(project_id: str):
     return q("""
         SELECT t.tool_name,
-               COUNT(*)                                     AS call_count,
-               COUNT(DISTINCT up.session_id)                AS sessions_used_in,
-               COALESCE(SUM(tt.input_tokens),          0)   AS input_tokens,
-               COALESCE(SUM(tt.output_tokens),         0)   AS output_tokens,
-               COALESCE(SUM(tt.cache_read_tokens),     0)   AS cache_read_tokens,
-               COALESCE(SUM(tt.cache_creation_tokens), 0)   AS cache_creation_tokens,
+               COUNT(*)                     AS call_count,
+               COUNT(DISTINCT up.session_id) AS sessions_used_in,
+               SUM(tt.input_tokens)          AS input_tokens,
+               SUM(tt.output_tokens)         AS output_tokens,
+               SUM(tt.cache_read_tokens)     AS cache_read_tokens,
+               SUM(tt.cache_creation_tokens) AS cache_creation_tokens,
                SUM(CASE WHEN t.output_json LIKE '%"error"%' THEN 1 ELSE 0 END) AS errors
         FROM TOOL t
         JOIN USER_PROMPT up ON up.prompt_id = t.prompt_id
@@ -216,10 +226,10 @@ def get_project_sessions_tool_breakdown(project_id: str):
         SELECT s.session_id, substr(s.created_at, 1, 10) AS session_date,
                COALESCE(tc.tool_calls,    0) AS tool_calls,
                COALESCE(tc.unique_tools,  0) AS unique_tools,
-               COALESCE(tk.input_tokens,          0) AS input_tokens,
-               COALESCE(tk.output_tokens,         0) AS output_tokens,
-               COALESCE(tk.cache_read_tokens,     0) AS cache_read_tokens,
-               COALESCE(tk.cache_creation_tokens, 0) AS cache_creation_tokens
+               tk.input_tokens          AS input_tokens,
+               tk.output_tokens         AS output_tokens,
+               tk.cache_read_tokens     AS cache_read_tokens,
+               tk.cache_creation_tokens AS cache_creation_tokens
         FROM SESSION s
         LEFT JOIN (
             SELECT up.session_id, COUNT(t.tool_id) AS tool_calls, COUNT(DISTINCT t.tool_name) AS unique_tools
@@ -241,10 +251,10 @@ def get_project_sessions_tool_breakdown(project_id: str):
 
 def get_session_tool_token_totals(session_id: str):
     return q("""
-        SELECT COALESCE(SUM(tt.input_tokens),0)          AS input_tokens,
-               COALESCE(SUM(tt.output_tokens),0)         AS output_tokens,
-               COALESCE(SUM(tt.cache_read_tokens),0)     AS cache_read_tokens,
-               COALESCE(SUM(tt.cache_creation_tokens),0) AS cache_creation_tokens
+        SELECT SUM(tt.input_tokens)          AS input_tokens,
+               SUM(tt.output_tokens)         AS output_tokens,
+               SUM(tt.cache_read_tokens)     AS cache_read_tokens,
+               SUM(tt.cache_creation_tokens) AS cache_creation_tokens
         FROM TOOL_TOKENS tt JOIN TOOL t ON t.tool_id=tt.tool_id
         JOIN USER_PROMPT up ON up.prompt_id=t.prompt_id
         WHERE up.session_id=?
@@ -253,10 +263,10 @@ def get_session_tool_token_totals(session_id: str):
 
 def get_project_tool_token_totals(project_id: str):
     return q("""
-        SELECT COALESCE(SUM(tt.input_tokens),0)          AS input_tokens,
-               COALESCE(SUM(tt.output_tokens),0)         AS output_tokens,
-               COALESCE(SUM(tt.cache_read_tokens),0)     AS cache_read_tokens,
-               COALESCE(SUM(tt.cache_creation_tokens),0) AS cache_creation_tokens
+        SELECT SUM(tt.input_tokens)          AS input_tokens,
+               SUM(tt.output_tokens)         AS output_tokens,
+               SUM(tt.cache_read_tokens)     AS cache_read_tokens,
+               SUM(tt.cache_creation_tokens) AS cache_creation_tokens
         FROM TOOL_TOKENS tt JOIN TOOL t ON t.tool_id=tt.tool_id
         JOIN USER_PROMPT up ON up.prompt_id=t.prompt_id
         JOIN SESSION s ON s.session_id=up.session_id

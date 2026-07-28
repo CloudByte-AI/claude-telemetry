@@ -18,7 +18,7 @@ logger = get_logger(__name__)
 
 
 def write_finding(
-    session_id: str,
+    session_id: str | None,
     scan_target: str,    # 'prompt' | 'response'
     result: ScanResult,
     blocked: bool,

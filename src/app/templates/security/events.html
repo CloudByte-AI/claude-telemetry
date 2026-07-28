@@ -1,4 +1,5 @@
 {% extends "base/index.html" %}
+{% from "base/_macros.html" import client_badge %}
 {% block title %}Security Reports — CloudByte{% endblock %}
 
 {% block head %}
@@ -20,10 +21,10 @@
     </div>
     <div class="er-head-right">
         <nav class="er-period-nav">
-            <a href="/security/events?period=today" class="er-pn {% if period == 'today' %}er-pn-on{% endif %}">Today</a>
-            <a href="/security/events?period=7d"    class="er-pn {% if period == '7d'    %}er-pn-on{% endif %}">7d</a>
-            <a href="/security/events?period=30d"   class="er-pn {% if period == '30d'   %}er-pn-on{% endif %}">30d</a>
-            <a href="/security/events?period=all"   class="er-pn {% if period == 'all'   %}er-pn-on{% endif %}">All</a>
+            <a href="/security/events?period=today&client={{ client_filter }}" class="er-pn {% if period == 'today' %}er-pn-on{% endif %}">Today</a>
+            <a href="/security/events?period=7d&client={{ client_filter }}"    class="er-pn {% if period == '7d'    %}er-pn-on{% endif %}">7d</a>
+            <a href="/security/events?period=30d&client={{ client_filter }}"   class="er-pn {% if period == '30d'   %}er-pn-on{% endif %}">30d</a>
+            <a href="/security/events?period=all&client={{ client_filter }}"   class="er-pn {% if period == 'all'   %}er-pn-on{% endif %}">All</a>
         </nav>
         <a href="/security" class="er-back">← Settings</a>
     </div>
@@ -179,6 +180,7 @@
     <!-- Column header -->
     <div class="er-list-head">
         <div>STATUS</div>
+        <div>CLIENT</div>
         <div>TARGET</div>
         <div>DETECTORS</div>
         <div class="er-th-r">HITS</div>
@@ -201,6 +203,7 @@
                     {{ ev.status_label }}
                 </span>
             </div>
+            <div>{{ client_badge(ev.client, compact=true) }}</div>
             <div>
                 <span class="er-target {% if ev.scan_target == 'prompt' %}er-target-prompt{% else %}er-target-resp{% endif %}">
                     {{ ev.scan_target }}
@@ -268,6 +271,9 @@
 
             <!-- Audit strip -->
             <div class="er-audit">
+                <span class="er-audit-k">CLIENT</span>
+                <span class="er-audit-v">{{ client_badge(ev.client, compact=true) }}</span>
+                <span class="er-audit-sep">·</span>
                 <span class="er-audit-k">SHA-256</span>
                 <span class="er-audit-v">{{ ev.hash_short or '—' }}</span>
                 <span class="er-audit-sep">·</span>
@@ -293,11 +299,11 @@
     <span class="er-pg-info">Page {{ page }} · {{ events | length }} event{{ 's' if events | length != 1 else '' }}</span>
     <div class="er-pg-btns">
         {% if page > 1 %}
-        <a href="?period={{ period }}{% if scan_target %}&target={{ scan_target }}{% endif %}{% if blocked_only %}&blocked=1{% endif %}&page={{ page - 1 }}"
+        <a href="?period={{ period }}{% if scan_target %}&target={{ scan_target }}{% endif %}{% if blocked_only %}&blocked=1{% endif %}&client={{ client_filter }}&page={{ page - 1 }}"
            class="er-pg-btn">← Prev</a>
         {% endif %}
         {% if has_more %}
-        <a href="?period={{ period }}{% if scan_target %}&target={{ scan_target }}{% endif %}{% if blocked_only %}&blocked=1{% endif %}&page={{ page + 1 }}"
+        <a href="?period={{ period }}{% if scan_target %}&target={{ scan_target }}{% endif %}{% if blocked_only %}&blocked=1{% endif %}&client={{ client_filter }}&page={{ page + 1 }}"
            class="er-pg-btn">Next →</a>
         {% endif %}
     </div>
@@ -307,7 +313,7 @@
 {% else %}
 <div class="er-list-empty">
     {% if scan_target or blocked_only %}
-    No events match this filter. <a href="/security/events?period={{ period }}" class="er-empty-link">Clear filter</a>
+    No events match this filter. <a href="/security/events?period={{ period }}&client={{ client_filter }}" class="er-empty-link">Clear filter</a>
     {% else %}
     No events recorded in this period.
     {% endif %}

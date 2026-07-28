@@ -1,6 +1,6 @@
 """
 CloudByte Dashboard — FastAPI + Jinja2
-Run: uvicorn src.app.app:app --reload --port 8765
+Run: uvicorn src.app.app:app --reload --port 4723
 """
 
 from contextlib import asynccontextmanager
