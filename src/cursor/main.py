@@ -3,7 +3,7 @@ Cursor Entry Point
 
 Dispatches Cursor hook invocations to their handlers. This mirrors the
 dispatch style of src/main.py (the Claude Code entrypoint) for familiarity,
-but is a fully independent file — the Cursor and Claude adapters are being
+but is a fully independent file - the Cursor and Claude adapters are being
 built and wired up one hook at a time, in isolation from each other.
 
 Invoked as: uv run --directory <plugin_root> -m src.cursor.main <command>

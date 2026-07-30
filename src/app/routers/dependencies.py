@@ -1,5 +1,5 @@
 """
-dependencies.py — Shared FastAPI dependencies.
+dependencies.py - Shared FastAPI dependencies.
 
 The templates instance is created here once and imported by all route modules.
 This avoids circular imports since app.py imports routes and routes need templates.

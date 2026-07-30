@@ -6,12 +6,12 @@ from ..queries.config import load_config, save_config, config_exists
 def get_config_context() -> dict:
     """
     Always reads directly from the config file.
-    No defaults injected — what's in the file is what the user sees.
+    No defaults injected - what's in the file is what the user sees.
 
     The `llm` and `worker` blocks are no longer read: the LLM generation layer and
     the task-queue worker were removed, and `worker.port` was never actually wired
     to the dashboard port (4723 is hardcoded). Existing config.json files keep those
-    keys — they are simply inert now.
+    keys - they are simply inert now.
     """
     cfg = load_config()
 
@@ -27,7 +27,7 @@ def update_config(form: dict) -> tuple[bool, str]:
     """
     Read the file, apply only the fields from the form, write back.
 
-    Nothing on the config page currently posts editable settings — the LLM
+    Nothing on the config page currently posts editable settings - the LLM
     provider, feature-toggle and worker-port fields were all removed. Kept as the
     POST target so the form still round-trips, and so future settings have a home.
     """

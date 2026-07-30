@@ -40,7 +40,7 @@
     Chart.defaults.font.family = "'IBM Plex Mono', monospace";
     Chart.defaults.color       = '#6b7d8f';
 
-    /* ─── Chart 1: Donut — tool call distribution across project ─── */
+    /* ─── Chart 1: Donut - tool call distribution across project ─── */
     new Chart(document.getElementById('donut-chart'), {
         type: 'doughnut',
         data: {
@@ -71,7 +71,7 @@
         }
     });
 
-    /* ─── Chart 2: Grouped bar — tool calls + tokens per session ─── */
+    /* ─── Chart 2: Grouped bar - tool calls + tokens per session ─── */
     new Chart(document.getElementById('bar-chart'), {
         type: 'bar',
         data: {

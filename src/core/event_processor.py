@@ -6,7 +6,7 @@ records on prompt submit, for the Claude Code hooks.
 
 Everything downstream of a prompt (responses, tools, thinking, tokens) is written
 by src/main.py's stop hook and src/core/recovery.py, which read the JSONL
-directly — this module deliberately does not duplicate that.
+directly - this module deliberately does not duplicate that.
 """
 
 from pathlib import Path

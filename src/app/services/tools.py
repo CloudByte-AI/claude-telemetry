@@ -15,7 +15,7 @@ def get_tools_page_context(
 ) -> dict:
     d_from, d_to = resolve_dates(dr, date_from, date_to)
 
-    # Chart data — date-filtered, top 5 + others
+    # Chart data - date-filtered, top 5 + others
     all_tools   = list(tq.get_tools_stats_by_date(d_from, d_to, client))
     total_calls = sum(r["call_count"] for r in all_tools) or 1
 
@@ -39,7 +39,7 @@ def get_tools_page_context(
             "cache_creation_tokens": sum(r["cache_creation_tokens"] or 0  for r in others),
         }]
 
-    # Per-tool table — all time, searchable
+    # Per-tool table - all time, searchable
     all_tools_full = list(tq.get_all_tools_stats(client))
     total_all      = sum(r["call_count"] for r in all_tools_full) or 1
     tool_rows_enriched = []
@@ -85,7 +85,7 @@ def get_session_tool_context(session_id: str) -> dict | None:
     if not session:
         return None
 
-    # Use dict() so we can safely derive values — sqlite3.Row is read-only
+    # Use dict() so we can safely derive values - sqlite3.Row is read-only
     stats        = dict(tq.get_session_tool_counts(session_id))
     token_totals = dict(tq.get_session_tool_token_totals(session_id) or
                         {"input_tokens":0,"output_tokens":0,

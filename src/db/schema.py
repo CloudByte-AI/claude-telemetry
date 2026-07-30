@@ -71,7 +71,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
 
     # ---------------- SESSION ----------------
     # client: which plugin/IDE this session came from ('claude_code' | 'cursor').
-    # Child tables never need their own copy — they all trace back to SESSION
+    # Child tables never need their own copy - they all trace back to SESSION
     # via session_id/prompt_id, so a join is enough to attribute any row.
     # ended_at/end_reason/final_status: no Claude Code hook gives session-end
     # data at all - Cursor's sessionEnd hook does. duration_ms on that hook's
@@ -110,21 +110,21 @@ def create_tables(conn: sqlite3.Connection) -> None:
     """)
 
     # ---------------- USER_PROMPT ----------------
-    # prompt_id      : stable auto-gen UUID — URL key, never changes (Claude Code);
+    # prompt_id      : stable auto-gen UUID - URL key, never changes (Claude Code);
     #                  Cursor uses the hook's generation_id directly instead
-    # jsonl_prompt_id: real ID from Claude Code JSONL — stored by stop() hook
+    # jsonl_prompt_id: real ID from Claude Code JSONL - stored by stop() hook
     # entrypoint     : client used for this prompt (claude-vscode, claude-terminal, etc.)
-    # client_version : app version at time of prompt — Claude Code version or Cursor version,
+    # client_version : app version at time of prompt - Claude Code version or Cursor version,
     #                  shared column across both clients (renamed from claude_version)
     # git_branch     : active git branch at time of prompt
-    # mode           : autonomy mode for this turn — Claude Code's permission_mode
+    # mode           : autonomy mode for this turn - Claude Code's permission_mode
     #                  (default, auto, plan, etc.) or Cursor's composer_mode
-    #                  (agent, ask, edit) — shared column across both clients
+    #                  (agent, ask, edit) - shared column across both clients
     #                  (renamed from permission_mode)
-    # status         : completion status for this turn — Claude Code: NULL = normal,
+    # status         : completion status for this turn - Claude Code: NULL = normal,
     #                  'tool_use' = user denied tool, 'request' = user hit ESC;
     #                  Cursor: 'completed' or 'aborted' (renamed from interrupt_reason,
-    #                  broadened into a shared column — vocabularies differ by client,
+    #                  broadened into a shared column - vocabularies differ by client,
     #                  join against SESSION.client to interpret)
     # attachments    : JSON array of context attachments (files/rules) submitted with the prompt
     cursor.execute("""
@@ -313,7 +313,7 @@ def _safe_alter(cursor: sqlite3.Cursor, sql: str, log_msg: str, changes: list, r
 def migrate_schema(conn: sqlite3.Connection) -> list:
     """
     Apply schema migrations for existing databases.
-    Safe to run on any database — skips if column already exists.
+    Safe to run on any database - skips if column already exists.
 
     Returns a list of change records describing what was actually applied
     (or lost a concurrent race) this run, for the migration history log.
@@ -451,19 +451,19 @@ def migrate_schema(conn: sqlite3.Connection) -> list:
             logger.info("Migration: created SECURITY_SCAN_EVENT table")
             changes.append({"table": "SECURITY_SCAN_EVENT", "action": "create_table", "status": "applied"})
 
-    # Rename event_id column alias — old rows used finding_id, add event_id if missing
+    # Rename event_id column alias - old rows used finding_id, add event_id if missing
     cursor.execute("PRAGMA table_info(SECURITY_SCAN_EVENT)")
     sse_cols = [row[1] for row in cursor.fetchall()]
     if sse_cols and "event_id" not in sse_cols and "finding_id" in sse_cols:
         # SQLite doesn't support RENAME COLUMN before 3.25; recreate is safest but
-        # for now just alias via a view — old rows remain readable as event_id via INSERT
+        # for now just alias via a view - old rows remain readable as event_id via INSERT
         logger.info("Migration: SECURITY_SCAN_EVENT has finding_id column (legacy), continuing")
 
     # ── v2: drop the LLM task-queue / summary subsystem ──────────────────────
     # These three tables were written only by the removed worker pipeline:
-    #   TASK_QUEUE      — task rows for the LLM worker
-    #   SESSION_SUMMARY — LLM-generated session summaries (never populated)
-    #   OBSERVATION     — LLM-generated observations (never populated; the live
+    #   TASK_QUEUE      - task rows for the LLM worker
+    #   SESSION_SUMMARY - LLM-generated session summaries (never populated)
+    #   OBSERVATION     - LLM-generated observations (never populated; the live
     #                     store is HOOK_OBSERVATION, written by the MCP tool on
     #                     both the Claude Code and Cursor paths)
     #
@@ -471,12 +471,12 @@ def migrate_schema(conn: sqlite3.Connection) -> list:
     # _safe_alter (not a bare execute) for two reasons: it tolerates the
     # OperationalError raised when a concurrent hook drops the same table a
     # moment earlier, and it records the change so the drop shows up in
-    # migration_history.jsonl — this is the most destructive step in the
+    # migration_history.jsonl - this is the most destructive step in the
     # project's history and must not be silent.
     #
     # NOTE: create_indexes() must not contain idx_task_queue_* statements. It is
     # called immediately after this function by ensure_schema_initialized(), and
-    # indexing a dropped table raises "no such table" — which would abort before
+    # indexing a dropped table raises "no such table" - which would abort before
     # set_schema_version() and leave the DB migrating forever.
     for _legacy in ("TASK_QUEUE", "SESSION_SUMMARY", "OBSERVATION"):
         _safe_alter(
@@ -582,13 +582,13 @@ class DatabaseSchema:
     TABLE_HOOK_OBSERVATION = "HOOK_OBSERVATION"
     TABLE_SECURITY_SCAN_EVENT = "SECURITY_SCAN_EVENT"
 
-    # All tables. MUST stay in sync with create_tables() — verify_schema() below
+    # All tables. MUST stay in sync with create_tables() - verify_schema() below
     # returns False if any entry is missing, and ensure_schema_initialized()
     # responds by calling create_tables(), which would recreate anything listed
     # here. Leaving a dropped table in this list silently resurrects it on the
     # next hook invocation.
     #
-    # HOOK_OBSERVATION and SECURITY_SCAN_EVENT were previously absent — the two
+    # HOOK_OBSERVATION and SECURITY_SCAN_EVENT were previously absent - the two
     # tables that matter most were never actually verified.
     ALL_TABLES = [
         TABLE_PROJECT,

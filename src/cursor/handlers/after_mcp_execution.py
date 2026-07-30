@@ -8,7 +8,7 @@ All other MCP tool calls are logged for discovery but not stored.
 Field mapping:
   session_id  <- session_id (or conversation_id as fallback)
   prompt_id   <- generation_id  (same key beforeSubmitPrompt wrote for
-                 USER_PROMPT.prompt_id — no extra join needed)
+                 USER_PROMPT.prompt_id - no extra join needed)
   obs_data    <- json.loads(tool_input)  (full record_observation input:
                  type, title, subtitle, narrative, facts, concepts,
                  files_read, files_modified)
@@ -37,7 +37,7 @@ def _write_observation(hook_data: dict) -> None:
 
     if not session_id or not generation_id:
         logger.warning(
-            f"Incomplete afterMCPExecution payload — "
+            f"Incomplete afterMCPExecution payload - "
             f"session_id={session_id!r}, generation_id={generation_id!r}. Skipping write."
         )
         return
@@ -56,13 +56,13 @@ def _write_observation(hook_data: dict) -> None:
     obs_id = save_observation(session_id, generation_id, obs_data)
     if obs_id:
         logger.info(
-            f"Observation saved — obs_id={obs_id!r}, "
+            f"Observation saved - obs_id={obs_id!r}, "
             f"type={obs_data.get('type', '')!r}, title={obs_data.get('title', '')!r}, "
             f"session={session_id!r}, gen={generation_id!r}"
         )
     else:
         logger.warning(
-            f"Observation save failed — session={session_id!r}, gen={generation_id!r}"
+            f"Observation save failed - session={session_id!r}, gen={generation_id!r}"
         )
 
 
@@ -82,7 +82,7 @@ def handle_after_mcp_execution() -> None:
         if tool_name == _OBS_TOOL:
             _write_observation(hook_data)
         else:
-            logger.debug(f"Non-observation MCP tool — tool_name={tool_name!r}, skipping DB write")
+            logger.debug(f"Non-observation MCP tool - tool_name={tool_name!r}, skipping DB write")
 
     except Exception as exc:
         debug(f"ERROR - {exc}")

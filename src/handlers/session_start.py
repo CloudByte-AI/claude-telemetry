@@ -52,7 +52,7 @@ def _ensure_mcp_permission() -> None:
 
     User-scope settings apply across ALL projects so the user is never
     prompted for permission when Claude calls record_observation.
-    Idempotent — safe to run on every setup call.
+    Idempotent - safe to run on every setup call.
     """
     import json as _json
 
@@ -66,9 +66,9 @@ def _ensure_mcp_permission() -> None:
             has_bom = raw_bytes.startswith(b'\xef\xbb\xbf')
 
             if has_bom:
-                logger.warning("settings.json has BOM — stripping and parsing with utf-8-sig")
+                logger.warning("settings.json has BOM - stripping and parsing with utf-8-sig")
             else:
-                logger.info("settings.json has no BOM — parsing normally")
+                logger.info("settings.json has no BOM - parsing normally")
 
             try:
                 raw = raw_bytes.decode("utf-8-sig").strip()

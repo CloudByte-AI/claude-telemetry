@@ -1,6 +1,6 @@
 {
   "name": "claude-telemetry",
-  "description": "Claude Telemetry - Observability stack for Claude \u2014 captures prompts, responses, tool usage, tokens, and observations across sessions.",
+  "description": "Claude Telemetry - Observability stack for Claude - captures prompts, responses, tool usage, tokens, and observations across sessions.",
   "owner": {
     "name": "CloudByte-AI"
   },
@@ -8,7 +8,7 @@
     {
       "name": "claude-telemetry",
       "source": "./",
-      "description": "Claude Telemetry - Observability stack for Claude \u2014 captures prompts, responses, tool usage, tokens, and observations across sessions.",
+      "description": "Claude Telemetry - Observability stack for Claude - captures prompts, responses, tool usage, tokens, and observations across sessions.",
       "version": "0.1.40",
       "author": {
         "name": "CloudByte-AI"

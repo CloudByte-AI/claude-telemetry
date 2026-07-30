@@ -33,7 +33,7 @@ def _norm(values: list) -> list:
 def get_dashboard_context(client: str = None) -> dict:
     stats = dict(dq.get_dashboard_stats(client))
 
-    # ── Heatmap — raw day → prompt count dict passed to JS ───────────────────
+    # ── Heatmap - raw day → prompt count dict passed to JS ───────────────────
     raw_heat   = list(dq.get_activity_heatmap(client))
     heat_data  = {r["day"]: r["prompts"] for r in raw_heat}
     heat_max   = max(heat_data.values()) if heat_data else 1

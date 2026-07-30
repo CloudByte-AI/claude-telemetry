@@ -57,7 +57,7 @@ def _log_obs_audit(prompt_id: str, obs_data: Dict[str, Any]) -> None:
 
 
 def _to_list(value: Any) -> list:
-    """Normalize a value to a list — handles both native lists and JSON-encoded strings."""
+    """Normalize a value to a list - handles both native lists and JSON-encoded strings."""
     if isinstance(value, list):
         return value
     if isinstance(value, str):
@@ -91,7 +91,7 @@ def save_observation(
 
         _log_obs_audit(prompt_id, obs_data)
 
-        # Normalize to list first — Claude sometimes passes arrays as JSON strings
+        # Normalize to list first - Claude sometimes passes arrays as JSON strings
         facts = json.dumps(_to_list(obs_data.get("facts", [])))
         concepts = json.dumps(_to_list(obs_data.get("concepts", [])))
         files_read = json.dumps(_to_list(obs_data.get("files_read", [])))
@@ -117,7 +117,7 @@ def save_observation(
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Dedup guard — skip if an observation with the same content already
+        # Dedup guard - skip if an observation with the same content already
         # exists for this prompt.  Prevents duplicate rows when process_missed_pairs
         # runs on every UserPromptSubmit for a session with a past interrupted
         # MCP observation call (Bug #1).

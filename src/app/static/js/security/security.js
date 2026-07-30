@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════
-   Security Scanning — UI Controller
+   Security Scanning - UI Controller
    ══════════════════════════════════════════════════════ */
 
 // ── Hero / enable flow ────────────────────────────────
@@ -15,7 +15,7 @@ function enableFeature() {
 }
 
 function choosePreset(name) {
-    // Simple form submit — no det_* inputs present in the hero state.
+    // Simple form submit - no det_* inputs present in the hero state.
     // save_from_form() detects this case and loads the full preset from YAML
     // so all detector defaults are applied correctly.
     document.getElementById('enabled-input').value = '1';
@@ -43,7 +43,7 @@ function disableFeature() {
 
 // ── Preset application (enabled state) ───────────────
 
-// The plan saved on the server — read once at page load.
+// The plan saved on the server - read once at page load.
 const _serverPlan = (() => {
     const el = document.getElementById('plan-input');
     return el ? el.value : '';
@@ -223,7 +223,7 @@ function addKeyword() {
     if (!inp) return;
     const val = inp.value.trim();
 
-    // Reject single characters — too broad and cause false positives on everything
+    // Reject single characters - too broad and cause false positives on everything
     if (val.length < 2) {
         inp.style.borderColor = 'var(--red)';
         inp.setAttribute('placeholder', 'Min 2 characters required');
@@ -286,7 +286,7 @@ function handleAlKey(e) { if (e.key === 'Enter') { e.preventDefault(); addAllowl
 
 // ── Pattern builder ───────────────────────────────────
 let selectedPattern    = '';
-let _originalPattern   = '';   // raw generated pattern — preserved for "← Back to generated"
+let _originalPattern   = '';   // raw generated pattern - preserved for "← Back to generated"
 let _pmActiveTab       = 'examples';
 let _editMode          = false;
 let _editOriginalName  = '';
@@ -368,7 +368,7 @@ function editPattern(btn) {
             document.getElementById('pm-result').style.display = '';
         }
     } else if (data.pattern) {
-        // Regex-only mode — set value BEFORE switchPmTab so updatePmSaveBtn sees it
+        // Regex-only mode - set value BEFORE switchPmTab so updatePmSaveBtn sees it
         document.getElementById('pm-regex-val').value = data.pattern;
         switchPmTab('regex', null);
     }

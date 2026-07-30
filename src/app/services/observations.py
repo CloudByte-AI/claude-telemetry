@@ -51,7 +51,7 @@ def _enrich_observation(row) -> dict:
         else:
             d["project_display"] = cleaned
     else:
-        d["project_display"] = "—"
+        d["project_display"] = "-"
 
     d["type_meta"] = TYPE_META.get(d.get("type", ""), {"label": d.get("type", ""), "color": "accent", "icon": "◎"})
     return d
@@ -99,7 +99,7 @@ def get_observations_context(
     donut_labels = [TYPE_META[t]["label"] for t in ALL_TYPES if type_counts.get(t,0) > 0]
     donut_values = [type_counts.get(t,0) for t in ALL_TYPES if type_counts.get(t,0) > 0]
 
-    # Distinct sessions that actually produced observations — the denominator for
+    # Distinct sessions that actually produced observations - the denominator for
     # the "Avg Density" / "Unique Contexts" tiles. This used to be derived from
     # TASK_QUEUE (sessions that enqueued an LLM task), which drifted from reality
     # and counted every Cursor session as zero, since Cursor never enqueued anything.

@@ -4,7 +4,7 @@ Dashboard Process Launcher (blocking variant)
 Starts the FastAPI dashboard (src.app.app) on localhost:4723 and waits for it
 to answer, plus resolves which port an already-running instance is on.
 
-Named `llm_client` for historical reasons — it used to be the HTTP client that
+Named `llm_client` for historical reasons - it used to be the HTTP client that
 submitted observation/summary tasks to a background LLM worker. That worker and
 its task queue are gone; what's left is purely dashboard process lifecycle.
 
@@ -45,7 +45,7 @@ logger = get_logger(__name__)
 
 
 # Default dashboard port. Hardcoded rather than read from config.json's
-# worker.port — that setting has never been wired to anything.
+# worker.port - that setting has never been wired to anything.
 DEFAULT_WORKER_PORT = 4723
 
 # How long ensure_worker_running() waits for the port to come up.
@@ -76,7 +76,7 @@ def ensure_worker_running() -> bool:
     Start the FastAPI dashboard if it isn't already listening, then wait for it.
 
     Delegates the actual spawn to worker_checker.ensure_worker_quick_sync() so
-    both entry points share one detach implementation — on Windows that means
+    both entry points share one detach implementation - on Windows that means
     `start /B`, which is what reliably outlives the one-shot hook process that
     launched it.
 

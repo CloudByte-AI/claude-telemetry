@@ -100,12 +100,12 @@ def handle_post_tool_use() -> None:
         if obs_state.check_and_mark(session_id, generation_id):
             output = {"additional_context": OBS_REMINDER}
             logger.info(
-                f"Cursor OBS reminder injected — "
+                f"Cursor OBS reminder injected - "
                 f"session={session_id!r}, gen={generation_id!r}"
             )
         else:
             logger.debug(
-                f"Cursor OBS reminder skipped (already injected this turn) — "
+                f"Cursor OBS reminder skipped (already injected this turn) - "
                 f"gen={generation_id!r}"
             )
 

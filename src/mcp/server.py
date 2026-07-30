@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-CloudByte MCP Server — Observation Capture
+CloudByte MCP Server - Observation Capture
 
 Exposes a single MCP tool: record_observation
 
 Claude calls this tool as routine background telemetry after every response
 where it used tools or made meaningful changes. The tool simply acknowledges
-receipt — observations are visible in the JSONL transcript for inspection.
+receipt - observations are visible in the JSONL transcript for inspection.
 
 Start command (declared in plugin.json mcpServers):
     uv run --directory "${CLAUDE_PLUGIN_ROOT}" python -m src.mcp.server
@@ -112,7 +112,7 @@ def _negotiate_protocol_version(requested: Any) -> str:
 # ── MCP Logger setup ───────────────────────────────────────────────────────────
 
 def _setup_mcp_logger() -> logging.Logger:
-    """Setup separate MCP log file — mcp-YYYY-MM-DD.log"""
+    """Setup separate MCP log file - mcp-YYYY-MM-DD.log"""
     log_dir = get_logs_dir()
     log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -198,7 +198,7 @@ _TOOLS: list = [
         "title": "Record Observation",
         "description": (
             "Record a structured technical observation about work just completed, so it is "
-            "kept as durable project memory — the session work log / telemetry history. "
+            "kept as durable project memory - the session work log / telemetry history. "
             "Call it once per DISTINCT unit of work finished in this response: one call for a "
             "bug fixed, a separate call for a feature added, a separate call for an analysis "
             "completed. Multiple calls per response are expected for complex tasks. "
@@ -206,7 +206,7 @@ _TOOLS: list = [
             "WHEN NOT TO CALL: pure conversation, greetings, or a trivial single read that "
             "produced no outcome.\n"
             "\n"
-            "EVERY call MUST carry all eight fields — type, title, subtitle, narrative, "
+            "EVERY call MUST carry all eight fields - type, title, subtitle, narrative, "
             "facts, concepts, files_read, files_modified. A call carrying only type and "
             "title is stored as an empty husk of an observation: the subtitle, narrative, "
             "facts and concepts are the entire reason the record is worth keeping, so never "
@@ -224,7 +224,7 @@ _TOOLS: list = [
             "narrative that says what was done, how it works and why it matters. Do not "
             "reply with a one-line stub.\n"
             "\n"
-            "FORMATTING: every value is a plain single-line string — no newline characters, "
+            "FORMATTING: every value is a plain single-line string - no newline characters, "
             "no inner quotes, forward slashes in every path (never backslashes). "
             "The tool replies with a short confirmation and never changes your work; it is "
             "routine background telemetry, so there is no need to mention the call in your "
@@ -251,7 +251,7 @@ _TOOLS: list = [
                         "change", "discovery", "decision",
                     ],
                     "description": (
-                        "REQUIRED. Category of the work YOU performed — not a word borrowed "
+                        "REQUIRED. Category of the work YOU performed - not a word borrowed "
                         "from the user's request. bugfix: broken behaviour identified and "
                         "corrected. feature: something added that did not exist. refactor: "
                         "existing code restructured with no behaviour change. change: an "
@@ -276,7 +276,7 @@ _TOOLS: list = [
                     "minLength": 20,
                     "maxLength": 200,
                     "description": (
-                        "REQUIRED — never send this empty. One sentence, max 24 words, "
+                        "REQUIRED - never send this empty. One sentence, max 24 words, "
                         "describing what the system now does differently. "
                         "GOOD: 'Requests with no Authorization header no longer crash the "
                         "middleware.'"
@@ -286,7 +286,7 @@ _TOOLS: list = [
                     "type": "string",
                     "minLength": 60,
                     "description": (
-                        "REQUIRED — never send this empty; it is the most valuable field in "
+                        "REQUIRED - never send this empty; it is the most valuable field in "
                         "the record. 2-4 sentences, structured as what was done -> how it "
                         "works -> why it matters. Focus on deliverables and capabilities. "
                         "Single line only, no newline characters, forward slashes for paths."
@@ -298,7 +298,7 @@ _TOOLS: list = [
                     "minItems": 1,
                     "maxItems": 12,
                     "description": (
-                        "REQUIRED — at least one entry, never an empty array. Concise "
+                        "REQUIRED - at least one entry, never an empty array. Concise "
                         "technical statements about what changed. No inner quotes, no log "
                         "strings, forward slashes for paths. "
                         "GOOD: ['Modified src/auth.py to add OAuth2 support']. "
@@ -311,7 +311,7 @@ _TOOLS: list = [
                     "minItems": 1,
                     "maxItems": 8,
                     "description": (
-                        "REQUIRED — at least one entry. Short abstract technical patterns as "
+                        "REQUIRED - at least one entry. Short abstract technical patterns as "
                         "kebab-case tags, NOT descriptions. "
                         "GOOD: ['oauth2', 'pkce-flow', 'token-refresh']. "
                         "BAD: ['login button', 'user screen', 'oauth setup']."
@@ -374,7 +374,7 @@ def _send(obj: dict) -> None:
         sys.stdout.write(json.dumps(obj) + "\n")
         sys.stdout.flush()
     except BrokenPipeError:
-        _log.warning("BrokenPipe — client disconnected")
+        _log.warning("BrokenPipe - client disconnected")
         sys.exit(0)
 
 
@@ -399,7 +399,7 @@ def _dispatch(req: dict) -> None:
     if method == "initialize":
         requested_version = params.get("protocolVersion")
         negotiated_version = _negotiate_protocol_version(requested_version)
-        _log.info("Client connected — initialize received")
+        _log.info("Client connected - initialize received")
         _log.info(f"Client requested protocolVersion: {requested_version!r}")
         _log.info(f"Client capabilities: {json.dumps(params.get('capabilities', {}))}")
         _log.info(f"Client info: {json.dumps(params.get('clientInfo', {}))}")
@@ -411,7 +411,7 @@ def _dispatch(req: dict) -> None:
             "instructions": (
                 "Use record_observation after completing any task that involved tool use "
                 "(Read, Write, Edit, Bash, Grep, etc.). "
-                "This is routine background telemetry — call it before your final response, "
+                "This is routine background telemetry - call it before your final response, "
                 "no need to narrate it in your reply, same as other routine tool calls. "
             ),
         })
@@ -421,7 +421,7 @@ def _dispatch(req: dict) -> None:
         _reply_ok(id_, {"tools": _TOOLS})
 
     elif method == "ping":
-        _log.debug("ping received — responding")
+        _log.debug("ping received - responding")
         if id_ is not None:
             _reply_ok(id_, {})
 
@@ -436,7 +436,7 @@ def _dispatch(req: dict) -> None:
             if "__unparsedToolInput" in audit["unknown"]:
                 _log.warning(
                     f"OBS_UNPARSED record_observation: client could not parse the model's "
-                    f"tool input JSON — payload arrived wrapped in __unparsedToolInput and "
+                    f"tool input JSON - payload arrived wrapped in __unparsedToolInput and "
                     f"this observation will be dropped downstream. title={title!r}"
                 )
             elif audit["missing"] or audit["unknown"]:
@@ -461,7 +461,7 @@ def _dispatch(req: dict) -> None:
 
     elif method.startswith("notifications/"):
         _log.debug(f"notification received: {method}")
-        pass  # Fire-and-forget — no response needed.
+        pass  # Fire-and-forget - no response needed.
 
     elif id_ is not None:
         _log.warning(f"Method not found: {method}")
@@ -492,10 +492,10 @@ def main() -> None:
             raw_line = sys.stdin.readline()
 
             if raw_line == "":
-                # stdin.readline() returns "" only on real EOF (pipe closed) —
+                # stdin.readline() returns "" only on real EOF (pipe closed) -
                 # the parent process disconnected, so shut down instead of
                 # looping forever and leaking an orphaned process.
-                _log.info("stdin closed — parent disconnected, shutting down")
+                _log.info("stdin closed - parent disconnected, shutting down")
                 break
 
             line = raw_line.strip()
@@ -513,10 +513,10 @@ def main() -> None:
                 sys.stderr.flush()
 
         except KeyboardInterrupt:
-            _log.info("KeyboardInterrupt — shutting down")
+            _log.info("KeyboardInterrupt - shutting down")
             break
         except EOFError:
-            _log.info("EOFError on stdin — parent disconnected, shutting down")
+            _log.info("EOFError on stdin - parent disconnected, shutting down")
             break
         except Exception as exc:
             _log.error(f"Main loop error: {exc}", exc_info=True)

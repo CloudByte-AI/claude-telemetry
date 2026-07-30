@@ -204,7 +204,7 @@ def _compute_posture(stats: dict) -> tuple[str, int]:
 
 
 def _finding_label(f: dict) -> str:
-    """Extract display label from a finding dict — handles both old and new formats."""
+    """Extract display label from a finding dict - handles both old and new formats."""
     return f.get("label") or f.get("detector") or f.get("category") or ""
 
 
@@ -604,14 +604,14 @@ def save_from_form(form: dict) -> tuple[bool, str]:
     if enabled and not has_det_inputs:
         return apply_preset(plan)
 
-    # Plan changed — load preset defaults (preserves allowlist / custom patterns)
+    # Plan changed - load preset defaults (preserves allowlist / custom patterns)
     existing_plan = load_security_yaml().get("plan")
     if enabled and plan != existing_plan:
         return apply_preset(plan)
 
     scope = form.get("scope", "both")
 
-    # Build categories dict — all detectors use det_ prefix with spaces→_
+    # Build categories dict - all detectors use det_ prefix with spaces→_
     categories: dict = {}
     for det in DETECTORS:
         if det.key == "Entropy Secret":

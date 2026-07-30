@@ -131,12 +131,12 @@
 }
 
 .stb-star-custom {
-    color: #fe4c02;        /* accent orange — custom/user title */
+    color: #fe4c02;        /* accent orange - custom/user title */
     text-shadow: 0 0 8px rgba(254, 76, 2, 0.35);
 }
 
 .stb-star-ai {
-    color: #a08cf8;        /* soft purple — AI generated title */
+    color: #a08cf8;        /* soft purple - AI generated title */
     text-shadow: 0 0 8px rgba(160, 140, 248, 0.35);
 }
 

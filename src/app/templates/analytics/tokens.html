@@ -1,6 +1,6 @@
 {% extends "base/index.html" %}
 {% from "base/_macros.html" import not_tracked %}
-{% block title %}Token Usage — CloudByte{% endblock %}
+{% block title %}Token Usage - CloudByte{% endblock %}
 {% block breadcrumb %}token usage{% endblock %}
 
 {% block head %}<link rel="stylesheet" href="/static/css/analytics/tokens.css">{% endblock %}
@@ -29,11 +29,11 @@
         <div style="display:flex; gap:48px;">
             <div class="stat-unit">
                 <div style="font-size:10px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:4px;">Total Volume</div>
-                <div style="font-size:48px; font-weight:400; color:var(--text); line-height:1; letter-spacing:-0.04em;" id="hero-total-tokens">—</div>
+                <div style="font-size:48px; font-weight:400; color:var(--text); line-height:1; letter-spacing:-0.04em;" id="hero-total-tokens">-</div>
             </div>
             <div class="stat-unit">
                 <div style="font-size:10px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:4px;">Avg / Session</div>
-                <div style="font-size:48px; font-weight:400; color:#fe4c02; line-height:1; letter-spacing:-0.04em;" id="hero-avg-tokens">—</div>
+                <div style="font-size:48px; font-weight:400; color:#fe4c02; line-height:1; letter-spacing:-0.04em;" id="hero-avg-tokens">-</div>
             </div>
         </div>
     </div>
@@ -82,7 +82,7 @@
                 <div class="donut-canvas-wrap">
                     <canvas id="donut-chart"></canvas>
                     <div class="donut-center">
-                        <div class="donut-center-val" id="donut-total">—</div>
+                        <div class="donut-center-val" id="donut-total">-</div>
                         <div class="donut-center-label">Total</div>
                     </div>
                 </div>

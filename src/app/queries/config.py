@@ -5,7 +5,7 @@ from pathlib import Path
 
 CONFIG_PATH = Path.home() / ".cloudbyte" / "config.json"
 
-# Used only when the file doesn't exist — minimal structure so the UI has something
+# Used only when the file doesn't exist - minimal structure so the UI has something
 # to show. The former `llm` and `worker` blocks are gone with the task-queue/LLM
 # subsystem, and no `settings` key was ever read (see src/main.py's setup()).
 # Kept in sync with the defaults written there.
@@ -18,7 +18,7 @@ _EMPTY_CONFIG = {
 def load_config() -> dict:
     """
     Load config directly from disk.
-    If file exists, returns exactly what is in the file — no merging, no defaults.
+    If file exists, returns exactly what is in the file - no merging, no defaults.
     If file does not exist, returns a minimal empty structure.
     """
     if not CONFIG_PATH.exists():
