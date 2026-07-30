@@ -1,6 +1,6 @@
 # claude-telemetry
 
-> Full observability for Claude Code — prompt history, token usage, and tool telemetry across every session.
+> Full observability for Claude Code - prompt history, token usage, and tool telemetry across every session.
 
 [![Plugin](https://img.shields.io/badge/Claude_Code-Plugin-blue)](https://github.com/CloudByte-AI/claude-telemetry)
 [![License](https://img.shields.io/badge/license-Apache_2.0-green)](LICENSE)
@@ -10,7 +10,7 @@
 
 ## Overview
 
-`claude-telemetry` hooks into Claude Code as a passive plugin and captures everything that happens in your sessions — prompts, responses, tool calls, file events, and token usage — without changing your workflow.
+`claude-telemetry` hooks into Claude Code as a passive plugin and captures everything that happens in your sessions - prompts, responses, tool calls, file events, and token usage - without changing your workflow.
 
 All data is stored locally in a SQLite database. Nothing leaves your machine.
 
@@ -104,7 +104,7 @@ No configuration required. No changes to your workflow.
 - Session start/end times and working directories
 - Activity timelines across sessions
 - Per-project history and decision log
-- Full record of what was built, fixed, or deployed — and when
+- Full record of what was built, fixed, or deployed - and when
 
 ---
 
@@ -150,12 +150,12 @@ This tool is called automatically after responses where tools were used or meani
 
 ## Data Schema
 
-**Location:** `~/.cloudbyte/data/cloudbyte.db` — SQLite, stored locally
+**Location:** `~/.cloudbyte/data/cloudbyte.db` - SQLite, stored locally
 
 | Table | Description |
 |---|---|
 | `PROJECT` | Project ID, name, path, created_at |
-| `SESSION` | Session ID, project reference, working directory, JSONL file |
+| `SESSION` | Session ID, project reference, working directory, transcript path, originating client (`claude_code` / `cursor`), end state |
 | `RAW_LOG` | Complete event JSON for each interaction |
 | `USER_PROMPT` | User prompts with UUID, parent references, timestamps |
 | `RESPONSE` | Claude's responses linked to prompts |
@@ -163,8 +163,8 @@ This tool is called automatically after responses where tools were used or meani
 | `THINKING` | Thinking process data for applicable models |
 | `IO_TOKENS` | Input/output/cache tokens per message |
 | `TOOL_TOKENS` | Token usage for tool calls |
-| `OBSERVATION` | Technical observations and learnings |
-| `SESSION_SUMMARY` | Summarized session data |
+| `HOOK_OBSERVATION` | Observations recorded by the agent via the MCP `record_observation` tool |
+| `SECURITY_SCAN_EVENT` | Secret/PII scan findings, with the masked text and what was blocked |
 
 ---
 
@@ -208,14 +208,16 @@ uv run python -m src.mcp.server
 ```
 claude-telemetry/
 ├── src/
-│   ├── app/              # Flask dashboard
+│   ├── app/              # FastAPI dashboard (localhost:4723)
 │   ├── common/           # Shared utilities
 │   ├── core/             # Event processing
 │   ├── db/               # Database schema, writers, managers
 │   ├── handlers/         # Hook handlers (session_start, user_prompt, etc.)
-│   ├── integrations/     # External integrations (Claude, LLM providers)
+│   ├── integrations/     # External integrations (Claude Code JSONL transcripts)
 │   ├── mcp/              # MCP server implementation
-│   └── workers/          # Background workers
+│   ├── security/         # Secret & PII scanning
+│   ├── cursor/           # Cursor adapter (shares the DB, tagged via SESSION.client)
+│   └── workers/          # Dashboard process launcher / guarded teardown
 ├── hooks/                # Claude hook definitions
 ├── scripts/              # Setup and validation scripts
 ├── pyproject.toml        # Project dependencies

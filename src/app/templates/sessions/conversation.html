@@ -1,6 +1,6 @@
 {% extends "base/index.html" %}
 {% from "base/_macros.html" import client_badge %}
-{% block title %}Conversation #{{ turn_number }} — CloudByte{% endblock %}
+{% block title %}Conversation #{{ turn_number }} - CloudByte{% endblock %}
 {% block breadcrumb %}sessions / {{ prompt.session_id[:8] }}… / conversation #{{ turn_number }}{% endblock %}
 
 {% block head %}
@@ -25,7 +25,7 @@
                 <span style="color:var(--text3);font-size:13px;"> / {{ total_turns }}</span>
                 {{ client_badge(prompt.client, compact=true) }}
             </div>
-            <div class="dimmer" style="font-size:12px;">{{ prompt.project_name or 'Unknown' }} — {{
+            <div class="dimmer" style="font-size:12px;">{{ prompt.project_name or 'Unknown' }} - {{
                 prompt.session_id[:8] }}…</div>
         </div>
     </div>
@@ -48,7 +48,7 @@
     <div class="conv-left">
         <div class="timeline">
 
-            <!-- 1. User Prompt — FIX 3: collapsible, shows preview when closed -->
+            <!-- 1. User Prompt - FIX 3: collapsible, shows preview when closed -->
             <div class="tl-item">
                 <div class="tl-icon user">👤</div>
                 <div class="tl-body">
@@ -73,7 +73,7 @@
                 </div>
             </div>
 
-            <!-- 2. Tool calls — each preceded by its paired thinking block -->
+            <!-- 2. Tool calls - each preceded by its paired thinking block -->
             {% for item in tool_list %}
 
             <!-- 2a. Thinking paired to this tool (shown as its own timeline step) -->
@@ -160,7 +160,7 @@
 
             {% endfor %}
 
-            <!-- 3b. Interrupt indicator — shown when the turn was interrupted -->
+            <!-- 3b. Interrupt indicator - shown when the turn was interrupted -->
             {% if prompt.status in ('tool_use', 'request', 'aborted') %}
             <div class="tl-item">
                 <div class="tl-icon interrupt">⚡</div>
@@ -173,14 +173,14 @@
                     </div>
                     <div class="tl-card" style="border-color:rgba(255,60,60,0.2);background:rgba(255,60,60,0.02);">
                         <div style="padding:10px 14px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#ff3c3c;">
-                            This turn was interrupted — no response was recorded.
+                            This turn was interrupted - no response was recorded.
                         </div>
                     </div>
                 </div>
             </div>
             {% endif %}
 
-            <!-- 4. Response — FIX 3&4: collapsed bar shows preview text + token summary -->
+            <!-- 4. Response - FIX 3&4: collapsed bar shows preview text + token summary -->
             {% if response %}
             <div class="tl-item">
                 <div class="tl-icon resp">◆</div>
@@ -246,7 +246,7 @@
     <!-- ── Right sidebar (independently scrollable) ── -->
     <div class="sticky-right">
 
-        <!-- Turn Summary — open by default -->
+        <!-- Turn Summary - open by default -->
         <div class="sc-card">
             <div class="sc-header open" onclick="toggleCard(this)">
                 <span class="sc-title">Turn Summary</span>
@@ -262,7 +262,7 @@
                             style="color:var(--purple);">{{ 'yes' if tool_list | selectattr('thinking') | list else 'no'
                             }}</span></div>
                     <div class="meta-row"><span class="meta-key">model</span><span class="meta-val mono dimmer"
-                            style="font-size:11px;">{{ response.model if response else '—' }}</span></div>
+                            style="font-size:11px;">{{ response.model if response else '-' }}</span></div>
                     {% if prompt.status in ('tool_use', 'request', 'aborted') %}
                     <div class="meta-row" style="margin-top:4px;">
                         <span class="meta-key" style="color:#ff3c3c;">interrupted</span>
@@ -317,7 +317,7 @@
             </div>
         </div>
 
-        <!-- Response Tokens — collapsed by default -->
+        <!-- Response Tokens - collapsed by default -->
         {% if tokens %}
         <div class="sc-card">
             <div class="sc-header" onclick="toggleCard(this)">
@@ -347,7 +347,7 @@
         </div>
         {% endif %}
 
-        <!-- Tool Token Total — collapsed by default -->
+        <!-- Tool Token Total - collapsed by default -->
         {% if tool_list %}
         <div class="sc-card">
             <div class="sc-header" onclick="toggleCard(this)">
@@ -385,7 +385,7 @@
         </div>
         {% endif %}
 
-        <!-- Tools Used — collapsed by default -->
+        <!-- Tools Used - collapsed by default -->
         {% if tool_list %}
         <div class="sc-card">
             <div class="sc-header" onclick="toggleCard(this)">

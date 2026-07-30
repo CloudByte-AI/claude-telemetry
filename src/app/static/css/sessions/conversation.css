@@ -59,7 +59,7 @@
     border-radius: 2px;
 }
 
-/* Cards must NOT stretch — they size to their own content */
+/* Cards must NOT stretch - they size to their own content */
 
 /* ── Timeline vertical line ── */
 .timeline {
@@ -332,7 +332,7 @@
     color: #eee;
 }
 
-/* tool collapsed bar — shows name + tokens + status */
+/* tool collapsed bar - shows name + tokens + status */
 .tool-summary-bar {
     display: flex;
     align-items: center;

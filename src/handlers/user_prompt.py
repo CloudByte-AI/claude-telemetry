@@ -22,6 +22,7 @@ from ftfy import fix_text
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.common.logging import get_logger, setup_logging
+from src.common.obs_instructions import CLAUDE_OBS_REMINDER
 from src.common.paths import get_claude_logs_dir
 from src.common.time_utils import get_now_ist_iso
 from src.core.event_processor import process_user_prompt
@@ -77,7 +78,7 @@ def ensure_session_initialized(session_id: str, cwd: str) -> bool:
             logger.debug(f"Session {session_id} already initialized")
             return True
 
-        # Session doesn't exist — create project and session
+        # Session doesn't exist - create project and session
         logger.info(
             f"Session {session_id} not found, initializing project and session records"
         )
@@ -134,87 +135,11 @@ def ensure_session_initialized(session_id: str, cwd: str) -> bool:
         return False
 
 
-def retry_pending_tasks(session_id: str):
-    """
-    Retry pending and failed tasks for a session.
-
-    Called on session start to process any tasks that didn't complete
-    in the previous session.
-    """
-    from src.db.manager import get_db_manager
-
-    try:
-        db = get_db_manager()
-
-        tasks = db.execute(
-            """
-            SELECT id, task_type, session_id, prompt_id, priority, payload
-            FROM TASK_QUEUE
-            WHERE session_id = ? AND status IN ('pending', 'failed')
-            ORDER BY priority DESC, created_at ASC
-            """,
-            (session_id,),
-        ).fetchall()
-
-        if not tasks:
-            return
-
-        logger.info(
-            f"Found {len(tasks)} pending/failed tasks for session {session_id}, retrying..."
-        )
-
-        for task in tasks:
-            db.execute(
-                """
-                UPDATE TASK_QUEUE
-                SET status = 'pending',
-                    error_message = NULL,
-                    retry_count = retry_count + 1,
-                    created_at = datetime('now')
-                WHERE id = ?
-                """,
-                (task[0],),
-            )
-
-        try:
-            from src.workers.llm_client import reset_worker
-            reset_worker()
-            logger.info("Worker reset to process retried tasks")
-        except Exception as e:
-            logger.warning(f"Could not reset worker: {e}")
-
-    except Exception as e:
-        # Don't log as error — tables might not exist yet
-        logger.debug(
-            f"Could not retry pending tasks (DB might not be initialized yet): {e}"
-        )
-
-
 # ---------------------------------------------------------------------------
 # OBS reminder constant
 # ---------------------------------------------------------------------------
 
-OBS_REMINDER = (
-    "MEMORY RULE: If you used ANY tool this response, "
-    "call mcp__plugin_claude-telemetry_cloudbyte__record_observation BEFORE "
-    "writing your final answer. "
-    "STRICT RULE: make one separate call for EVERY distinct type of work performed. "
-    "Never combine two different types into one call. Never skip a type you actually did. "
-    "Determine type from YOUR OWN ACTIONS not from user's words"
-    "discovery: you read/analysed something and formed understanding, no writes. "
-    "bugfix: you identified broken behaviour and corrected it."
-    "feature: you added something that did not exist before. "
-    "refactor: you restructured existing code/config without changing behaviour. "
-    "change: you modified an existing value, setting, or data. "
-    "decision: you evaluated multiple valid options and chose one"
-    "only use this when you genuinely weighed alternatives, not just followed instructions. "
-    "Call directly — do NOT use ToolSearch first. "
-    "This is routine background telemetry, like other logging calls — "
-    "no need to call it out in your reply unless the user asks about it. "
-    "JSON SAFETY: all field values must be plain single-line strings. "
-    "Use forward slashes in paths (never backslashes). "
-    "No inner quotes, no newlines inside any field value."
-)
+OBS_REMINDER = CLAUDE_OBS_REMINDER
 
 
 # ---------------------------------------------------------------------------
@@ -302,13 +227,13 @@ def extract_user_text_from_hook_data(hook_data: dict) -> str:
     Returns:
         str: Cleaned user text only
     """
-    # Format 1 — simple string
+    # Format 1 - simple string
     if "prompt" in hook_data:
         return filter_system_messages(hook_data["prompt"])
     if "content" in hook_data and isinstance(hook_data["content"], str):
         return filter_system_messages(hook_data["content"])
 
-    # Format 2 — message.content array
+    # Format 2 - message.content array
     message = hook_data.get("message", {})
     if isinstance(message, dict):
         content_array = message.get("content", [])
@@ -361,7 +286,7 @@ def handle_user_prompt():
         }
     }
 
-    NOTE: promptId and parentUuid are NOT present in hook stdin — they are
+    NOTE: promptId and parentUuid are NOT present in hook stdin - they are
     read from the transcript file (with retry logic to avoid the race condition
     where the hook fires before Claude writes the entry to the JSONL).
     """
@@ -402,10 +327,6 @@ def handle_user_prompt():
         )
         event_uuid = hook_data.get("uuid") or hook_data.get("id")
         event_timestamp = hook_data.get("timestamp") or hook_data.get("time")
-
-        # ── Retry pending tasks from previous session ────────────────────────
-        if session_id:
-            retry_pending_tasks(session_id)
 
         # ── Heartbeat this session in the shared active-session registry ─────
         # Uses register() (not a separate "touch if exists" call) so a session
@@ -449,14 +370,14 @@ def handle_user_prompt():
         if session_id and cwd:
             ensure_session_initialized(session_id, cwd)
 
-        # ── Security scan — runs before USER_PROMPT write ────────────────────
+        # ── Security scan - runs before USER_PROMPT write ────────────────────
         # If scanning is enabled and a finding is detected, the prompt is
         # blocked immediately. process_user_prompt() is never called so the
         # raw secret is never written to USER_PROMPT. All findings are logged
         # to SECURITY_SCAN_EVENT with the masked version of the prompt.
         try:
             # Ensure SECURITY_SCAN_EVENT table exists before writing.
-            # migrate_schema() only runs in stop() by default — run it here
+            # migrate_schema() only runs in stop() by default - run it here
             # too so existing installs don't miss the first scan events.
             try:
                 from src.db.schema import migrate_schema
@@ -486,7 +407,7 @@ def handle_user_prompt():
                     _ms = _sec_result.scan_ms
                     _ms_str = f"{_ms:.2f}" if _ms < 1 else f"{int(_ms)}"
                     logger.info(
-                        f"Security scan: {len(_sec_result.findings)} finding(s) — blocking prompt "
+                        f"Security scan: {len(_sec_result.findings)} finding(s) - blocking prompt "
                         f"[{_sec_result.scan_strategy}, {_ms_str}ms]"
                     )
                     _finding_lines = "\n".join(
@@ -545,7 +466,7 @@ def handle_user_prompt():
 
                     return
         except Exception as _sec_err:
-            # Scan failure must never block the user — log and continue
+            # Scan failure must never block the user - log and continue
             logger.warning(f"Security scan error (non-fatal, prompt proceeding): {_sec_err}")
 
         # ── Defer prompts with emojis / special characters ───────────────────
@@ -555,7 +476,7 @@ def handle_user_prompt():
         # will insert the prompt once with the correct promptId.
         if _has_special_chars(prompt_text):
             logger.info(
-                f"Prompt contains non-ASCII/emoji characters — deferring DB insert to stop hook "
+                f"Prompt contains non-ASCII/emoji characters - deferring DB insert to stop hook "
                 f"(length={len(prompt_text)}, preview={prompt_text[:50]!r})"
             )
             if session_id and cwd:
@@ -570,7 +491,7 @@ def handle_user_prompt():
             }))
             return
 
-        # prompt_id is always None here — a UUID is generated by process_user_prompt.
+        # prompt_id is always None here - a UUID is generated by process_user_prompt.
         # The stop hook reads from JSONL and updates jsonl_prompt_id on the stored record.
         prompt_id = None
         parent_uuid = None

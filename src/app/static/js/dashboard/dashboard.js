@@ -21,7 +21,7 @@
     ═══════════════════════════════ */
     var MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-    // Grid constants — Sharp Geometric
+    // Grid constants - Sharp Geometric
     var CELL = 12;
     var GAP = 4;
 
@@ -42,7 +42,7 @@
 
     var todayStr = dateKey(today);
 
-    /* Fin Orange heatmap palette — one color regardless of client. The
+    /* Fin Orange heatmap palette - one color regardless of client. The
        per-client breakdown is still shown in the tooltip (see ghTipShow),
        just not as a tile color split - keeps the heatmap reading as one
        consistent "activity" signal rather than a client-comparison chart. */
@@ -232,7 +232,7 @@
     renderYear(ghYear);
 
     /* ═══════════════════════════════
-       RADAR CHARTS — Wise Green palette
+       RADAR CHARTS - Wise Green palette
     ═══════════════════════════════ */
     var radarOpts = function (labels) {
         return {
@@ -260,7 +260,7 @@
                         label: function (ctx) {
                             var raw = ctx.dataset.raw;
                             if (!raw) return ' ' + ctx.dataset.label + ': ' + ctx.parsed.r;
-                            var text = ' ' + ctx.dataset.label + ' — ' + labels[ctx.dataIndex] + ': ' + raw[ctx.dataIndex];
+                            var text = ' ' + ctx.dataset.label + ' - ' + labels[ctx.dataIndex] + ': ' + raw[ctx.dataIndex];
                             var byClient = ctx.dataset.rawByClient && ctx.dataset.rawByClient[ctx.dataIndex];
                             if (byClient) {
                                 var cc = byClient['claude_code'] || 0;

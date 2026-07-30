@@ -16,7 +16,7 @@
         <tbody>
             {% for s in sessions %}
             {% set cwd_parts = (s.cwd or '').replace('--', '/').replace('\\', '/').split('/') %}
-            {% set last_dir = cwd_parts|last if cwd_parts else '—' %}
+            {% set last_dir = cwd_parts|last if cwd_parts else '-' %}
             <tr>
                 <td style="white-space:nowrap;">
                     <span class="mono accent-text" style="font-size:11px;">{{ s.session_id[:12] }}…</span>
@@ -29,12 +29,12 @@
                 <td style="max-width:200px;">
                     <span class="mono dimmer"
                           style="font-size:11px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:195px;"
-                          title="{{ s.cwd or '' }}">{{ s.cwd[-35:] if s.cwd else '—' }}</span>
+                          title="{{ s.cwd or '' }}">{{ s.cwd[-35:] if s.cwd else '-' }}</span>
                 </td>
                 <td style="white-space:nowrap;"><span class="mono accent-text">{{ s.prompt_count }}</span></td>
                 <td style="white-space:nowrap;"><span class="mono amber-text">{{ s.tool_count }}</span></td>
                 <td class="mono dimmer" style="white-space:nowrap;font-size:11px;">
-                    {{ s.created_at[:16].replace('T',' ') if s.created_at else '—' }}
+                    {{ s.created_at[:16].replace('T',' ') if s.created_at else '-' }}
                 </td>
                 <td style="white-space:nowrap;width:70px;text-align:right;">
                     <a href="/sessions/{{ s.session_id }}" class="btn btn-primary"

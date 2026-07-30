@@ -126,7 +126,7 @@
                 <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; row-gap: 6px;">
                     {% for pv in plugin_versions %}
                     <div style="display: flex; align-items: center; gap: 4px;"
-                        title="{{ 'Claude Code' if pv.client == 'claude_code' else 'Cursor' }} plugin (claude-telemetry) version — not the {{ 'Claude Code CLI' if pv.client == 'claude_code' else 'Cursor IDE' }}'s own version">
+                        title="{{ 'Claude Code' if pv.client == 'claude_code' else 'Cursor' }} plugin (claude-telemetry) version - not the {{ 'Claude Code CLI' if pv.client == 'claude_code' else 'Cursor IDE' }}'s own version">
                         {{ client_badge(pv.client, compact=true) }}
                         <span class="mono" style="font-size: 10px; font-weight: 700; color: var(--accent);">v{{ pv.version }}</span>
                     </div>

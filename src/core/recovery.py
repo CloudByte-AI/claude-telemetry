@@ -5,12 +5,12 @@ process_missed_pairs(session_id, cwd) detects interrupted or missed turns
 using JSONL identifiers and recovers all available data into the DB.
 
 Two interruption types detected from JSONL:
-  "[Request interrupted by user for tool use]" — user denied a tool call
-  "[Request interrupted by user]"              — user hit ESC mid-stream
+  "[Request interrupted by user for tool use]" - user denied a tool call
+  "[Request interrupted by user]"              - user hit ESC mid-stream
 
 Two recovery passes:
   Pass 1 (interrupt-based): uses the above markers to find interrupted promptIds.
-    Works at raw event level — captures tools and tokens even with no text response.
+    Works at raw event level - captures tools and tokens even with no text response.
   Pass 2 (message_id-based): catches any end_turn response the stop hook missed
     for any other reason (crash, etc.) by checking message_id in RESPONSE table.
 """
@@ -57,8 +57,8 @@ def _find_interrupted_prompt_ids(events: list) -> dict:
     Return {promptId: status} for all interrupted turns.
 
     status values:
-      'tool_use' — user denied a tool call
-      'request'  — user hit ESC / cancelled the entire request
+      'tool_use' - user denied a tool call
+      'request'  - user hit ESC / cancelled the entire request
     """
     result = {}
     for event in events:
@@ -232,13 +232,13 @@ def _find_or_create_db_prompt(
 
     db_prompt_id = None
 
-    # Pass 1 — normalized exact
+    # Pass 1 - normalized exact
     for cid, ctxt in candidates:
         if _norm(ctxt) == prompt_text_norm:
             db_prompt_id = cid
             break
 
-    # Pass 2 — fuzzy substring
+    # Pass 2 - fuzzy substring
     # Minimum-length guard prevents short prompts ("ok", "yes", etc.) from
     # false-matching any longer candidate and attaching records to the wrong
     # prompt (Bug #3).
@@ -250,7 +250,7 @@ def _find_or_create_db_prompt(
                     db_prompt_id = cid
                     break
 
-    # Pass 3 — create new record
+    # Pass 3 - create new record
     if not db_prompt_id:
         new_id = jsonl_prompt_id
         try:
@@ -330,7 +330,7 @@ def _recover_interrupted_prompt(
 ) -> bool:
     """
     Pass 1: recover all available data for an interrupted promptId.
-    Works at raw event level — handles tool-only turns with no text response.
+    Works at raw event level - handles tool-only turns with no text response.
     """
     prompt_text_raw, prompt_event = _get_user_prompt_event(events, prompt_id)
     if not prompt_text_raw:
@@ -351,7 +351,7 @@ def _recover_interrupted_prompt(
     cursor = conn.cursor()
 
     # Identify the chronologically last assistant message.  Only this one gets
-    # a RESPONSE row — mirroring the stop-hook, which only ever writes the
+    # a RESPONSE row - mirroring the stop-hook, which only ever writes the
     # final end_turn response.  Writing all intermediate sub-responses as
     # RESPONSE rows caused N rows per interrupted agentic turn in the UI (Bug #4).
     last_msg_id = max(
@@ -478,11 +478,11 @@ def process_missed_pairs(session_id: str, cwd: str) -> dict:
     """
     Recover response data for any JSONL turns the stop hook missed.
 
-    Pass 1 — interrupt-based:
+    Pass 1 - interrupt-based:
       Detect promptIds with [Request interrupted by user ...] markers.
       Recover prompt + tools + tokens directly from raw JSONL events.
 
-    Pass 2 — message_id-based:
+    Pass 2 - message_id-based:
       For end_turn pairs not in the RESPONSE table (stop hook missed for
       any other reason), apply the same stop-hook matching + write logic.
 
@@ -503,7 +503,7 @@ def process_missed_pairs(session_id: str, cwd: str) -> dict:
         if not events:
             return counts
 
-        # Run migrations before any writes — ensures status column exists
+        # Run migrations before any writes - ensures status column exists
         # even when called from UserPromptSubmit before stop() has had a chance to migrate.
         try:
             from src.db.schema import migrate_schema
@@ -542,7 +542,7 @@ def process_missed_pairs(session_id: str, cwd: str) -> dict:
             if pair.get("prompt_id") in interrupted_ids:
                 continue
 
-            # Not in DB — apply stop-hook matching logic
+            # Not in DB - apply stop-hook matching logic
             jsonl_prompt_id = pair["prompt_id"]
             prompt_text = _fix_text(pair.get("prompt", ""))
             prompt_rec = pair.get("prompt_rec", {})

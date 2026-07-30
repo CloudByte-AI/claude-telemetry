@@ -28,7 +28,7 @@ Security scanning (response):
   - afterAgentResponse has NO supported output fields, so findings are
     logged to SECURITY_SCAN_EVENT (blocked=False) but the user cannot be
     notified in the chat UI from this hook. This is a log-only operation.
-  - Failures always fail open — the response is never withheld.
+  - Failures always fail open - the response is never withheld.
 """
 
 import json
@@ -49,11 +49,11 @@ def _scan_response_for_secrets(response_text: str, session_id: str | None) -> No
     """
     Scan the agent response text for secrets when scope == 'both'.
 
-    Log-only — afterAgentResponse has no output fields so findings cannot
+    Log-only - afterAgentResponse has no output fields so findings cannot
     be shown to the user from this hook. Findings are written to
     SECURITY_SCAN_EVENT with blocked=False for visibility in the dashboard.
 
-    Never raises — failures must not affect the normal response flow.
+    Never raises - failures must not affect the normal response flow.
     """
     try:
         from src.security.config import load_security_config
@@ -64,17 +64,17 @@ def _scan_response_for_secrets(response_text: str, session_id: str | None) -> No
         sec_cfg = load_security_config(cwd=None)
 
         if not sec_cfg.enabled:
-            logger.debug("Security scanning disabled — skipping response scan")
+            logger.debug("Security scanning disabled - skipping response scan")
             return
 
         if sec_cfg.scope != "both":
             logger.debug(
-                f"Response scan skipped — scope={sec_cfg.scope!r} (requires 'both')"
+                f"Response scan skipped - scope={sec_cfg.scope!r} (requires 'both')"
             )
             return
 
         logger.info(
-            f"Security response scan starting — plan={sec_cfg.plan!r}, "
+            f"Security response scan starting - plan={sec_cfg.plan!r}, "
             f"response_len={len(response_text)} chars"
         )
 
@@ -83,7 +83,7 @@ def _scan_response_for_secrets(response_text: str, session_id: str | None) -> No
         ms = scan_result.scan_ms
         ms_str = f"{ms:.2f}" if ms < 1 else f"{int(ms)}"
         logger.info(
-            f"Security response scan complete — findings={len(scan_result.findings)}, "
+            f"Security response scan complete - findings={len(scan_result.findings)}, "
             f"lines={scan_result.line_count}, time={ms_str}ms, "
             f"strategy={scan_result.scan_strategy}"
         )
@@ -110,7 +110,7 @@ def _scan_response_for_secrets(response_text: str, session_id: str | None) -> No
             masked_text=masked_text,
         )
         logger.warning(
-            f"⚠️  Sensitive data found in agent response — "
+            f"⚠️  Sensitive data found in agent response - "
             f"{len(scan_result.findings)} finding(s) logged. "
             f"event_id={event_id}. "
             f"View details at http://localhost:4723/security/events"
@@ -203,9 +203,9 @@ def handle_after_agent_response() -> None:
 
         obs_state.delete(session_id, prompt_id)
 
-        # ── Security scan — response (log-only, never blocks) ─────────────────
+        # ── Security scan - response (log-only, never blocks) ─────────────────
         # Only runs when scope == "both". afterAgentResponse has no output
-        # fields, so findings cannot be surfaced in the chat UI here — they
+        # fields, so findings cannot be surfaced in the chat UI here - they
         # are recorded in SECURITY_SCAN_EVENT for the dashboard. Failures
         # always fail open.
         if response_text:

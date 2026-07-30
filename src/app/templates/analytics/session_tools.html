@@ -1,6 +1,6 @@
 {% extends "base/index.html" %}
 {% from "base/_macros.html" import not_tracked %}
-{% block title %}Tool Analysis · {{ session.session_id[:8] }} — CloudByte{% endblock %}
+{% block title %}Tool Analysis · {{ session.session_id[:8] }} - CloudByte{% endblock %}
 {% block breadcrumb %}tool calls / session {{ session.session_id[:8] }}…{% endblock %}
 
 {% block head %}<link rel="stylesheet" href="/static/css/analytics/session_tools.css">{% endblock %}
@@ -25,7 +25,7 @@
     <div style="display:flex; justify-content:space-between; align-items:flex-end;">
         <div>
             <div style="font-size:10px; font-weight:800; color:var(--amber); text-transform:uppercase; letter-spacing:0.12em; margin-bottom:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:600px;">
-                {% set raw_p = session.project_name or session.cwd or '—' %}
+                {% set raw_p = session.project_name or session.cwd or '-' %}
                 {{ (raw_p|replace('--', '/')|replace('\\', '/') if raw_p else '').split('/')|last }}
             </div>
             <h1 style="font-size: 54px; font-weight: 400; color: var(--text); line-height: 1.0; letter-spacing: -0.05em; margin:0;">Tool Analysis</h1>
@@ -189,7 +189,7 @@
                         <td><span class="mono" style="font-weight:700; color:var(--text);">#{{ row.turn_num }}</span></td>
                         <td>
                             <div style="font-size:13px; color:var(--text-dim); max-width:400px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                                {{ row.prompt or '—' }}
+                                {{ row.prompt or '-' }}
                             </div>
                         </td>
                         <td style="text-align:center;"><span class="mono" style="color:#fe4c02; font-weight:700;">{{ row.tool_count }}</span></td>

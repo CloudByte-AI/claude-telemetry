@@ -16,8 +16,48 @@ from src.common.logging import get_logger
 logger = get_logger(__name__)
 
 
+OBS_FIELDS = (
+    "type", "title", "subtitle", "narrative",
+    "facts", "concepts", "files_read", "files_modified",
+)
+
+# concepts, files_read and files_modified are legitimately empty on some
+# observations (a discovery that wrote nothing), so they are not counted here.
+OBS_NEVER_EMPTY = ("type", "title", "subtitle", "narrative", "facts")
+
+
+def audit_obs_fields(obs_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Describe what an observation payload is missing or has renamed.
+
+    Runs on every write path (stop hook, recovery, Cursor afterMCPExecution) so
+    a payload that arrives with invented field names is visible in the log
+    instead of silently landing as a title-only row.
+    """
+    obs_data = obs_data if isinstance(obs_data, dict) else {}
+    unknown = sorted(set(obs_data) - set(OBS_FIELDS))
+    return {
+        "missing": [f for f in OBS_NEVER_EMPTY if not obs_data.get(f)],
+        "absent": [f for f in OBS_FIELDS if f not in obs_data],
+        "unknown": unknown,
+        "dropped_chars": sum(len(json.dumps(obs_data[k], default=str)) for k in unknown),
+    }
+
+
+def _log_obs_audit(prompt_id: str, obs_data: Dict[str, Any]) -> None:
+    """Emit one OBS_INCOMPLETE warning when a payload will store badly."""
+    audit = audit_obs_fields(obs_data)
+    if not (audit["missing"] or audit["unknown"]):
+        return
+    logger.warning(
+        f"OBS_INCOMPLETE save_observation: prompt_id={prompt_id} "
+        f"title={str(obs_data.get('title', ''))[:60]!r} "
+        f"missing={audit['missing']} absent={audit['absent']} "
+        f"unknown={audit['unknown']} dropped_chars={audit['dropped_chars']}"
+    )
+
+
 def _to_list(value: Any) -> list:
-    """Normalize a value to a list — handles both native lists and JSON-encoded strings."""
+    """Normalize a value to a list - handles both native lists and JSON-encoded strings."""
     if isinstance(value, list):
         return value
     if isinstance(value, str):
@@ -49,7 +89,9 @@ def save_observation(
     try:
         obs_id = str(uuid.uuid4())
 
-        # Normalize to list first — Claude sometimes passes arrays as JSON strings
+        _log_obs_audit(prompt_id, obs_data)
+
+        # Normalize to list first - Claude sometimes passes arrays as JSON strings
         facts = json.dumps(_to_list(obs_data.get("facts", [])))
         concepts = json.dumps(_to_list(obs_data.get("concepts", [])))
         files_read = json.dumps(_to_list(obs_data.get("files_read", [])))
@@ -75,7 +117,7 @@ def save_observation(
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Dedup guard — skip if an observation with the same content already
+        # Dedup guard - skip if an observation with the same content already
         # exists for this prompt.  Prevents duplicate rows when process_missed_pairs
         # runs on every UserPromptSubmit for a session with a past interrupted
         # MCP observation call (Bug #1).

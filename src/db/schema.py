@@ -71,7 +71,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
 
     # ---------------- SESSION ----------------
     # client: which plugin/IDE this session came from ('claude_code' | 'cursor').
-    # Child tables never need their own copy — they all trace back to SESSION
+    # Child tables never need their own copy - they all trace back to SESSION
     # via session_id/prompt_id, so a join is enough to attribute any row.
     # ended_at/end_reason/final_status: no Claude Code hook gives session-end
     # data at all - Cursor's sessionEnd hook does. duration_ms on that hook's
@@ -110,21 +110,21 @@ def create_tables(conn: sqlite3.Connection) -> None:
     """)
 
     # ---------------- USER_PROMPT ----------------
-    # prompt_id      : stable auto-gen UUID — URL key, never changes (Claude Code);
+    # prompt_id      : stable auto-gen UUID - URL key, never changes (Claude Code);
     #                  Cursor uses the hook's generation_id directly instead
-    # jsonl_prompt_id: real ID from Claude Code JSONL — stored by stop() hook
+    # jsonl_prompt_id: real ID from Claude Code JSONL - stored by stop() hook
     # entrypoint     : client used for this prompt (claude-vscode, claude-terminal, etc.)
-    # client_version : app version at time of prompt — Claude Code version or Cursor version,
+    # client_version : app version at time of prompt - Claude Code version or Cursor version,
     #                  shared column across both clients (renamed from claude_version)
     # git_branch     : active git branch at time of prompt
-    # mode           : autonomy mode for this turn — Claude Code's permission_mode
+    # mode           : autonomy mode for this turn - Claude Code's permission_mode
     #                  (default, auto, plan, etc.) or Cursor's composer_mode
-    #                  (agent, ask, edit) — shared column across both clients
+    #                  (agent, ask, edit) - shared column across both clients
     #                  (renamed from permission_mode)
-    # status         : completion status for this turn — Claude Code: NULL = normal,
+    # status         : completion status for this turn - Claude Code: NULL = normal,
     #                  'tool_use' = user denied tool, 'request' = user hit ESC;
     #                  Cursor: 'completed' or 'aborted' (renamed from interrupt_reason,
-    #                  broadened into a shared column — vocabularies differ by client,
+    #                  broadened into a shared column - vocabularies differ by client,
     #                  join against SESSION.client to interpret)
     # attachments    : JSON array of context attachments (files/rules) submitted with the prompt
     cursor.execute("""
@@ -225,28 +225,6 @@ def create_tables(conn: sqlite3.Connection) -> None:
     );
     """)
 
-    # ---------------- OBSERVATION ----------------
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS OBSERVATION (
-        id TEXT PRIMARY KEY,
-        session_id TEXT,
-        prompt_id TEXT,
-        title TEXT,
-        subtitle TEXT,
-        narrative TEXT,
-        text TEXT,
-        facts TEXT,
-        concepts TEXT,
-        type TEXT,
-        files_read TEXT,
-        files_modified TEXT,
-        content_hash TEXT,
-        created_at DATETIME,
-        FOREIGN KEY (session_id) REFERENCES SESSION(session_id),
-        FOREIGN KEY (prompt_id) REFERENCES USER_PROMPT(prompt_id)
-    );
-    """)
-
     # ---------------- HOOK_OBSERVATION ----------------
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS HOOK_OBSERVATION (
@@ -266,42 +244,6 @@ def create_tables(conn: sqlite3.Connection) -> None:
         created_at DATETIME,
         FOREIGN KEY (session_id) REFERENCES SESSION(session_id),
         FOREIGN KEY (prompt_id) REFERENCES USER_PROMPT(prompt_id)
-    );
-    """)
-
-    # ---------------- SESSION_SUMMARY ----------------
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS SESSION_SUMMARY (
-        id TEXT PRIMARY KEY,
-        session_id TEXT,
-        project TEXT,
-        request TEXT,
-        investigated TEXT,
-        learned TEXT,
-        completed TEXT,
-        next_steps TEXT,
-        notes TEXT,
-        created_at DATETIME,
-        FOREIGN KEY (session_id) REFERENCES SESSION(session_id)
-    );
-    """)
-
-    # ---------------- TASK_QUEUE ----------------
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS TASK_QUEUE (
-        id TEXT PRIMARY KEY,
-        task_type TEXT NOT NULL,
-        session_id TEXT NOT NULL,
-        prompt_id TEXT,
-        status TEXT NOT NULL,
-        priority INTEGER DEFAULT 0,
-        payload TEXT,
-        error_message TEXT,
-        created_at DATETIME,
-        started_at DATETIME,
-        completed_at DATETIME,
-        retry_count INTEGER DEFAULT 0,
-        FOREIGN KEY (session_id) REFERENCES SESSION(session_id)
     );
     """)
 
@@ -333,7 +275,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
 # DatabaseManager.ensure_schema_initialized() is the single choke point
 # that compares this against the stored value on every process's first
 # connection and re-runs migrate_schema() only when behind.
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 
 
 def get_schema_version(conn: sqlite3.Connection) -> int:
@@ -371,7 +313,7 @@ def _safe_alter(cursor: sqlite3.Cursor, sql: str, log_msg: str, changes: list, r
 def migrate_schema(conn: sqlite3.Connection) -> list:
     """
     Apply schema migrations for existing databases.
-    Safe to run on any database — skips if column already exists.
+    Safe to run on any database - skips if column already exists.
 
     Returns a list of change records describing what was actually applied
     (or lost a concurrent race) this run, for the migration history log.
@@ -509,13 +451,41 @@ def migrate_schema(conn: sqlite3.Connection) -> list:
             logger.info("Migration: created SECURITY_SCAN_EVENT table")
             changes.append({"table": "SECURITY_SCAN_EVENT", "action": "create_table", "status": "applied"})
 
-    # Rename event_id column alias — old rows used finding_id, add event_id if missing
+    # Rename event_id column alias - old rows used finding_id, add event_id if missing
     cursor.execute("PRAGMA table_info(SECURITY_SCAN_EVENT)")
     sse_cols = [row[1] for row in cursor.fetchall()]
     if sse_cols and "event_id" not in sse_cols and "finding_id" in sse_cols:
         # SQLite doesn't support RENAME COLUMN before 3.25; recreate is safest but
-        # for now just alias via a view — old rows remain readable as event_id via INSERT
+        # for now just alias via a view - old rows remain readable as event_id via INSERT
         logger.info("Migration: SECURITY_SCAN_EVENT has finding_id column (legacy), continuing")
+
+    # ── v2: drop the LLM task-queue / summary subsystem ──────────────────────
+    # These three tables were written only by the removed worker pipeline:
+    #   TASK_QUEUE      - task rows for the LLM worker
+    #   SESSION_SUMMARY - LLM-generated session summaries (never populated)
+    #   OBSERVATION     - LLM-generated observations (never populated; the live
+    #                     store is HOOK_OBSERVATION, written by the MCP tool on
+    #                     both the Claude Code and Cursor paths)
+    #
+    # Runs last so the column renames above still see the schema they expect.
+    # _safe_alter (not a bare execute) for two reasons: it tolerates the
+    # OperationalError raised when a concurrent hook drops the same table a
+    # moment earlier, and it records the change so the drop shows up in
+    # migration_history.jsonl - this is the most destructive step in the
+    # project's history and must not be silent.
+    #
+    # NOTE: create_indexes() must not contain idx_task_queue_* statements. It is
+    # called immediately after this function by ensure_schema_initialized(), and
+    # indexing a dropped table raises "no such table" - which would abort before
+    # set_schema_version() and leave the DB migrating forever.
+    for _legacy in ("TASK_QUEUE", "SESSION_SUMMARY", "OBSERVATION"):
+        _safe_alter(
+            cursor,
+            f"DROP TABLE IF EXISTS {_legacy}",
+            f"Migration: dropped legacy table {_legacy}",
+            changes,
+            {"table": _legacy, "action": "drop_table"},
+        )
 
     conn.commit()
     return changes
@@ -549,11 +519,6 @@ def create_indexes(conn: sqlite3.Connection) -> None:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_io_prompt ON IO_TOKENS(prompt_id);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_io_message ON IO_TOKENS(message_id);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_tool_tokens_tool ON TOOL_TOKENS(tool_id);")
-
-    # Indexes for task queue
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_task_queue_status ON TASK_QUEUE(status);")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_task_queue_priority ON TASK_QUEUE(priority DESC, created_at);")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_task_queue_session ON TASK_QUEUE(session_id);")
 
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_prompt_jsonl_id ON USER_PROMPT(jsonl_prompt_id);")
 
@@ -614,11 +579,17 @@ class DatabaseSchema:
     TABLE_TOOL = "TOOL"
     TABLE_IO_TOKENS = "IO_TOKENS"
     TABLE_TOOL_TOKENS = "TOOL_TOKENS"
-    TABLE_OBSERVATION = "OBSERVATION"
-    TABLE_SESSION_SUMMARY = "SESSION_SUMMARY"
-    TABLE_TASK_QUEUE = "TASK_QUEUE"
+    TABLE_HOOK_OBSERVATION = "HOOK_OBSERVATION"
+    TABLE_SECURITY_SCAN_EVENT = "SECURITY_SCAN_EVENT"
 
-    # All tables
+    # All tables. MUST stay in sync with create_tables() - verify_schema() below
+    # returns False if any entry is missing, and ensure_schema_initialized()
+    # responds by calling create_tables(), which would recreate anything listed
+    # here. Leaving a dropped table in this list silently resurrects it on the
+    # next hook invocation.
+    #
+    # HOOK_OBSERVATION and SECURITY_SCAN_EVENT were previously absent - the two
+    # tables that matter most were never actually verified.
     ALL_TABLES = [
         TABLE_PROJECT,
         TABLE_SESSION,
@@ -629,9 +600,8 @@ class DatabaseSchema:
         TABLE_TOOL,
         TABLE_IO_TOKENS,
         TABLE_TOOL_TOKENS,
-        TABLE_OBSERVATION,
-        TABLE_SESSION_SUMMARY,
-        TABLE_TASK_QUEUE,
+        TABLE_HOOK_OBSERVATION,
+        TABLE_SECURITY_SCAN_EVENT,
     ]
 
     @classmethod

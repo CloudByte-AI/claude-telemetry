@@ -1,4 +1,4 @@
-/* CloudByte — Security Reports  events.js  v1.3 */
+/* CloudByte - Security Reports  events.js  v1.3 */
 
 (function () {
 'use strict';
@@ -136,7 +136,7 @@ function initActivityChart() {
 }
 
 /* ═══════════════════════════════════════════════
-   Security Terminal — typewriter + phased reveal
+   Security Terminal - typewriter + phased reveal
 ═══════════════════════════════════════════════ */
 function initSecurityTerminal() {
     var cmdEl  = document.getElementById('er-term-cmd');
@@ -180,11 +180,11 @@ function initSecurityTerminal() {
         var nextIdx = idx + 1;
         var delay;
         if (nextIdx === sepIdx) {
-            delay = 200;   /* pause before separator — marks end of stats */
+            delay = 200;   /* pause before separator - marks end of stats */
         } else if (idx === sepIdx) {
             delay = 80;    /* brief pause after separator before insights */
         } else if (sepIdx < 0 || idx < sepIdx) {
-            delay = 70;    /* stats lines — fast */
+            delay = 70;    /* stats lines - fast */
         } else {
             delay = 130;   /* insight lines */
         }

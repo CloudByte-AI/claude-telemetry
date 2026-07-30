@@ -13,7 +13,7 @@ def get_token_usage_context(
 ) -> dict:
     d_from, d_to = resolve_dates(dr, date_from, date_to)
 
-    # Chart data — date-filtered
+    # Chart data - date-filtered
     io_t   = tq.get_io_totals_by_date(d_from, d_to, client)
     tool_t = tq.get_tool_totals_by_date(d_from, d_to, client)
 
@@ -34,11 +34,11 @@ def get_token_usage_context(
         bar_tool.append(tt["total"] if tt else 0)
         bar_sess_ids.append(sid)
 
-    # Session breakdown — all sessions, IO only
+    # Session breakdown - all sessions, IO only
     sess_rows       = list(tq.get_sessions_io_breakdown(sess_search, client))
     sess_paged, sess_pg = paginate(sess_rows, sess_page, per_page)
 
-    # Project breakdown — all projects, IO only
+    # Project breakdown - all projects, IO only
     proj_rows       = list(tq.get_projects_io_breakdown(proj_search, client))
     proj_paged, proj_pg = paginate(proj_rows, proj_page, per_page)
 

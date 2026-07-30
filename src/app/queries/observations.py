@@ -169,17 +169,3 @@ def get_nearby_observations(session_id: str, limit: int = 10):
         ORDER BY turn_number DESC
         LIMIT ?
     """, (session_id, limit))
-
-
-def get_session_task_counts():
-    """Get pending/failed task counts for all sessions."""
-    return q("""
-        SELECT
-            session_id,
-            COUNT(CASE WHEN status = 'pending' THEN 1 END) AS pending,
-            COUNT(CASE WHEN status = 'running' THEN 1 END) AS running,
-            COUNT(CASE WHEN status = 'failed' THEN 1 END) AS failed,
-            COUNT(CASE WHEN status = 'completed' THEN 1 END) AS completed
-        FROM TASK_QUEUE
-        GROUP BY session_id
-    """)

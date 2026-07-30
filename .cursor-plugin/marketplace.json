@@ -11,7 +11,7 @@
       "name": "cursor-telemetry",
       "source": ".",
       "description": "Cursor Telemetry - Observability stack for Cursor - Prompt, Observability, Tokens.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "author": {
         "name": "CloudByte-AI"
       }

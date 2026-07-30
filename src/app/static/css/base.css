@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════════════
-   CloudByte — Intercom-Inspired Design System
+   CloudByte - Intercom-Inspired Design System
    Two themes: Light (default) + Dark
    Accent: Fin Orange #ff5600
    Geometry: Sharp (4px radius buttons, 8px cards)
@@ -59,7 +59,7 @@
     --shadow-md:   rgba(0, 0, 0, 0.5) 0px 4px 12px;
 }
 
-/* ── Global custom scrollbars — replaces browser default on all elements ── */
+/* ── Global custom scrollbars - replaces browser default on all elements ── */
 ::-webkit-scrollbar              { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track        { background: transparent; }
 ::-webkit-scrollbar-thumb        { background: var(--border-alt); }
@@ -448,7 +448,7 @@ tr:hover td { background: var(--bg-alt); }
     border: 1px solid var(--border);
 }
 
-/* ── Client badge — which plugin (Claude Code / Cursor / future) produced
+/* ── Client badge - which plugin (Claude Code / Cursor / future) produced
    this session. Rendered as a solid rounded-rect wordmark chip matching each
    product's own brand look, not the app's usual outlined/translucent pills -
    deliberately theme-invariant (no dark/light overrides) since a brand mark
@@ -474,15 +474,15 @@ tr:hover td { background: var(--bg-alt); }
     font-size: 9px;
     border-radius: 5px;
 }
-/* Claude — warm terracotta chip, white wordmark */
+/* Claude - warm terracotta chip, white wordmark */
 .client-badge.claude_code { background: #CC785C; color: #ffffff; }
-/* Cursor — near-black chip, silver wordmark, same monochrome vibe as its logo.
+/* Cursor - near-black chip, silver wordmark, same monochrome vibe as its logo.
    Needs its own subtle border: the app's dark theme surface color (#1a1a1a)
    is close enough to this chip's near-black fill (#0A0A0A) that without an
    edge, the chip nearly disappears against a dark card/sidebar background. */
 .client-badge.cursor      { background: #0A0A0A; color: #C9C9C9; border: 1px solid rgba(255, 255, 255, 0.14); }
 
-/* ── "Not tracked" indicator — for data a client legitimately never reports
+/* ── "Not tracked" indicator - for data a client legitimately never reports
    (e.g. Cursor's missing per-tool-call token usage), distinct from a
    genuine zero. Always paired with a title attribute for the full reason. ── */
 .not-tracked {

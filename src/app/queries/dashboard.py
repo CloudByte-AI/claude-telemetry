@@ -84,7 +84,7 @@ def get_activity_heatmap_by_client():
 
 
 def get_projects_radar(client: str = None):
-    """Per-project: sessions, prompts, observations — the 3 edges.
+    """Per-project: sessions, prompts, observations - the 3 edges.
 
     The per-client breakdown columns (sessions_claude_code/sessions_cursor/etc.)
     are always computed across all clients regardless of the filter, same
@@ -113,7 +113,7 @@ def get_projects_radar(client: str = None):
 
 
 def get_obs_types_per_project(client: str = None):
-    """Per-project observation type counts — for observation radar."""
+    """Per-project observation type counts - for observation radar."""
     where, params = client_where(client, "s")
     return q(f"""
         SELECT p.name  AS project_name,

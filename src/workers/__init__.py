@@ -1,27 +1,20 @@
 """
 CloudByte Workers Module
 
-Provides background worker processes for handling LLM-based
-observation and summary generation tasks.
+Manages the shared background dashboard process (src.app.app on
+localhost:4723) that both the Claude Code and Cursor plugins depend on:
+
+    llm_client.ensure_worker_running()          - start it and wait for the port
+    worker_checker.ensure_worker_quick_sync()   - start it, don't wait
+    kill_worker.shutdown_worker_if_no_active_sessions()
+                                                - stop it, but only when no
+                                                  other session still needs it
+
+Nothing here re-exports at package level on purpose: both plugins import from
+the submodules directly (`from src.workers.kill_worker import ...`), and a
+package-level import list is one more place to keep in sync. Keeping this file
+empty of imports also means a broken submodule can't take the whole package
+down with it.
 """
 
-from .task_queue import Task, TaskQueue
-from .llm_client import (
-    queue_observation_task,
-    queue_summary_task,
-    ensure_worker_running,
-    request_worker_shutdown,
-    get_worker_status,
-)
-from .llm_worker import LLMWorker
-
-__all__ = [
-    "Task",
-    "TaskQueue",
-    "LLMWorker",
-    "queue_observation_task",
-    "queue_summary_task",
-    "ensure_worker_running",
-    "request_worker_shutdown",
-    "get_worker_status",
-]
+__all__: list[str] = []

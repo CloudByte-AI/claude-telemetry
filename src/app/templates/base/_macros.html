@@ -1,6 +1,6 @@
 {% macro not_tracked(reason='Not tracked for this session') %}<span class="not-tracked" title="{{ reason }}">not tracked</span>{% endmacro %}
 
-{# Client badge: one dict entry per plugin. Add a future third plugin here only — never edit callers.
+{# Client badge: one dict entry per plugin. Add a future third plugin here only - never edit callers.
    Rendered as a branded rounded-rect chip matching each product's own look
    (black/silver for Cursor, orange/white for Claude) - see .client-badge in base.css.
    `short` is the on-chip wordmark text; both are short enough to show in full

@@ -17,7 +17,7 @@ async function checkVersion() {
             }
         }
     } catch (e) {
-        // Silently ignore — version check is non-critical
+        // Silently ignore - version check is non-critical
     }
 }
 
@@ -32,15 +32,15 @@ async function applyUpdate() {
     );
     if (!confirmed) return;
 
-    // Show success UI BEFORE firing kill — server will die and never respond
+    // Show success UI BEFORE firing kill - server will die and never respond
     btn.textContent = '✓ Applied';
     btn.style.background = '#22c55e';
     btn.disabled = true;
     alert('Update applied successfully.\n\nThe new version will be active on your next prompt or conversation.');
 
-    // Fire and forget — don't await, server will die
+    // Fire and forget - don't await, server will die
     fetch('/version/apply', { method: 'POST' }).catch(() => {
-        // Expected — server killed itself, ignore the error
+        // Expected - server killed itself, ignore the error
     });
 }
 

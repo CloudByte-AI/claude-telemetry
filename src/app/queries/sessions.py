@@ -81,22 +81,11 @@ def get_prompt_tool_tokens_agg(prompt_id: str):
     """, (prompt_id,), one=True)
 
 
-
 def get_session_observations(session_id: str):
     return q(
         "SELECT * FROM HOOK_OBSERVATION WHERE session_id = ? ORDER BY created_at DESC",
         (session_id,)
     )
-
-
-def get_all_observations():
-    return q("""
-        SELECT o.id, o.session_id, o.title, o.subtitle, o.narrative,
-               o.type, o.concepts, o.facts, o.created_at, o.sync_status
-        FROM HOOK_OBSERVATION o
-        JOIN SESSION s ON s.session_id = o.session_id
-        ORDER BY o.created_at DESC
-    """)
 
 
 def get_conversation_prompt(prompt_id: str):
@@ -124,29 +113,3 @@ def get_prompt_observation(prompt_id: str):
         "SELECT id, type, title, subtitle FROM HOOK_OBSERVATION WHERE prompt_id = ? LIMIT 1",
         (prompt_id,), one=True
     )
-
-
-def get_task_counts_by_client():
-    """Pending/running TASK_QUEUE counts broken down by SESSION.client, for the worker status card."""
-    return q("""
-        SELECT s.client                                                AS client,
-               COUNT(CASE WHEN tq.status = 'pending' THEN 1 END)        AS pending,
-               COUNT(CASE WHEN tq.status = 'running' THEN 1 END)        AS running
-        FROM TASK_QUEUE tq
-        LEFT JOIN SESSION s ON s.session_id = tq.session_id
-        WHERE tq.status IN ('pending', 'running')
-        GROUP BY s.client
-    """)
-
-
-def get_session_task_queue_status(session_id: str):
-    """Get task queue status for a session (pending, running, completed, failed counts)."""
-    return q("""
-        SELECT
-            COUNT(CASE WHEN status = 'pending' THEN 1 END) AS pending,
-            COUNT(CASE WHEN status = 'running' THEN 1 END) AS running,
-            COUNT(CASE WHEN status = 'completed' THEN 1 END) AS completed,
-            COUNT(CASE WHEN status = 'failed' THEN 1 END) AS failed
-        FROM TASK_QUEUE
-        WHERE session_id = ?
-    """, (session_id,), one=True)
