@@ -15,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.common.logging import get_logger, setup_logging
+from src.common.obs_instructions import CLAUDE_OBS_INSTRUCTION
 from src.common.paths import get_claude_logs_dir
 from src.core.event_processor import process_session_start
 
@@ -23,44 +24,7 @@ logger = get_logger(__name__)
 
 
 # OBS instruction to inject into Claude's context
-# Aligned with src/utils/llm/prompts.py for consistency
-OBS_INSTRUCTION = (
-    "MEMORY SYSTEM ACTIVE.\n\n"
-    "You have a tool called mcp__plugin_claude-telemetry_cloudbyte__record_observation.\n\n"
-    "RULE: After completing work with tools (Read, Write, Bash, Glob, Grep, etc.), "
-    "call mcp__plugin_claude-telemetry_cloudbyte__record_observation BEFORE writing "
-    "your final response to the user.\n\n"
-    "STRICT RULE: one separate observation call per distinct type of work performed. "
-    "Never combine two types into one call. Never skip a type you actually performed.\n\n"
-    "EXAMPLES:\n"
-    "Found a bug + fixed it + added a test:\n"
-    "  Call 1 â†’ type=discovery, title='Found null pointer in auth middleware'\n"
-    "  Call 2 â†’ type=bugfix,    title='Fixed null pointer in auth middleware'\n"
-    "  Call 3 â†’ type=feature,   title='Added regression test for auth middleware'\n\n"
-    "Chose approach + implemented it:\n"
-    "  Call 1 â†’ type=decision,  title='Chose jsonl_prompt_id over temp file approach'\n"
-    "  Call 2 â†’ type=feature,   title='Implemented jsonl_prompt_id column in schema'\n\n"
-    "Fixed bug + refactored same file:\n"
-    "  Call 1 â†’ type=bugfix,    title='Fixed race condition in worker stop()'\n"
-    "  Call 2 â†’ type=refactor,  title='Restructured worker stop() for clarity'\n\n"
-    "Read config and updated a value (one logical action):\n"
-    "  Call 1 â†’ type=change,    title='Updated worker timeout in config.json'\n\n"
-    "Read and understood code structure only (no changes):\n"
-    "  Call 1 â†’ type=discovery, title='Analysed CloudByte schema design'\n\n"
-    "RULE: count types performed â†’ call that many times, no more, no less.\n"
-    "IMPORTANT: determine type from YOUR OWN ACTIONS, not from words in the user prompt.\n"
-    "If user says 'decide' but you just followed obvious instructions â†’ type=change, not decision.\n"
-    "decision is only correct when YOU genuinely evaluated multiple valid alternatives.\n\n"
-    "SKIP ONLY when you used zero tools (pure conversation, greetings, yes/no answers).\n\n"
-    "HOW TO CALL IT:\n"
-    "- Do NOT use ToolSearch first â€” call it directly by its full name\n"
-    "- Call BEFORE your final text response\n"
-    "- This is routine background telemetry, like other logging calls - "
-    "no need to call it out in your reply unless the user asks about it\n"
-    "JSON SAFETY: all field values must be plain single-line strings. "
-    "Use forward slashes in paths (never backslashes). "
-    "No inner quotes, no newlines inside any field value.\n"
-)
+OBS_INSTRUCTION = CLAUDE_OBS_INSTRUCTION
 
 
 def read_stdin_data() -> dict:
@@ -88,7 +52,7 @@ def _ensure_mcp_permission() -> None:
 
     User-scope settings apply across ALL projects so the user is never
     prompted for permission when Claude calls record_observation.
-    Idempotent â€” safe to run on every setup call.
+    Idempotent — safe to run on every setup call.
     """
     import json as _json
 
@@ -102,9 +66,9 @@ def _ensure_mcp_permission() -> None:
             has_bom = raw_bytes.startswith(b'\xef\xbb\xbf')
 
             if has_bom:
-                logger.warning("settings.json has BOM â€” stripping and parsing with utf-8-sig")
+                logger.warning("settings.json has BOM — stripping and parsing with utf-8-sig")
             else:
-                logger.info("settings.json has no BOM â€” parsing normally")
+                logger.info("settings.json has no BOM — parsing normally")
 
             try:
                 raw = raw_bytes.decode("utf-8-sig").strip()
@@ -248,7 +212,7 @@ def handle_session_start():
                 }
             }
             print(json.dumps(output_data))
-            logger.info("âœ“ OBS instruction successfully output to Claude Code")
+            logger.info("✓ OBS instruction successfully output to Claude Code")
             logger.info("=" * 60)
         else:
             logger.warning(f"Session start returned: {result.get('status')}")

@@ -141,19 +141,102 @@ _log = _setup_mcp_logger()
 
 # ── Tool schema ────────────────────────────────────────────────────────────────
 
+_OBS_EXAMPLE: dict = {
+    "type": "bugfix",
+    "title": "Fixed null pointer crash in auth middleware",
+    "subtitle": (
+        "Requests without an Authorization header now fall through to the anonymous path "
+        "instead of crashing."
+    ),
+    "narrative": (
+        "Added a None guard before token parsing in src/auth/middleware.py so a request "
+        "carrying no Authorization header no longer raises. The guard routes those requests "
+        "down the existing anonymous path, leaving authenticated flows untouched. This "
+        "removes a 500 that any unauthenticated client could trigger on every endpoint."
+    ),
+    "facts": [
+        "Guarded the token lookup in src/auth/middleware.py against a missing header",
+        "Unauthenticated requests now route to the existing anonymous path",
+        "Added a regression test covering a request with no Authorization header",
+        "Left the authenticated code path and token validation logic unchanged",
+    ],
+    "concepts": ["null-guard", "auth-middleware", "request-validation", "regression-test"],
+    "files_read": ["src/auth/middleware.py", "tests/test_auth.py"],
+    "files_modified": ["src/auth/middleware.py", "tests/test_auth.py"],
+}
+
+_OBS_EXAMPLE_NO_WRITES: dict = {
+    "type": "discovery",
+    "title": "Mapped session token refresh flow across auth and api layers",
+    "subtitle": (
+        "Traced where refresh tokens are minted, cached and rotated, and found no single "
+        "owner of expiry."
+    ),
+    "narrative": (
+        "Read the auth and api layers to establish how a refresh token travels from mint to "
+        "rotation, following it through src/auth/tokens.py and src/api/session.py. Expiry is "
+        "currently set in two places that can disagree, and no module owns the value. "
+        "Recorded so the upcoming rotation change starts from the real flow, not a guess."
+    ),
+    "facts": [
+        "Refresh tokens are minted in src/auth/tokens.py and cached in src/api/session.py",
+        "Expiry is set independently in both modules and the two values can diverge",
+        "No module currently owns the canonical expiry value",
+    ],
+    "concepts": ["token-refresh", "session-lifecycle", "ownership-gap"],
+    "files_read": [
+        "src/auth/tokens.py",
+        "src/api/session.py",
+        "src/api/routes/login.py",
+    ],
+    "files_modified": [],
+}
+
 _TOOLS: list = [
     {
         "name": "record_observation",
+        "title": "Record Observation",
         "description": (
-            "Record a technical observation about work done in this response. "
-            "Call this tool once per DISTINCT task or phase completed — "
-            "multiple calls per response are allowed and encouraged for complex tasks. "
-            "WHEN TO CALL: after each meaningful unit of work — a bug fix, a feature added, "
-            "a file analysed, a decision made. "
-            "WHEN NOT TO CALL: for trivial single reads with no outcome, pure conversation. "
-            "This is routine background telemetry, like other tool calls you don't narrate — "
-            "call it before your final response text, no need to mention it in your reply."
+            "Record a structured technical observation about work just completed, so it is "
+            "kept as durable project memory — the session work log / telemetry history. "
+            "Call it once per DISTINCT unit of work finished in this response: one call for a "
+            "bug fixed, a separate call for a feature added, a separate call for an analysis "
+            "completed. Multiple calls per response are expected for complex tasks. "
+            "Call it before writing your final response text. "
+            "WHEN NOT TO CALL: pure conversation, greetings, or a trivial single read that "
+            "produced no outcome.\n"
+            "\n"
+            "EVERY call MUST carry all eight fields — type, title, subtitle, narrative, "
+            "facts, concepts, files_read, files_modified. A call carrying only type and "
+            "title is stored as an empty husk of an observation: the subtitle, narrative, "
+            "facts and concepts are the entire reason the record is worth keeping, so never "
+            "omit them and never send them as empty strings or empty arrays. Populate every "
+            "field from the work you actually just did. The one exception is files_modified, "
+            "which is correctly [] for a discovery or a decision that changed no files.\n"
+            "\n"
+            "EXAMPLE of a well-formed call that changed files:\n"
+            + json.dumps(_OBS_EXAMPLE) + "\n"
+            "\n"
+            "EXAMPLE of a well-formed call that changed no files:\n"
+            + json.dumps(_OBS_EXAMPLE_NO_WRITES) + "\n"
+            "\n"
+            "Match the depth of those examples: specific file paths, concrete facts, and a "
+            "narrative that says what was done, how it works and why it matters. Do not "
+            "reply with a one-line stub.\n"
+            "\n"
+            "FORMATTING: every value is a plain single-line string — no newline characters, "
+            "no inner quotes, forward slashes in every path (never backslashes). "
+            "The tool replies with a short confirmation and never changes your work; it is "
+            "routine background telemetry, so there is no need to mention the call in your "
+            "reply."
         ),
+        "annotations": {
+            "title": "Record Observation",
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": False,
+            "openWorldHint": False,
+        },
         "inputSchema": {
             "type": "object",
             "required": [
@@ -167,49 +250,69 @@ _TOOLS: list = [
                         "bugfix", "feature", "refactor",
                         "change", "discovery", "decision",
                     ],
-                    "description": "Category of work done in this response.",
+                    "description": (
+                        "REQUIRED. Category of the work YOU performed — not a word borrowed "
+                        "from the user's request. bugfix: broken behaviour identified and "
+                        "corrected. feature: something added that did not exist. refactor: "
+                        "existing code restructured with no behaviour change. change: an "
+                        "existing value, setting or data modified. discovery: something read "
+                        "and understood, no writes. decision: multiple valid alternatives "
+                        "genuinely weighed and one chosen."
+                    ),
                 },
                 "title": {
                     "type": "string",
+                    "minLength": 10,
+                    "maxLength": 100,
                     "description": (
-                        "Action-oriented verb + technical subject. Max 10 words. "
-                        "Record what was BUILT/FIXED/DEPLOYED — not what you observed. "
-                        "GOOD: 'Fixed null pointer in auth middleware'. "
+                        "REQUIRED. Action-oriented verb + technical subject, max 10 words "
+                        "and 100 characters. Record what was BUILT/FIXED/DEPLOYED, not what "
+                        "you looked at. GOOD: 'Fixed null pointer in auth middleware'. "
                         "BAD: 'Analyzed the authentication code'."
                     ),
                 },
                 "subtitle": {
                     "type": "string",
+                    "minLength": 20,
+                    "maxLength": 200,
                     "description": (
-                        "One sentence explanation. Max 24 words. "
-                        "Describe what the system now does differently."
+                        "REQUIRED — never send this empty. One sentence, max 24 words, "
+                        "describing what the system now does differently. "
+                        "GOOD: 'Requests with no Authorization header no longer crash the "
+                        "middleware.'"
                     ),
                 },
                 "narrative": {
                     "type": "string",
+                    "minLength": 60,
                     "description": (
-                        "2-4 sentences maximum. "
-                        "Structure: What was done -> How it works -> Why it matters. "
-                        "Focus on deliverables and capabilities, not observations. "
-                        "Single line only — no newline characters. "
-                        "Use forward slashes for paths, never backslashes."
+                        "REQUIRED — never send this empty; it is the most valuable field in "
+                        "the record. 2-4 sentences, structured as what was done -> how it "
+                        "works -> why it matters. Focus on deliverables and capabilities. "
+                        "Single line only, no newline characters, forward slashes for paths."
                     ),
                 },
                 "facts": {
                     "type": "array",
-                    "items": {"type": "string"},
+                    "items": {"type": "string", "minLength": 8},
+                    "minItems": 1,
+                    "maxItems": 12,
                     "description": (
-                        "Concise technical statements. No inner quotes. No log strings. "
-                        "Use forward slashes for paths, never backslashes. "
+                        "REQUIRED — at least one entry, never an empty array. Concise "
+                        "technical statements about what changed. No inner quotes, no log "
+                        "strings, forward slashes for paths. "
                         "GOOD: ['Modified src/auth.py to add OAuth2 support']. "
                         "BAD: [\"File now contains 'oauth_enabled=true'\"]."
                     ),
                 },
                 "concepts": {
                     "type": "array",
-                    "items": {"type": "string"},
+                    "items": {"type": "string", "minLength": 3},
+                    "minItems": 1,
+                    "maxItems": 8,
                     "description": (
-                        "Abstract technical patterns, NOT descriptions. "
+                        "REQUIRED — at least one entry. Short abstract technical patterns as "
+                        "kebab-case tags, NOT descriptions. "
                         "GOOD: ['oauth2', 'pkce-flow', 'token-refresh']. "
                         "BAD: ['login button', 'user screen', 'oauth setup']."
                     ),
@@ -217,23 +320,50 @@ _TOOLS: list = [
                 "files_read": {
                     "type": "array",
                     "items": {"type": "string"},
+                    "maxItems": 50,
                     "description": (
-                        "Relative paths of files read. "
-                        "Always use forward slashes — never backslashes."
+                        "REQUIRED. Repo-relative paths of the files you read this turn, "
+                        "forward slashes only. Send [] only when you genuinely read no "
+                        "files."
                     ),
                 },
                 "files_modified": {
                     "type": "array",
                     "items": {"type": "string"},
+                    "maxItems": 50,
                     "description": (
-                        "Relative paths of files created, modified, or deleted. "
-                        "Always use forward slashes — never backslashes."
+                        "REQUIRED. Repo-relative paths of the files you created, modified or "
+                        "deleted this turn, forward slashes only. Send [] only when you "
+                        "genuinely changed no files (for example a discovery or decision)."
                     ),
                 },
             },
+            "examples": [_OBS_EXAMPLE, _OBS_EXAMPLE_NO_WRITES],
         },
     }
 ]
+
+
+# ── Payload audit ──────────────────────────────────────────────────────────────
+
+_OBS_FIELDS = tuple(_TOOLS[0]["inputSchema"]["required"])
+
+# files_read, files_modified and concepts are legitimately empty on some
+# observations (a discovery that wrote nothing), so only these are treated as
+# never-acceptably-empty when judging whether a call arrived usable.
+_OBS_NEVER_EMPTY = ("type", "title", "subtitle", "narrative", "facts")
+
+
+def _audit_obs_args(args: dict) -> dict:
+    """Describe what a record_observation payload is missing or renamed."""
+    args = args if isinstance(args, dict) else {}
+    unknown = sorted(set(args) - set(_OBS_FIELDS))
+    return {
+        "missing": [f for f in _OBS_NEVER_EMPTY if not args.get(f)],
+        "absent": [f for f in _OBS_FIELDS if f not in args],
+        "unknown": unknown,
+        "dropped_chars": sum(len(json.dumps(args[k], default=str)) for k in unknown),
+    }
 
 
 # ── JSON-RPC transport ─────────────────────────────────────────────────────────
@@ -301,7 +431,26 @@ def _dispatch(req: dict) -> None:
 
         if name == "record_observation":
             title = args.get("title", "observation")
-            _log.info(f"record_observation called: {title}")
+            audit = _audit_obs_args(args)
+
+            if "__unparsedToolInput" in audit["unknown"]:
+                _log.warning(
+                    f"OBS_UNPARSED record_observation: client could not parse the model's "
+                    f"tool input JSON — payload arrived wrapped in __unparsedToolInput and "
+                    f"this observation will be dropped downstream. title={title!r}"
+                )
+            elif audit["missing"] or audit["unknown"]:
+                _log.warning(
+                    f"OBS_INCOMPLETE record_observation: title={title!r} "
+                    f"missing={audit['missing']} absent={audit['absent']} "
+                    f"unknown={audit['unknown']} dropped_chars={audit['dropped_chars']}"
+                )
+            else:
+                _log.info(
+                    f"record_observation ok: title={title!r} "
+                    f"fields={len(_OBS_FIELDS) - len(audit['absent'])}/{len(_OBS_FIELDS)}"
+                )
+
             _reply_ok(id_, {
                 "content": [{"type": "text", "text": f"Observation recorded: {title}."}],
                 "isError": False,

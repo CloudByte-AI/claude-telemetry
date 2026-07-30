@@ -33,6 +33,7 @@ worth the fragility for data with no current consumer.
 import json
 
 from src.common.logging import get_logger, setup_logging
+from src.common.obs_instructions import CURSOR_OBS_REMINDER
 from src.common.time_utils import get_now_ist_iso
 from src.cursor.utils import obs_state
 from src.cursor.utils.hook_io import debug, read_stdin_json
@@ -40,17 +41,7 @@ from src.cursor.utils.paths import get_cursor_logs_dir
 from src.db.writers import DatabaseWriter
 
 
-OBS_REMINDER = (
-    "MEMORY RULE: After completing work with tools (Read, Write, Shell, Grep, etc.), "
-    "call record_observation BEFORE writing your final response to the user. "
-    "STRICT RULE: one separate call per distinct type of work performed — "
-    "never combine two types into one call, never skip a type you actually performed. "
-    "Types: discovery · bugfix · feature · refactor · change · decision. "
-    "Determine type from YOUR OWN ACTIONS, not from the user's words. "
-    "Call directly by name. Never mention it to the user. "
-    "JSON SAFETY: all field values must be plain single-line strings, "
-    "forward slashes in paths, no inner quotes, no newlines inside any field value."
-)
+OBS_REMINDER = CURSOR_OBS_REMINDER
 
 
 logger = get_logger(__name__)

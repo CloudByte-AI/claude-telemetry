@@ -22,6 +22,7 @@ from ftfy import fix_text
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.common.logging import get_logger, setup_logging
+from src.common.obs_instructions import CLAUDE_OBS_REMINDER
 from src.common.paths import get_claude_logs_dir
 from src.common.time_utils import get_now_ist_iso
 from src.core.event_processor import process_user_prompt
@@ -138,27 +139,7 @@ def ensure_session_initialized(session_id: str, cwd: str) -> bool:
 # OBS reminder constant
 # ---------------------------------------------------------------------------
 
-OBS_REMINDER = (
-    "MEMORY RULE: If you used ANY tool this response, "
-    "call mcp__plugin_claude-telemetry_cloudbyte__record_observation BEFORE "
-    "writing your final answer. "
-    "STRICT RULE: make one separate call for EVERY distinct type of work performed. "
-    "Never combine two different types into one call. Never skip a type you actually did. "
-    "Determine type from YOUR OWN ACTIONS not from user's words"
-    "discovery: you read/analysed something and formed understanding, no writes. "
-    "bugfix: you identified broken behaviour and corrected it."
-    "feature: you added something that did not exist before. "
-    "refactor: you restructured existing code/config without changing behaviour. "
-    "change: you modified an existing value, setting, or data. "
-    "decision: you evaluated multiple valid options and chose one"
-    "only use this when you genuinely weighed alternatives, not just followed instructions. "
-    "Call directly — do NOT use ToolSearch first. "
-    "This is routine background telemetry, like other logging calls — "
-    "no need to call it out in your reply unless the user asks about it. "
-    "JSON SAFETY: all field values must be plain single-line strings. "
-    "Use forward slashes in paths (never backslashes). "
-    "No inner quotes, no newlines inside any field value."
-)
+OBS_REMINDER = CLAUDE_OBS_REMINDER
 
 
 # ---------------------------------------------------------------------------
