@@ -1,6 +1,6 @@
 {% extends "base/index.html" %}
 {% from "base/_macros.html" import not_tracked %}
-{% block title %}Token Analysis · {{ session.session_id[:8] }} — CloudByte{% endblock %}
+{% block title %}Token Analysis · {{ session.session_id[:8] }} - CloudByte{% endblock %}
 {% block breadcrumb %}token usage / session {{ session.session_id[:8] }}…{% endblock %}
 
 {% block head %}<link rel="stylesheet" href="/static/css/analytics/session_tokens.css">{% endblock %}
@@ -22,7 +22,7 @@
     <div style="display:flex; justify-content:space-between; align-items:flex-end;">
         <div>
             <div style="font-size:10px; font-weight:800; color:var(--amber); text-transform:uppercase; letter-spacing:0.12em; margin-bottom:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:600px;">
-                {% set raw_p = session.project_name or session.cwd or '—' %}
+                {% set raw_p = session.project_name or session.cwd or '-' %}
                 {{ (raw_p|replace('--', '/')|replace('\\', '/') if raw_p else '').split('/')|last }}
             </div>
             <h1 style="font-size: 54px; font-weight: 400; color: var(--text); line-height: 1.0; letter-spacing: -0.05em; margin:0;">Session Intelligence</h1>
@@ -80,7 +80,7 @@
                 <div class="donut-canvas-wrap">
                     <canvas id="donut-chart" width="140" height="140"></canvas>
                     <div class="donut-center">
-                        <div class="donut-center-val" id="donut-total">—</div>
+                        <div class="donut-center-val" id="donut-total">-</div>
                         <div class="donut-center-label">total</div>
                     </div>
                 </div>
@@ -141,7 +141,7 @@
                         <td><span class="turn-num-cell">#{{ row.turn_num }}</span></td>
                         <td>
                             <div style="font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:340px;" title="{{ row.prompt or '' }}">
-                                {{ row.prompt | truncate(80) if row.prompt else '—' }}
+                                {{ row.prompt | truncate(80) if row.prompt else '-' }}
                             </div>
                         </td>
                         <td class="mono" style="color:var(--text); font-weight:700;">{{ "{:,}".format(row.input_tokens or 0) }}</td>

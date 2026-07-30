@@ -23,6 +23,7 @@ dependencies = [
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
+    "jsonschema>=4.0.0",
 ]
 
 [build-system]
@@ -41,4 +42,5 @@ python_functions = ["test_*"]
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
+    "jsonschema>=4.0.0",
 ]

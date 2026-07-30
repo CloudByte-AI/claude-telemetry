@@ -20,8 +20,8 @@
                 <td style="white-space:nowrap;">
                     <a href="/sessions/{{ row.session_id }}" class="mono accent-text" style="font-size:11px;text-decoration:none;">{{ row.session_id[:8] }}…</a>
                 </td>
-                <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;" title="{{ row.project_name or '' }}">{{ row.project_name or '—' }}</td>
-                <td class="mono dimmer" style="font-size:11px;white-space:nowrap;">{{ row.session_date or '—' }}</td>
+                <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;" title="{{ row.project_name or '' }}">{{ row.project_name or '-' }}</td>
+                <td class="mono dimmer" style="font-size:11px;white-space:nowrap;">{{ row.session_date or '-' }}</td>
                 <td><span class="tool-badge">{{ row.tool_calls }}</span></td>
                 <td class="mono dimmer" style="text-align:center;">{{ row.unique_tools }}</td>
                 <td class="mono accent-text">{% if row.input_tokens is none %}{{ not_tracked("Cursor doesn't report tool-level token usage") }}{% else %}{{ "{:,}".format(row.input_tokens) }}{% endif %}</td>

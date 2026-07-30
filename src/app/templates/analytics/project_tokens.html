@@ -1,6 +1,6 @@
 {% extends "base/index.html" %}
 {% from "base/_macros.html" import not_tracked %}
-{% block title %}Token Analysis · {{ project.name }} — CloudByte{% endblock %}
+{% block title %}Token Analysis · {{ project.name }} - CloudByte{% endblock %}
 {% block breadcrumb %}token intelligence / {{ project.name | truncate(28) }}{% endblock %}
 
 {% block head %}
@@ -24,11 +24,11 @@
         <div>
             <div style="font-family:'IBM Plex Mono'; font-size:10px; font-weight:800; color:#fe4c02; text-transform:uppercase; letter-spacing:0.15em; margin-bottom:12px;">Project Analytics</div>
             <h1 style="font-size: 54px; font-weight: 400; color: var(--text); line-height: 1.0; letter-spacing: -0.05em; margin:0;" title="{{ project.name }}">
-                {% set raw_p = project.name or '—' %}
+                {% set raw_p = project.name or '-' %}
                 {{ (raw_p|replace('--', '/')|replace('\\', '/') if raw_p else '').split('/')|last }}
             </h1>
             <div class="dimmer mono" style="font-size: 11px; margin-top: 16px; display: flex; gap: 24px;">
-                <span>PATH: <span style="color:var(--text);">{{ project.path[-60:] if project.path else '—' }}</span></span>
+                <span>PATH: <span style="color:var(--text);">{{ project.path[-60:] if project.path else '-' }}</span></span>
                 <span>SESSIONS: <span style="color:var(--text);">{{ session_rows|length }}</span></span>
             </div>
         </div>
@@ -73,7 +73,7 @@
                 <div class="donut-canvas-wrap">
                     <canvas id="donut-chart" width="160" height="160"></canvas>
                     <div class="donut-center">
-                        <div class="donut-center-val" id="donut-total">—</div>
+                        <div class="donut-center-val" id="donut-total">-</div>
                         <div class="donut-center-label">TOTAL</div>
                     </div>
                 </div>
@@ -130,7 +130,7 @@
                         <td style="white-space:nowrap;">
                             <a href="/sessions/{{ row.session_id }}" class="mono" style="font-weight:700; color:#fe4c02; text-decoration:none;">{{ row.session_id[:8] }}…</a>
                         </td>
-                        <td class="mono dimmer" style="font-size:11px;">{{ row.session_date or '—' }}</td>
+                        <td class="mono dimmer" style="font-size:11px;">{{ row.session_date or '-' }}</td>
                         <td class="mono" style="font-weight:700;">{{ "{:,}".format(row.io_input or 0) }}</td>
                         <td class="mono" style="color:#fe4c02;">{{ "{:,}".format(row.io_output or 0) }}</td>
                         <td class="mono dimmer">{{ "{:,}".format(row.io_cr or 0) }}</td>

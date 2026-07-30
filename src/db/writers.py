@@ -85,7 +85,7 @@ class DatabaseWriter:
 
         Args:
             session_data: Dict with session_id, project_id, cwd, transcript_path, created_at, kind, entrypoint.
-                Optional "client" key ('claude_code' | 'cursor') — defaults to 'claude_code'
+                Optional "client" key ('claude_code' | 'cursor') - defaults to 'claude_code'
                 for callers that don't know about multi-IDE support yet.
 
         Returns:
@@ -121,7 +121,7 @@ class DatabaseWriter:
         """
         Backfill SESSION.transcript_path if it isn't set yet.
 
-        No-op if the session already has a transcript_path — safe to call on
+        No-op if the session already has a transcript_path - safe to call on
         every prompt without re-writing an already-known value.
 
         Returns:
@@ -191,7 +191,7 @@ class DatabaseWriter:
         """
         Backfill SESSION.ai_title if it isn't set yet.
 
-        No-op if the session already has an ai_title — safe to call
+        No-op if the session already has an ai_title - safe to call
         repeatedly without re-writing an already-known value.
 
         Returns:

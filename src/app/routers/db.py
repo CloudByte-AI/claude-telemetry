@@ -1,14 +1,14 @@
 """
-db.py — Database helpers shared across all routes.
+db.py - Database helpers shared across all routes.
 
 Ordering strategy (confirmed from real DB analysis):
 ─────────────────────────────────────────────────────
 1. USER_PROMPT order within a session  → ORDER BY timestamp ASC
-   Timestamps are unique per prompt — safe to use.
+   Timestamps are unique per prompt - safe to use.
 
 2. TOOL order within a prompt          → ORDER BY rowid ASC
    All tools in one prompt share the same timestamp (useless for ordering).
-   The parent_uuid chain is broken — most parents reference assistant wrapper
+   The parent_uuid chain is broken - most parents reference assistant wrapper
    blocks not stored in any table.
    rowid = SQLite insertion order = JSONL parse order = true execution order.
 
@@ -115,7 +115,7 @@ def build_tool_list(prompt_id: str) -> list[dict]:
         "tokens":   dict | None, # TOOL_TOKENS row
       }
 
-    Thinking is matched to its tool by shared uuid — every tool call has
+    Thinking is matched to its tool by shared uuid - every tool call has
     exactly one paired thinking block recorded with the same uuid.
     """
     tools = q(

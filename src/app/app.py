@@ -1,5 +1,5 @@
 """
-CloudByte Dashboard — FastAPI + Jinja2
+CloudByte Dashboard - FastAPI + Jinja2
 Run: uvicorn src.app.app:app --reload --port 4723
 """
 
@@ -27,7 +27,7 @@ async def lifespan(app: FastAPI):
 
     Writes ~/.cloudbyte/worker.pid on startup and removes it on shutdown.
 
-    This is NOT bookkeeping — it is the teardown contract. Both plugins' session
+    This is NOT bookkeeping - it is the teardown contract. Both plugins' session
     end handlers call kill_worker.shutdown_worker_if_no_active_sessions(), whose
     first strategy is kill_worker_by_pid(), which reads this exact file. Without
     it that call returns False immediately and shutdown silently degrades to the

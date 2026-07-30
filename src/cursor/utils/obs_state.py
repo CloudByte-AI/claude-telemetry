@@ -1,11 +1,11 @@
 """
-Cursor OBS State — per-turn context injection tracking.
+Cursor OBS State - per-turn context injection tracking.
 
 Tracks whether the OBS_REMINDER has already been injected into the model
 context for the current generation (turn) via postToolUse's additional_context.
 
 Uses a folder-per-session, file-per-generation layout so concurrent sessions
-and subagents are fully isolated — each only ever touches its own files.
+and subagents are fully isolated - each only ever touches its own files.
 
 Directory layout:
     ~/.cloudbyte/cursor_obs/
@@ -60,12 +60,12 @@ def create(session_id: str | None, generation_id: str | None) -> None:
     Called at beforeSubmitPrompt. Creates the state file for this turn.
 
     Also removes any stale .json files left over from the previous turn
-    (covers the case where afterAgentResponse never fired — e.g. an aborted
-    turn — so old state doesn't block injection on the new turn).
+    (covers the case where afterAgentResponse never fired - e.g. an aborted
+    turn - so old state doesn't block injection on the new turn).
     """
     if not session_id or not generation_id:
         logger.debug(
-            f"obs_state.create: skipped — "
+            f"obs_state.create: skipped - "
             f"session_id={session_id!r}, generation_id={generation_id!r}"
         )
         return
@@ -85,7 +85,7 @@ def create(session_id: str | None, generation_id: str | None) -> None:
         gen_file = sess_dir / f"{generation_id}.json"
         gen_file.write_text(json.dumps({"injected": False}), encoding="utf-8")
         logger.info(
-            f"obs_state: turn state created — "
+            f"obs_state: turn state created - "
             f"session={session_id[:8]}, gen={generation_id[:8]}"
         )
 
@@ -101,17 +101,17 @@ def check_and_mark(session_id: str | None, generation_id: str | None) -> bool:
     Called at postToolUse. Returns True if OBS_REMINDER should be injected.
 
     Returns True  (inject) when:
-      • state file is missing or unreadable  — safe fallback
-      • state file exists with injected=False — first tool call this turn
+      • state file is missing or unreadable  - safe fallback
+      • state file exists with injected=False - first tool call this turn
 
     Returns False (skip) when:
-      • state file exists with injected=True  — already done this turn
+      • state file exists with injected=True  - already done this turn
 
     Writes injected=True whenever it returns True, so subsequent calls in the
     same turn always get False (no double injection).
     """
     if not session_id or not generation_id:
-        logger.debug("obs_state.check_and_mark: missing ids — defaulting to inject")
+        logger.debug("obs_state.check_and_mark: missing ids - defaulting to inject")
         return True
 
     gen_file = _gen_path(session_id, generation_id)
@@ -120,7 +120,7 @@ def check_and_mark(session_id: str | None, generation_id: str | None) -> bool:
         if not gen_file.exists():
             logger.info(
                 f"obs_state: state file missing for gen={generation_id[:8]} "
-                f"(beforeSubmitPrompt may not have fired) — injecting as fallback"
+                f"(beforeSubmitPrompt may not have fired) - injecting as fallback"
             )
             _write_injected(session_id, generation_id)
             return True
@@ -129,14 +129,14 @@ def check_and_mark(session_id: str | None, generation_id: str | None) -> bool:
 
         if state.get("injected"):
             logger.debug(
-                f"obs_state: reminder already injected this turn — "
+                f"obs_state: reminder already injected this turn - "
                 f"skipping gen={generation_id[:8]}"
             )
             return False
 
         _write_injected(session_id, generation_id)
         logger.info(
-            f"obs_state: injecting OBS reminder — "
+            f"obs_state: injecting OBS reminder - "
             f"session={session_id[:8]}, gen={generation_id[:8]}"
         )
         return True
@@ -144,7 +144,7 @@ def check_and_mark(session_id: str | None, generation_id: str | None) -> bool:
     except Exception as exc:
         logger.warning(
             f"obs_state.check_and_mark failed "
-            f"(session={session_id!r}, gen={generation_id!r}): {exc} — defaulting to inject"
+            f"(session={session_id!r}, gen={generation_id!r}): {exc} - defaulting to inject"
         )
         return True  # Fail-safe: inject rather than silently drop the reminder
 
@@ -163,12 +163,12 @@ def delete(session_id: str | None, generation_id: str | None) -> None:
         gen_file.unlink(missing_ok=True)
         if existed:
             logger.info(
-                f"obs_state: turn state deleted — "
+                f"obs_state: turn state deleted - "
                 f"session={session_id[:8]}, gen={generation_id[:8]}"
             )
         else:
             logger.debug(
-                f"obs_state: no state file to delete (zero-tool turn) — "
+                f"obs_state: no state file to delete (zero-tool turn) - "
                 f"gen={generation_id[:8]}"
             )
     except Exception as exc:
@@ -192,9 +192,9 @@ def delete_session(session_id: str | None) -> None:
         sess_dir = _session_dir(session_id)
         if sess_dir.exists():
             shutil.rmtree(sess_dir)
-            logger.info(f"obs_state: session state folder deleted — session={session_id[:8]}")
+            logger.info(f"obs_state: session state folder deleted - session={session_id[:8]}")
         else:
-            logger.debug(f"obs_state: no state folder to delete — session={session_id[:8]}")
+            logger.debug(f"obs_state: no state folder to delete - session={session_id[:8]}")
     except Exception as exc:
         logger.warning(f"obs_state.delete_session failed (session={session_id!r}): {exc}")
 

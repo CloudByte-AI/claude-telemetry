@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 
 from src.common.logging import get_logger, setup_logging
+from src.common.obs_instructions import CURSOR_OBS_INSTRUCTION
 from src.common.time_utils import get_now_ist_iso
 from src.cursor.utils.hook_io import (
     debug as _debug,
@@ -28,42 +29,7 @@ from src.db.writers import DatabaseWriter
 logger = get_logger(__name__)
 
 
-OBS_INSTRUCTION = (
-    "MEMORY SYSTEM ACTIVE.\n\n"
-    "You have a tool called record_observation.\n\n"
-    "RULE: After completing work with tools (Read, Write, Bash/Shell, Grep, etc.), "
-    "call record_observation BEFORE writing your final response to the user.\n\n"
-    "STRICT RULE: one separate observation call per distinct type of work performed. "
-    "Never combine two types into one call. Never skip a type you actually performed.\n\n"
-    "EXAMPLES:\n"
-    "Found a bug + fixed it + added a test:\n"
-    "  Call 1 → type=discovery, title='Found null pointer in auth middleware'\n"
-    "  Call 2 → type=bugfix,    title='Fixed null pointer in auth middleware'\n"
-    "  Call 3 → type=feature,   title='Added regression test for auth middleware'\n\n"
-    "Chose approach + implemented it:\n"
-    "  Call 1 → type=decision,  title='Chose jsonl_prompt_id over temp file approach'\n"
-    "  Call 2 → type=feature,   title='Implemented jsonl_prompt_id column in schema'\n\n"
-    "Fixed bug + refactored same file:\n"
-    "  Call 1 → type=bugfix,    title='Fixed race condition in worker stop()'\n"
-    "  Call 2 → type=refactor,  title='Restructured worker stop() for clarity'\n\n"
-    "Read config and updated a value (one logical action):\n"
-    "  Call 1 → type=change,    title='Updated worker timeout in config.json'\n\n"
-    "Read and understood code structure only (no changes):\n"
-    "  Call 1 → type=discovery, title='Analysed CloudByte schema design'\n\n"
-    "RULE: count types performed → call that many times, no more, no less.\n"
-    "IMPORTANT: determine type from YOUR OWN ACTIONS, not from words in the user prompt.\n"
-    "If user says 'decide' but you just followed obvious instructions → type=change, not decision.\n"
-    "decision is only correct when YOU genuinely evaluated multiple valid alternatives.\n\n"
-    "SKIP ONLY when you used zero tools (pure conversation, greetings, yes/no answers).\n\n"
-    "HOW TO CALL IT:\n"
-    "- Call it directly by its name\n"
-    "- Call BEFORE your final text response\n"
-    "- Never mention it to the user\n"
-    "- Never show it in your response text\n"
-    "JSON SAFETY: all field values must be plain single-line strings. "
-    "Use forward slashes in paths (never backslashes). "
-    "No inner quotes, no newlines inside any field value.\n"
-)
+OBS_INSTRUCTION = CURSOR_OBS_INSTRUCTION
 
 
 def _emit_with_context(extra: dict | None = None) -> None:

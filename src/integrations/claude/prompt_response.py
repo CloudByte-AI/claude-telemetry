@@ -179,7 +179,7 @@ def extract_prompt_response_pairs(events: List[Dict[str, Any]]) -> List[Dict[str
         # Use helper to extract text from both string and list format content
         prompt_text = get_text_content(content)
 
-        # Skip sub-agent task-notification blocks — these are delivered back
+        # Skip sub-agent task-notification blocks - these are delivered back
         # into the transcript as a "user" record but aren't a real user prompt
         if prompt_text and prompt_text.lstrip().startswith("<task-notification>"):
             continue
@@ -282,7 +282,7 @@ def extract_prompt_response_pairs(events: List[Dict[str, Any]]) -> List[Dict[str
                 merged["thinking_output_tokens"] = usage.get("output_tokens", 0) or 0
                 merged["thinking_cache_read_tokens"] = usage.get("cache_read_input_tokens", 0) or 0
                 merged["thinking_cache_creation_tokens"] = usage.get("cache_creation_input_tokens", 0) or 0
-                # Do NOT update merged["usage"] here — this is partial usage
+                # Do NOT update merged["usage"] here - this is partial usage
                 continue
 
             # All other chunks → last one's usage is the final/complete usage

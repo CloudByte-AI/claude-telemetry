@@ -93,7 +93,7 @@ def setup() -> None:
         # enable_observations / enable_summaries gates were removed once observations
         # started coming from the MCP tool instead of an LLM.
         #
-        # Only written when the file is ABSENT — existing config.json files are never
+        # Only written when the file is ABSENT - existing config.json files are never
         # rewritten or pruned here, so any keys placed there by other tooling (e.g.
         # CENTRAL_URL / API_KEY) survive untouched. Stale keys are simply inert.
         config_file = get_config_file()
@@ -155,7 +155,7 @@ def stop() -> None:
         import uuid
         MCP_OBS_TOOL = "mcp__plugin_claude-telemetry_cloudbyte__record_observation"
 
-        # Run migrations before writing — handles mid-session plugin updates
+        # Run migrations before writing - handles mid-session plugin updates
         try:
             _db_mgr = get_db_manager()
             migrate_schema(_db_mgr.get_connection())
@@ -181,7 +181,7 @@ def stop() -> None:
         logger.info(f"Processing current prompt data for: {session_id}")
 
         # Resolve the JSONL path.
-        # Prefer transcript_path from hook_data — Claude Code provides the exact path
+        # Prefer transcript_path from hook_data - Claude Code provides the exact path
         # it is writing to, regardless of any `cd` commands run during the session.
         # Falling back to cwd reconstruction can produce wrong paths when Claude has
         # navigated into a subdirectory (e.g. cwd=FashionAssist/bulk-invoice gives
@@ -202,7 +202,7 @@ def stop() -> None:
             logger.warning(f"JSONL file not found: {jsonl_path}")
             return
 
-        # Read events from JSONL — include subagent files if they exist
+        # Read events from JSONL - include subagent files if they exist
         events = list(read_jsonl_file(jsonl_path))
 
         subagents_dir = str(jsonl_path).replace(".jsonl", "") + os.sep + "subagents"
@@ -244,7 +244,7 @@ def stop() -> None:
                     (ai_title, custom_title, session_id),
                 )
                 _title_conn.commit()
-                logger.debug(f"Session titles updated — ai: {ai_title!r}, custom: {custom_title!r}")
+                logger.debug(f"Session titles updated - ai: {ai_title!r}, custom: {custom_title!r}")
             except Exception as _te:
                 logger.warning(f"Could not update session titles: {_te}")
 
@@ -309,7 +309,7 @@ def stop() -> None:
             if not pair_message_id:
                 continue
 
-            # Skip pairs already in DB — prevents duplicates and the N+1 cascade
+            # Skip pairs already in DB - prevents duplicates and the N+1 cascade
             cursor.execute(
                 "SELECT 1 FROM RESPONSE WHERE message_id = ? LIMIT 1", (pair_message_id,)
             )
@@ -503,7 +503,7 @@ def stop() -> None:
         logger.info(f"Stop hook totals: {total_counts}")
 
         # ── Response security scan (on last processed pair) ──────────────────────
-        # Runs after all DB writes. Response is never blocked — findings are
+        # Runs after all DB writes. Response is never blocked - findings are
         # logged to SECURITY_SCAN_EVENT with masked text and surfaced as a
         # UI notice via systemMessage.
         try:
@@ -533,7 +533,7 @@ def stop() -> None:
                                 f"Response scan: {len(_sec_result.findings)} finding(s) logged"
                                 f" [{_sec_result.scan_strategy}, {_rms_str}ms]"
                             )
-                            _summary = ", ".join(f"{f.category} — {f.type}" for f in _sec_result.findings[:3])
+                            _summary = ", ".join(f"{f.category} - {f.type}" for f in _sec_result.findings[:3])
                             if len(_sec_result.findings) > 3:
                                 _summary += f" +{len(_sec_result.findings) - 3} more"
                             print(_json.dumps({

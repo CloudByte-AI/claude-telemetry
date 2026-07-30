@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════════════
-   CloudByte — Security Reports  v5.6
+   CloudByte - Security Reports  v5.6
    Matches app theme: IBM Plex Mono, 0px radius, --accent orange
    ══════════════════════════════════════════════════════════════ */
 
@@ -115,7 +115,7 @@
 .er-empty-link { color: var(--accent); text-decoration: none; }
 .er-empty-link:hover { text-decoration: underline; }
 
-/* Row 1 removed — stats shown in Security Terminal */
+/* Row 1 removed - stats shown in Security Terminal */
 
 /* ── Top grid ────────────────────────────────────────────── */
 .er-top-grid {
@@ -597,7 +597,7 @@
 
 .er-th-r { justify-content: flex-end; }
 
-/* Event card — signature left border */
+/* Event card - signature left border */
 .er-event {
     border-bottom: 1px solid var(--border);
     border-left: 3px solid transparent;
@@ -653,7 +653,7 @@
 .er-target-prompt { color: var(--text-muted); border-color: var(--border-alt); }
 .er-target-resp   { color: var(--blue);       border-color: var(--blue); background: rgba(101,181,255,0.05); }
 
-/* Detector chips — min-width:0 lets this grid cell actually shrink to the
+/* Detector chips - min-width:0 lets this grid cell actually shrink to the
    column's allotted space instead of forcing the whole row wider than its
    container (grid items default to min-width:auto, i.e. their content size). */
 .er-dets { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; min-width: 0; }

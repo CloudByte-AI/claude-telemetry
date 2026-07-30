@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════════════
-   Security Scanning — Precision Control Panel
+   Security Scanning - Precision Control Panel
    Design system: IBM Plex Mono data + Inter body
    Signature: left-border severity, atmospheric hero, tier cards
    ══════════════════════════════════════════════════════════════ */
@@ -26,7 +26,7 @@
 }
 
 /* ══════════════════════════════════════════════════════════════
-   HERO — Disabled state
+   HERO - Disabled state
    ══════════════════════════════════════════════════════════════ */
 
 .sec-hero {
@@ -133,7 +133,7 @@
 }
 .sec-hero-check svg { color: var(--accent); flex-shrink: 0; }
 
-/* Highlight the custom detector benefit — it's a unique differentiator */
+/* Highlight the custom detector benefit - it's a unique differentiator */
 .sec-hero-check-highlight {
     color: var(--text);
     font-weight: 500;
@@ -300,7 +300,7 @@
 .spc-sep { opacity: 0.4; }
 
 /* ══════════════════════════════════════════════════════════════
-   ENABLED STATE — Security Control Panel Redesign
+   ENABLED STATE - Security Control Panel Redesign
    ══════════════════════════════════════════════════════════════ */
 
 /* ── Status bar ─────────────────────────────────────────────── */
@@ -360,7 +360,7 @@
 .sc-separator { color: var(--border-alt); font-size: 12px; }
 .sc-coverage-count { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--text-dim); }
 
-/* ── Plan selector — card grid ──────────────────────────────── */
+/* ── Plan selector - card grid ──────────────────────────────── */
 .sc-plan-selector {
     margin-bottom: 16px;
     animation: sc-reveal 0.35s ease 0.05s both;
@@ -393,7 +393,7 @@
     gap: 6px;
 }
 
-/* Plan card — the sps-btn transformed into a full card */
+/* Plan card - the sps-btn transformed into a full card */
 .sc-plan-card {
     padding: 14px 16px;
     background: var(--bg-alt);
@@ -410,7 +410,7 @@
     border-bottom-color: var(--text-muted);
     background: var(--bg-surface);
 }
-/* Active state — bottom indicator line + elevated */
+/* Active state - bottom indicator line + elevated */
 .sps-active.sc-plan-card {
     background: var(--bg-surface) !important;
     border-color: var(--border-alt) !important;
@@ -456,7 +456,7 @@
     margin-bottom: 8px;
 }
 
-/* Plan status row — shows one badge at a time */
+/* Plan status row - shows one badge at a time */
 .sc-pc-status-row {
     min-height: 18px;
     display: flex;
@@ -466,7 +466,7 @@
 .sc-pc-pending-badge,
 .sc-pc-current-badge { display: none; }
 
-/* Currently saved plan — shows "Active plan" badge */
+/* Currently saved plan - shows "Active plan" badge */
 .sc-pc-is-saved .sc-pc-active-badge {
     display: inline-flex;
     align-items: center;
@@ -482,7 +482,7 @@
     padding: 2px 7px;
 }
 
-/* Plan changed — original card shows "Currently saved" */
+/* Plan changed - original card shows "Currently saved" */
 .sc-pc-was-saved .sc-pc-active-badge { display: none; }
 .sc-pc-was-saved .sc-pc-current-badge {
     display: inline-flex;
@@ -496,7 +496,7 @@
     padding: 2px 0;
 }
 
-/* Newly selected plan — shows "Will apply on save" */
+/* Newly selected plan - shows "Will apply on save" */
 .sc-pc-pending .sc-pc-pending-badge {
     display: inline-flex;
     align-items: center;
@@ -590,7 +590,7 @@
     margin-bottom: 10px;
 }
 
-/* Chip grid — denser layout */
+/* Chip grid - denser layout */
 .sc-chip-grid {
     display: flex;
     flex-wrap: wrap;
@@ -669,7 +669,7 @@
 .sc-card-desc { font-size: 11px; color: var(--text-muted); margin-top: 4px; line-height: 1.45; }
 .sc-card-desc-inline { font-size: 10px; color: var(--text-dim); }
 
-/* Entropy inside card — compact layout */
+/* Entropy inside card - compact layout */
 .sc-card .ent-grid { gap: 16px; }
 .sc-card .ent-field { gap: 5px; }
 .ent-note {
@@ -679,7 +679,7 @@
     margin-top: 10px;
 }
 
-/* Scope inside card — stacked */
+/* Scope inside card - stacked */
 .sc-scope-stack { flex-direction: column; gap: 6px; }
 .sc-scope-stack .scope-card { padding: 12px 14px; }
 
@@ -689,7 +689,7 @@
     animation: sc-reveal 0.4s ease 0.1s both;
 }
 
-/* ── Settings row — always 3 equal columns ──────────────────── */
+/* ── Settings row - always 3 equal columns ──────────────────── */
 .sc-settings-row {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -972,7 +972,7 @@
     color: var(--text-muted);
 }
 
-/* ── Detector tooltip — rich type-list panel ─────────────────── */
+/* ── Detector tooltip - rich type-list panel ─────────────────── */
 .det-tooltip {
     position: fixed;
     z-index: 9999;
@@ -1033,7 +1033,7 @@
 .dtt-toggle-inline:hover { border-color: var(--accent); color: var(--accent); }
 .dtt-toggle-inline.toggle-disable:hover { border-color: var(--red); color: var(--red); }
 
-/* Backward compat — keep old dtt-toggle selector working */
+/* Backward compat - keep old dtt-toggle selector working */
 .dtt-toggle {
     background: none;
     border: 1px solid var(--border);
@@ -1050,7 +1050,7 @@
 .dtt-toggle:hover { border-color: var(--accent); color: var(--accent); }
 .dtt-toggle.toggle-disable:hover { border-color: var(--red); color: var(--red); }
 
-/* Type list — scrollable when many types */
+/* Type list - scrollable when many types */
 .dtt-type-list {
     flex: 1;
     overflow-y: auto;
@@ -1288,7 +1288,7 @@
 
 .ent-toggle:hover { border-color: var(--accent); }
 
-/* Knob — slides left↔right via `left` transition */
+/* Knob - slides left↔right via `left` transition */
 .ent-toggle-knob {
     position: absolute;
     top: 50%;
@@ -1302,7 +1302,7 @@
     z-index: 1;
 }
 
-/* Label — OFF state: sits to the RIGHT of the knob */
+/* Label - OFF state: sits to the RIGHT of the knob */
 .ent-toggle-label {
     position: absolute;
     top: 50%;
@@ -1320,7 +1320,7 @@
     line-height: 1;
 }
 
-/* ON state — pill accent, knob slides to right, label moves to left */
+/* ON state - pill accent, knob slides to right, label moves to left */
 .ent-toggle.ent-toggle-on {
     border-color: var(--accent);
     background: color-mix(in srgb, var(--accent) 12%, var(--bg-alt));
@@ -1368,7 +1368,7 @@
     flex-wrap: wrap;
     gap: 6px;
     min-height: 32px;
-    max-height: 72px;      /* hard cap — scroll if many keywords added */
+    max-height: 72px;      /* hard cap - scroll if many keywords added */
     overflow-y: auto;
     scrollbar-width: thin;
     scrollbar-color: var(--border-alt) transparent;
@@ -1453,7 +1453,7 @@
 .scope-card input { display: none; }
 .scope-card:hover { opacity: 0.85; border-color: var(--text-muted); }
 
-/* ── Active state driven by radio :checked — no JS class needed ─
+/* ── Active state driven by radio :checked - no JS class needed ─
    :has(input:checked) responds to BOTH JS (radio.checked = true)
    AND direct user clicks instantly, so badge always reflects
    real selection state at runtime.                              */
@@ -1505,7 +1505,7 @@
     margin-bottom: 5px;
 }
 
-/* "SELECTED" badge — hidden by default */
+/* "SELECTED" badge - hidden by default */
 .scope-selected-badge {
     display: none;
     align-items: center;
@@ -1542,7 +1542,7 @@
     grid-template-columns: 1fr 1fr;
     gap: 12px;
     margin-bottom: 16px;
-    /* Default align-items:stretch — both cards same height.
+    /* Default align-items:stretch - both cards same height.
        kw-tags has max-height so keywords card never grows beyond entropy card's height. */
     animation: sc-reveal 0.42s ease 0.12s both;
 }

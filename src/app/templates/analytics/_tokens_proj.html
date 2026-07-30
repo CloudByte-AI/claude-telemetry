@@ -15,7 +15,7 @@
             {% for row in proj_rows %}
             <tr>
                 <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;" title="{{ row.project_name or row.path or '' }}">
-                    {% set raw_p = row.project_name or row.path or '—' %}
+                    {% set raw_p = row.project_name or row.path or '-' %}
                     {{ (raw_p|replace('--', '/')|replace('\\', '/') if raw_p else '').split('/')|last }}
                 </td>
                 <td class="mono accent-text" style="text-align:center;">{{ row.session_count }}</td>

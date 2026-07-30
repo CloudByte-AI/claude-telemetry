@@ -1,6 +1,6 @@
 {% extends "base/index.html" %}
 {% from "base/_macros.html" import client_badge %}
-{% block title %}Session {{ session.session_id[:8] }} — CloudByte{% endblock %}
+{% block title %}Session {{ session.session_id[:8] }} - CloudByte{% endblock %}
 {% block breadcrumb %}sessions / {{ session.session_id[:8] }}…{% endblock %}
 
 {% block head %}
@@ -115,7 +115,7 @@
                             {{ 'TOOL DENIED' if turn.status == 'tool_use' else ('ABORTED' if turn.status == 'aborted' else 'INTERRUPTED') }}
                         </div>
                         <div style="font-size:12px; color:var(--text-dim); margin-top:3px;">
-                            {{ 'User denied a tool call — no response was recorded.' if turn.status == 'tool_use' else ('Agent run was aborted before completing.' if turn.status == 'aborted' else 'User cancelled this request before Claude responded.') }}
+                            {{ 'User denied a tool call - no response was recorded.' if turn.status == 'tool_use' else ('Agent run was aborted before completing.' if turn.status == 'aborted' else 'User cancelled this request before Claude responded.') }}
                         </div>
                     </div>
                 </div>

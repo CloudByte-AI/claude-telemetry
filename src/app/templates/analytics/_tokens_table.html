@@ -27,8 +27,8 @@
                        style="font-size:11px;text-decoration:none;">{{ row.session_id[:8] }}…</a>
                 </td>
                 <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;"
-                    title="{{ row.project_name or '' }}">{{ row.project_name or '—' }}</td>
-                <td class="mono dimmer" style="font-size:11px;white-space:nowrap;">{{ row.session_date or '—' }}</td>
+                    title="{{ row.project_name or '' }}">{{ row.project_name or '-' }}</td>
+                <td class="mono dimmer" style="font-size:11px;white-space:nowrap;">{{ row.session_date or '-' }}</td>
                 <td class="mono dimmer" style="text-align:center;">{{ row.turn_count }}</td>
                 <td class="mono accent-text" style="border-left:1px solid var(--border);">{{ "{:,}".format(row.display_input or 0) }}</td>
                 <td class="mono green-text">{{ "{:,}".format(row.display_output or 0) }}</td>

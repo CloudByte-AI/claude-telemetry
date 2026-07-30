@@ -1,6 +1,6 @@
 {% extends "base/index.html" %}
 {% from "base/_macros.html" import client_badge %}
-{% block title %}Audit: {{ obs.title | truncate(30) }} — CloudByte Intelligence{% endblock %}
+{% block title %}Audit: {{ obs.title | truncate(30) }} - CloudByte Intelligence{% endblock %}
 {% block breadcrumb %}intelligence / observations / audit / {{ obs.id[:8] }}{% endblock %}
 
 {% block head %}
@@ -132,7 +132,7 @@
                     {{ obs.type_meta.icon }} {{ obs.type_meta.label }}
                 </span>
                 <span class="mono" style="font-size: 11px; font-weight: 700; color: #fe4c02;">TURN #{{ obs.turn_number
-                    or '—' }}</span>
+                    or '-' }}</span>
                 {{ client_badge(obs.client, compact=true) }}
             </div>
             <h1 class="audit-title">{{ obs.title or 'Unnamed Discovery' }}</h1>
@@ -269,7 +269,7 @@
                                     {{ n.type_meta.icon }} {{ n.type_meta.label }}
                                 </span>
                                 <span class="mono" style="font-size:9px; font-weight:700; color:#fe4c02;">TURN #{{
-                                    n.turn_number or '—' }}</span>
+                                    n.turn_number or '-' }}</span>
                                 <span class="mono dimmer" style="font-size:9px;">{{ n.created_at[11:16] }}</span>
                                 {% if is_curr %}
                                 <span class="mono"

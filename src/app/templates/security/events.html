@@ -1,6 +1,6 @@
 {% extends "base/index.html" %}
 {% from "base/_macros.html" import client_badge %}
-{% block title %}Security Reports — CloudByte{% endblock %}
+{% block title %}Security Reports - CloudByte{% endblock %}
 
 {% block head %}
 <link rel="stylesheet" href="/static/css/security/events.css?v=5.6">
@@ -275,7 +275,7 @@
                 <span class="er-audit-v">{{ client_badge(ev.client, compact=true) }}</span>
                 <span class="er-audit-sep">·</span>
                 <span class="er-audit-k">SHA-256</span>
-                <span class="er-audit-v">{{ ev.hash_short or '—' }}</span>
+                <span class="er-audit-v">{{ ev.hash_short or '-' }}</span>
                 <span class="er-audit-sep">·</span>
                 <span class="er-audit-k">STRATEGY</span>
                 <span class="er-audit-v">{{ (ev.scan_strategy or 'full') | upper }}</span>
@@ -284,7 +284,7 @@
                 <span class="er-audit-v">{{ ev.scan_ms }}ms</span>
                 <span class="er-audit-sep">·</span>
                 <span class="er-audit-k">LOGGED</span>
-                <span class="er-audit-v">{{ ev.timestamp[:19] | replace('T', ' ') if ev.timestamp else '—' }}</span>
+                <span class="er-audit-v">{{ ev.timestamp[:19] | replace('T', ' ') if ev.timestamp else '-' }}</span>
             </div>
         </div>
 

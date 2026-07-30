@@ -1,13 +1,13 @@
 {% extends "base/index.html" %}
 {% from "base/_macros.html" import not_tracked %}
-{% block title %}Tool Analysis · {{ project.name }} — CloudByte{% endblock %}
+{% block title %}Tool Analysis · {{ project.name }} - CloudByte{% endblock %}
 {% block breadcrumb %}tool calls / project {{ project.name | truncate(30) }}{% endblock %}
 
 {% block head %}<link rel="stylesheet" href="/static/css/analytics/project_tools.css">{% endblock %}
 
 {% block content %}
 
-<!-- Chart data — forceescape keeps double-quoted JSON safe in HTML attributes -->
+<!-- Chart data - forceescape keeps double-quoted JSON safe in HTML attributes -->
 <div id="chart-data" style="display:none;"
      data-labels="{{ chart_labels | tojson | forceescape }}"
      data-calls="{{ chart_calls | tojson | forceescape }}"
@@ -30,10 +30,10 @@
         </div>
         <div class="project-meta-row">
             <div class="project-meta-item">
-                path <span class="mono" style="font-size:10px;">{{ project.path[-50:] if project.path else '—' }}</span>
+                path <span class="mono" style="font-size:10px;">{{ project.path[-50:] if project.path else '-' }}</span>
             </div>
             <div class="project-meta-item">
-                created <span>{{ project.created_at[:10] if project.created_at else '—' }}</span>
+                created <span>{{ project.created_at[:10] if project.created_at else '-' }}</span>
             </div>
             <div class="project-meta-item">
                 sessions <span>{{ stats.total_sessions }}</span>
@@ -173,7 +173,7 @@
                             {% if row.errors > 0 %}
                                 <span class="error-badge">✗ {{ row.errors }}</span>
                             {% else %}
-                                <span class="ok-badge">—</span>
+                                <span class="ok-badge">-</span>
                             {% endif %}
                         </td>
                     </tr>
@@ -220,7 +220,7 @@
                             </a>
                         </td>
                         <td class="mono dimmer" style="font-size:11px;white-space:nowrap;">
-                            {{ row.session_date or '—' }}
+                            {{ row.session_date or '-' }}
                         </td>
                         <td>
                             <span class="tool-badge">{{ row.tool_calls }} calls</span>

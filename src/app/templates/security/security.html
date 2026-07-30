@@ -1,5 +1,5 @@
 {% extends "base/index.html" %}
-{% block title %}Security Scanning — CloudByte{% endblock %}
+{% block title %}Security Scanning - CloudByte{% endblock %}
 
 {% block head %}
 <link rel="stylesheet" href="/static/css/security/security.css?v=4.2">
@@ -11,7 +11,7 @@
 
 {% if not enabled %}
 <!-- ═══════════════════════════════════════════════
-     DISABLED — Hero
+     DISABLED - Hero
 ════════════════════════════════════════════════ -->
 <div class="sec-hero">
     <div class="sec-hero-glow"></div>
@@ -147,7 +147,7 @@
 
 {% else %}
 <!-- ═══════════════════════════════════════════════
-     ENABLED — Security Control Panel
+     ENABLED - Security Control Panel
 ════════════════════════════════════════════════ -->
 
 {% if save_message %}
@@ -324,7 +324,7 @@
     </div>
 </div>
 
-<!-- ── Custom Detectors — full width (grows safely) ── -->
+<!-- ── Custom Detectors - full width (grows safely) ── -->
 <div class="sc-custom-full sec-section-dark sc-card">
     <div class="sc-card-hdr">
         <div>
@@ -368,7 +368,7 @@
     {% endif %}
 </div>
 
-<!-- ── Scan Scope — full width, horizontal 2-option selector ── -->
+<!-- ── Scan Scope - full width, horizontal 2-option selector ── -->
 <div class="sc-card sc-card-muted sc-scope-section">
     <div class="sc-card-hdr sc-card-hdr-compact">
         <span class="sec-section-label">Scan Scope</span>
@@ -413,7 +413,7 @@
                 </div>
                 <div class="scope-card-desc">
                     Prompts blocked as above. Your assistant's responses are also scanned; any findings are
-                    <strong>logged here on the dashboard</strong> for you to review — response scans don't interrupt the reply in-chat.
+                    <strong>logged here on the dashboard</strong> for you to review - response scans don't interrupt the reply in-chat.
                 </div>
             </div>
         </label>
@@ -421,7 +421,7 @@
     <input type="hidden" name="scope" id="scope-hidden" value="{{ scope }}">
 </div>
 
-<!-- ── Entropy + Keywords — 2 equal columns ──────────────── -->
+<!-- ── Entropy + Keywords - 2 equal columns ──────────────── -->
 <div class="sc-settings-2col">
 
     <!-- Entropy Detection -->
@@ -433,12 +433,12 @@
                 <span class="ent-toggle-label">{{ 'ON' if entropy.enabled else 'OFF' }}</span>
             </button>
         </div>
-        <div class="sc-card-desc">Catches secrets that specific detectors can't — anything without a known prefix or format. Covers Azure storage keys, IBM credentials, HMACs, and any high-entropy random string. Enable this if you work with services not in the built-in detector list.</div>
+        <div class="sc-card-desc">Catches secrets that specific detectors can't - anything without a known prefix or format. Covers Azure storage keys, IBM credentials, HMACs, and any high-entropy random string. Enable this if you work with services not in the built-in detector list.</div>
         <input type="hidden" id="entropy-enabled-input" name="entropy_enabled" value="{{ '1' if entropy.enabled else '0' }}">
         <div class="ent-modes{% if not entropy.enabled %} entropy-off{% endif %}" id="entropy-fields">
-            <div class="ent-mode-item">◈ Variable assignment — <code>api_key = "…"</code></div>
-            <div class="ent-mode-item">◈ Bare hex strings — IBM keys, HMACs, Azure secrets</div>
-            <div class="ent-mode-item">◈ Bare base64 strings — Azure storage keys, IAM tokens</div>
+            <div class="ent-mode-item">◈ Variable assignment - <code>api_key = "…"</code></div>
+            <div class="ent-mode-item">◈ Bare hex strings - IBM keys, HMACs, Azure secrets</div>
+            <div class="ent-mode-item">◈ Bare base64 strings - Azure storage keys, IAM tokens</div>
         </div>
     </div>
 
@@ -461,13 +461,13 @@
 
 </div>
 
-<!-- ── Allowlist — full width ─────────────────────────────────────────────── -->
+<!-- ── Allowlist - full width ─────────────────────────────────────────────── -->
 <div class="sc-card sc-card-muted">
     <div class="sc-card-hdr sc-card-hdr-compact">
         <span class="sec-section-label">Allowlist</span>
         <span class="sc-card-desc-inline">Values that are never detected, masked, or blocked</span>
     </div>
-    <div class="sc-card-desc" style="margin-bottom:12px;">Add test credentials, documentation examples, or placeholder values. Once allowlisted, a value will never trigger any detector — even if it looks like a real secret.</div>
+    <div class="sc-card-desc" style="margin-bottom:12px;">Add test credentials, documentation examples, or placeholder values. Once allowlisted, a value will never trigger any detector - even if it looks like a real secret.</div>
     <div class="kw-wrap">
         <div class="kw-tags" id="al-tags"></div>
         <input type="hidden" name="allowlist" id="al-hidden" value="{{ allowlist | join('\n') }}">
@@ -493,7 +493,7 @@
 
 {% endif %}
 
-<!-- Hidden inputs — always present regardless of enabled state -->
+<!-- Hidden inputs - always present regardless of enabled state -->
 <input type="hidden" name="enabled" id="enabled-input" value="{{ '1' if enabled else '0' }}">
 <input type="hidden" name="plan"    id="plan-input"    value="{{ plan }}">
 
@@ -593,7 +593,7 @@
                            oninput="updatePmSaveBtn()">
                 </div>
                 <div class="pm-regex-hint">
-                    Tested with Python's <code>re.finditer()</code> — use lookbehind/lookahead to avoid partial matches.
+                    Tested with Python's <code>re.finditer()</code> - use lookbehind/lookahead to avoid partial matches.
                 </div>
             </div>
 

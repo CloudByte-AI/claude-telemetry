@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-MCP server launcher — cross-platform, venv-aware.
+MCP server launcher - cross-platform, venv-aware.
 
 Start modes (tried in order):
-  1. Venv python  — used when .venv is ready; supports any future project deps
-  2. Direct exec  — fallback when venv not yet built; works because server.py is stdlib-only
+  1. Venv python  - used when .venv is ready; supports any future project deps
+  2. Direct exec  - fallback when venv not yet built; works because server.py is stdlib-only
 
 Claude Code calls this via:
     uv run --no-project "${CLAUDE_PLUGIN_ROOT}/scripts/start_mcp.py"
@@ -38,7 +38,7 @@ def main() -> None:
 
     if python.exists():
         if sys.platform == "win32":
-            # On Windows, os.execv does NOT replace the current process — it
+            # On Windows, os.execv does NOT replace the current process - it
             # spawns a new child and exits the caller.  When the caller exits,
             # uv run (which is waiting for its subprocess) also exits, and
             # Cursor/Claude detects the top-level process death and closes the
@@ -49,10 +49,10 @@ def main() -> None:
             sys.exit(proc.returncode)
         else:
             # On Unix/macOS execv truly replaces the current process (same PID,
-            # same file descriptors) — safe to use here.
+            # same file descriptors) - safe to use here.
             os.execv(str(python), [str(python), str(SERVER)])
     else:
-        # Fallback mode: venv not built yet — run server.py directly.
+        # Fallback mode: venv not built yet - run server.py directly.
         # Works as long as server.py only needs stdlib (current state).
         # Hooks will build the venv; next Claude restart uses full mode.
         sys.path.insert(0, str(PLUGIN_ROOT))
