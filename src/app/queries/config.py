@@ -5,29 +5,13 @@ from pathlib import Path
 
 CONFIG_PATH = Path.home() / ".cloudbyte" / "config.json"
 
-# Used only when file doesn't exist — minimal structure so UI has something to show
+# Used only when the file doesn't exist — minimal structure so the UI has something
+# to show. The former `llm` and `worker` blocks are gone with the task-queue/LLM
+# subsystem, and no `settings` key was ever read (see src/main.py's setup()).
+# Kept in sync with the defaults written there.
 _EMPTY_CONFIG = {
-    "version":  "0.1.36",
-    "settings": {
-        "log_level":            "INFO",
-        "enable_observations":  False,
-    },
-    "llm": {
-        "default": "default",
-        "endpoints": {
-            "default": {
-                "provider":    "",
-                "model":       "",
-                "api_key":     "",
-                "temperature": 0.7,
-                "max_tokens":  4000,
-            }
-        },
-    },
-    "worker": {
-        "enabled": True,
-        "port":    4723,
-    },
+    "version":  "unknown",
+    "settings": {},
 }
 
 

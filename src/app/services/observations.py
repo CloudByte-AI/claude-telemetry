@@ -99,20 +99,11 @@ def get_observations_context(
     donut_labels = [TYPE_META[t]["label"] for t in ALL_TYPES if type_counts.get(t,0) > 0]
     donut_values = [type_counts.get(t,0) for t in ALL_TYPES if type_counts.get(t,0) > 0]
 
-    # Task counts
-    session_task_counts = {}
-    for row in oq.get_session_task_counts():
-        session_id = row["session_id"]
-        session_task_counts[session_id] = {
-            "pending": row["pending"] or 0,
-            "running": row["running"] or 0,
-            "failed": row["failed"] or 0,
-            "completed": row["completed"] or 0,
-        }
-
-    for obs in paged:
-        session_id = obs.get("session_id")
-        obs["task_counts"] = session_task_counts.get(session_id, {"pending":0, "running":0, "failed":0, "completed":0})
+    # Distinct sessions that actually produced observations — the denominator for
+    # the "Avg Density" / "Unique Contexts" tiles. This used to be derived from
+    # TASK_QUEUE (sessions that enqueued an LLM task), which drifted from reality
+    # and counted every Cursor session as zero, since Cursor never enqueued anything.
+    obs_sessions = len({r["session_id"] for r in all_rows if r.get("session_id")})
 
     return {
         "active":          "observations",
@@ -132,7 +123,7 @@ def get_observations_context(
         "timeline_values": timeline_data,
         "donut_labels":    donut_labels,
         "donut_values":    donut_values,
-        "session_task_counts": session_task_counts,
+        "obs_sessions":    obs_sessions,
     }
 
 

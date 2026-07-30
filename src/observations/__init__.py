@@ -1,44 +1,25 @@
 """
 Observation handling module.
 
-This module consolidates all observation-related functionality including
-extraction, generation, storage, and queue management.
+Observations are authored by the agent itself and delivered through the MCP
+`record_observation` tool, then persisted to HOOK_OBSERVATION:
+
+    Claude Code  — src/main.py's stop hook reads the tool calls out of the JSONL
+    Cursor       — src/cursor/handlers/after_mcp_execution.py parses tool_input
+
+Both paths land on save_observation() below. The legacy inline `<obs>` block
+parser (extractor.py / hook_handler.py) and the LLM task queue that predated the
+MCP tool have been removed.
 """
 
-from src.observations.extractor import (
-    extract_obs_blocks,
-    parse_obs_block,
-    extract_and_parse_obs,
-    clean_response_text,
-)
 from src.observations.writer import (
     save_observation,
     get_session_observations,
-)
-from src.observations.hook_handler import (
-    handle_hook_observation_extraction,
-)
-from src.observations.queue import (
-    queue_observation_task,
-    get_pending_tasks,
-    mark_task_started,
-    mark_task_completed,
+    cleanup_duplicate_observations,
 )
 
 __all__ = [
-    # Extractor
-    "extract_obs_blocks",
-    "parse_obs_block",
-    "extract_and_parse_obs",
-    "clean_response_text",
-    # Writer
     "save_observation",
     "get_session_observations",
-    # Hook Handler
-    "handle_hook_observation_extraction",
-    # Queue
-    "queue_observation_task",
-    "get_pending_tasks",
-    "mark_task_started",
-    "mark_task_completed",
+    "cleanup_duplicate_observations",
 ]

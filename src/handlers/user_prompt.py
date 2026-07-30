@@ -134,62 +134,6 @@ def ensure_session_initialized(session_id: str, cwd: str) -> bool:
         return False
 
 
-def retry_pending_tasks(session_id: str):
-    """
-    Retry pending and failed tasks for a session.
-
-    Called on session start to process any tasks that didn't complete
-    in the previous session.
-    """
-    from src.db.manager import get_db_manager
-
-    try:
-        db = get_db_manager()
-
-        tasks = db.execute(
-            """
-            SELECT id, task_type, session_id, prompt_id, priority, payload
-            FROM TASK_QUEUE
-            WHERE session_id = ? AND status IN ('pending', 'failed')
-            ORDER BY priority DESC, created_at ASC
-            """,
-            (session_id,),
-        ).fetchall()
-
-        if not tasks:
-            return
-
-        logger.info(
-            f"Found {len(tasks)} pending/failed tasks for session {session_id}, retrying..."
-        )
-
-        for task in tasks:
-            db.execute(
-                """
-                UPDATE TASK_QUEUE
-                SET status = 'pending',
-                    error_message = NULL,
-                    retry_count = retry_count + 1,
-                    created_at = datetime('now')
-                WHERE id = ?
-                """,
-                (task[0],),
-            )
-
-        try:
-            from src.workers.llm_client import reset_worker
-            reset_worker()
-            logger.info("Worker reset to process retried tasks")
-        except Exception as e:
-            logger.warning(f"Could not reset worker: {e}")
-
-    except Exception as e:
-        # Don't log as error — tables might not exist yet
-        logger.debug(
-            f"Could not retry pending tasks (DB might not be initialized yet): {e}"
-        )
-
-
 # ---------------------------------------------------------------------------
 # OBS reminder constant
 # ---------------------------------------------------------------------------
@@ -402,10 +346,6 @@ def handle_user_prompt():
         )
         event_uuid = hook_data.get("uuid") or hook_data.get("id")
         event_timestamp = hook_data.get("timestamp") or hook_data.get("time")
-
-        # ── Retry pending tasks from previous session ────────────────────────
-        if session_id:
-            retry_pending_tasks(session_id)
 
         # ── Heartbeat this session in the shared active-session registry ─────
         # Uses register() (not a separate "touch if exists" call) so a session
