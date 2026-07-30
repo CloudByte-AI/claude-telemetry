@@ -309,67 +309,6 @@ def extract_raw_log(event: Dict[str, Any], session_id: str) -> Dict[str, Any]:
     }
 
 
-def extract_observation(session_summary: Dict[str, Any], session_id: str) -> Dict[str, Any]:
-    """
-    Extract observation data from session summary.
-
-    Args:
-        session_summary: Parsed session summary
-        session_id: Session ID
-
-    Returns:
-        Dict with keys for OBSERVATION table
-    """
-    return {
-        "id": str(uuid.uuid4()),
-        "session_id": session_id,
-        "prompt_number": session_summary.get("stats", {}).get("total_user_messages"),
-        "title": f"Session Observation - {session_summary.get('date', '')}",
-        "subtitle": "",
-        "narrative": "\n".join(session_summary.get("tasks", [])),
-        "text": session_summary.get("notes", ""),
-        "facts": "",
-        "concepts": "",
-        "type": "session_summary",
-        "files_read": "",
-        "files_modified": "",
-        "content_hash": "",
-        "created_at": get_now_ist_iso(),
-        "sync_status": "pending",
-    }
-
-
-def extract_session_summary(
-    session_summary: Dict[str, Any],
-    session_id: str,
-    project_name: str,
-) -> Dict[str, Any]:
-    """
-    Extract session summary data for SESSION_SUMMARY table.
-
-    Args:
-        session_summary: Parsed session summary
-        session_id: Session ID
-        project_name: Project name
-
-    Returns:
-        Dict with keys for SESSION_SUMMARY table
-    """
-    return {
-        "id": str(uuid.uuid4()),
-        "session_id": session_id,
-        "project": project_name,
-        "request": "\n".join(session_summary.get("tasks", [])),
-        "investigated": "",
-        "learned": "",
-        "completed": "\n".join(session_summary.get("tools_used", [])),
-        "next_steps": session_summary.get("notes", ""),
-        "notes": session_summary.get("context", ""),
-        "created_at": get_now_ist_iso(),
-        "sync_status": "pending",
-    }
-
-
 def get_event_type(event: Dict[str, Any]) -> str:
     """
     Get the event type from an event dictionary.

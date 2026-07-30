@@ -45,6 +45,21 @@ from ftfy import fix_text as _fix_text
 logger = get_logger(__name__)
 
 
+def _plugin_version() -> str:
+    """
+    Read the plugin version from .claude-plugin/plugin.json.
+
+    Sourced from the manifest rather than hardcoded because the two drifted before:
+    the default config said 0.1.36 while plugin.json said 0.1.40. One source of
+    truth means a version bump only has to happen in one place.
+    """
+    try:
+        manifest = Path(__file__).parent.parent / ".claude-plugin" / "plugin.json"
+        return _json.loads(manifest.read_text(encoding="utf-8")).get("version", "unknown")
+    except Exception:
+        return "unknown"
+
+
 def setup() -> None:
     """
     Setup hook - Initialize database and directories.
@@ -70,47 +85,23 @@ def setup() -> None:
         else:
             logger.warning("Database schema verification failed")
 
-        # Create default config if not exists
+        # Create default config if not exists.
+        #
+        # Deliberately minimal. The old `worker` and `llm` blocks are gone with the
+        # task-queue/LLM subsystem, and none of the former `settings` keys were ever
+        # read: log_level is never passed to setup_logging(), and the
+        # enable_observations / enable_summaries gates were removed once observations
+        # started coming from the MCP tool instead of an LLM.
+        #
+        # Only written when the file is ABSENT — existing config.json files are never
+        # rewritten or pruned here, so any keys placed there by other tooling (e.g.
+        # CENTRAL_URL / API_KEY) survive untouched. Stale keys are simply inert.
         config_file = get_config_file()
         if not config_file.exists():
             default_config = {
-                "version": "0.1.36",
+                "version": _plugin_version(),
                 "created_at": get_now_ist_iso(),
-                "settings": {
-                    "log_level": "INFO",
-                    "enable_observations": True,
-                    "enable_summaries": True,
-                },
-                "worker": {
-                    "enabled": True,
-                    "port": 4723,
-                    "timeout": 120,
-                    "shutdown_idle_seconds": 60,
-                    "max_shutdown_wait_seconds": 300,
-                    "max_retries": 3,
-                    "cleanup_days": 7,
-                },
-                "llm": {
-                    "default": "observation",
-                    "endpoints": {
-                        "observation": {
-                            "provider": "openai",
-                            "model": "gpt-4o",
-                            "api_key": "",
-                            "temperature": 0.7,
-                            "max_tokens": 2000,
-                            "base_url": None,
-                        },
-                        "summary": {
-                            "provider": "anthropic",
-                            "model": "claude-3-5-sonnet-20241022",
-                            "api_key": "",
-                            "temperature": 0.5,
-                            "max_tokens": 4000,
-                            "base_url": None,
-                        },
-                    },
-                },
+                "settings": {},
             }
             write_json(config_file, default_config)
             logger.info("Created default configuration")
@@ -138,26 +129,6 @@ def user_prompt() -> None:
     Delegates to the user_prompt handler.
     """
     handle_user_prompt()
-
-
-def observation() -> None:
-    """
-    Observation generation hook - Ready for LLM integration.
-
-    To enable observation generation:
-    1. Set API key in .cloudbyte/config.json under llm.endpoints.observation.api_key
-    2. Decide when to call this (Stop hook vs SessionEnd vs after each prompt)
-    3. Import and use generate_observation() from src.utils.llm.generators
-
-    Example:
-        from src.utils.llm import generate_observation, save_observation_to_db
-        observation = generate_observation(session_id, prompt_id)
-        if observation:
-            save_observation_to_db(observation)
-    """
-    setup_logging(log_to_file=True, log_to_console=False, log_dir=get_claude_logs_dir())
-    logger.debug("Observation generation hook - LLM integration ready but not yet triggered")
-    # TODO: Implement observation generation timing and logic
 
 
 def stop() -> None:
@@ -529,33 +500,6 @@ def stop() -> None:
             except Exception as obs_error:
                 logger.warning(f"MCP observation save failed: {obs_error}")
 
-            # ── Queue observation task if tools were used ──────────────────────
-            if pair_counts["tools"] > 0:
-                try:
-                    from src.workers.llm_client import queue_observation_task
-                    from src.common.paths import get_config_file
-                    from src.common.file_io import read_json
-
-                    observations_enabled = True
-                    config_file = get_config_file()
-                    if config_file.exists():
-                        config = read_json(config_file)
-                        observations_enabled = config.get("settings", {}).get("enable_observations", True)
-
-                    if observations_enabled:
-                        logger.info(f"Queueing observation task for prompt with {pair_counts['tools']} tools")
-                        result = queue_observation_task(session_id, effective_prompt_id)
-                        if result.get("status") == "queued":
-                            logger.info(f"Observation task queued: {result['task_id']}")
-                        else:
-                            logger.warning(f"Failed to queue observation task: {result.get('message', 'Unknown error')}")
-                    else:
-                        logger.info("Observations disabled in config, skipping queue")
-                except ImportError:
-                    logger.debug("Worker module not available, skipping observation queue")
-                except Exception as obs_error:
-                    logger.warning(f"Observation queue failed (will retry on next prompt): {obs_error}")
-
         logger.info(f"Stop hook totals: {total_counts}")
 
         # ── Response security scan (on last processed pair) ──────────────────────
@@ -630,7 +574,7 @@ def main():
     """
     if len(sys.argv) < 2:
         print("Usage: python -m src.main <command>")
-        print("Commands: setup, session_start, user_prompt, observation, stop, session_end")
+        print("Commands: setup, session_start, user_prompt, stop, session_end")
         sys.exit(1)
 
     command = sys.argv[1]
@@ -639,7 +583,6 @@ def main():
         "setup": setup,
         "session_start": session_start,
         "user_prompt": user_prompt,
-        "observation": observation,
         "stop": stop,
         "session_end": session_end,
     }

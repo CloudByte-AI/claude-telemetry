@@ -225,28 +225,6 @@ def create_tables(conn: sqlite3.Connection) -> None:
     );
     """)
 
-    # ---------------- OBSERVATION ----------------
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS OBSERVATION (
-        id TEXT PRIMARY KEY,
-        session_id TEXT,
-        prompt_id TEXT,
-        title TEXT,
-        subtitle TEXT,
-        narrative TEXT,
-        text TEXT,
-        facts TEXT,
-        concepts TEXT,
-        type TEXT,
-        files_read TEXT,
-        files_modified TEXT,
-        content_hash TEXT,
-        created_at DATETIME,
-        FOREIGN KEY (session_id) REFERENCES SESSION(session_id),
-        FOREIGN KEY (prompt_id) REFERENCES USER_PROMPT(prompt_id)
-    );
-    """)
-
     # ---------------- HOOK_OBSERVATION ----------------
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS HOOK_OBSERVATION (
@@ -266,42 +244,6 @@ def create_tables(conn: sqlite3.Connection) -> None:
         created_at DATETIME,
         FOREIGN KEY (session_id) REFERENCES SESSION(session_id),
         FOREIGN KEY (prompt_id) REFERENCES USER_PROMPT(prompt_id)
-    );
-    """)
-
-    # ---------------- SESSION_SUMMARY ----------------
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS SESSION_SUMMARY (
-        id TEXT PRIMARY KEY,
-        session_id TEXT,
-        project TEXT,
-        request TEXT,
-        investigated TEXT,
-        learned TEXT,
-        completed TEXT,
-        next_steps TEXT,
-        notes TEXT,
-        created_at DATETIME,
-        FOREIGN KEY (session_id) REFERENCES SESSION(session_id)
-    );
-    """)
-
-    # ---------------- TASK_QUEUE ----------------
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS TASK_QUEUE (
-        id TEXT PRIMARY KEY,
-        task_type TEXT NOT NULL,
-        session_id TEXT NOT NULL,
-        prompt_id TEXT,
-        status TEXT NOT NULL,
-        priority INTEGER DEFAULT 0,
-        payload TEXT,
-        error_message TEXT,
-        created_at DATETIME,
-        started_at DATETIME,
-        completed_at DATETIME,
-        retry_count INTEGER DEFAULT 0,
-        FOREIGN KEY (session_id) REFERENCES SESSION(session_id)
     );
     """)
 
@@ -333,7 +275,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
 # DatabaseManager.ensure_schema_initialized() is the single choke point
 # that compares this against the stored value on every process's first
 # connection and re-runs migrate_schema() only when behind.
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 
 
 def get_schema_version(conn: sqlite3.Connection) -> int:
@@ -517,6 +459,34 @@ def migrate_schema(conn: sqlite3.Connection) -> list:
         # for now just alias via a view — old rows remain readable as event_id via INSERT
         logger.info("Migration: SECURITY_SCAN_EVENT has finding_id column (legacy), continuing")
 
+    # ── v2: drop the LLM task-queue / summary subsystem ──────────────────────
+    # These three tables were written only by the removed worker pipeline:
+    #   TASK_QUEUE      — task rows for the LLM worker
+    #   SESSION_SUMMARY — LLM-generated session summaries (never populated)
+    #   OBSERVATION     — LLM-generated observations (never populated; the live
+    #                     store is HOOK_OBSERVATION, written by the MCP tool on
+    #                     both the Claude Code and Cursor paths)
+    #
+    # Runs last so the column renames above still see the schema they expect.
+    # _safe_alter (not a bare execute) for two reasons: it tolerates the
+    # OperationalError raised when a concurrent hook drops the same table a
+    # moment earlier, and it records the change so the drop shows up in
+    # migration_history.jsonl — this is the most destructive step in the
+    # project's history and must not be silent.
+    #
+    # NOTE: create_indexes() must not contain idx_task_queue_* statements. It is
+    # called immediately after this function by ensure_schema_initialized(), and
+    # indexing a dropped table raises "no such table" — which would abort before
+    # set_schema_version() and leave the DB migrating forever.
+    for _legacy in ("TASK_QUEUE", "SESSION_SUMMARY", "OBSERVATION"):
+        _safe_alter(
+            cursor,
+            f"DROP TABLE IF EXISTS {_legacy}",
+            f"Migration: dropped legacy table {_legacy}",
+            changes,
+            {"table": _legacy, "action": "drop_table"},
+        )
+
     conn.commit()
     return changes
 
@@ -549,11 +519,6 @@ def create_indexes(conn: sqlite3.Connection) -> None:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_io_prompt ON IO_TOKENS(prompt_id);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_io_message ON IO_TOKENS(message_id);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_tool_tokens_tool ON TOOL_TOKENS(tool_id);")
-
-    # Indexes for task queue
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_task_queue_status ON TASK_QUEUE(status);")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_task_queue_priority ON TASK_QUEUE(priority DESC, created_at);")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_task_queue_session ON TASK_QUEUE(session_id);")
 
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_prompt_jsonl_id ON USER_PROMPT(jsonl_prompt_id);")
 
@@ -614,11 +579,17 @@ class DatabaseSchema:
     TABLE_TOOL = "TOOL"
     TABLE_IO_TOKENS = "IO_TOKENS"
     TABLE_TOOL_TOKENS = "TOOL_TOKENS"
-    TABLE_OBSERVATION = "OBSERVATION"
-    TABLE_SESSION_SUMMARY = "SESSION_SUMMARY"
-    TABLE_TASK_QUEUE = "TASK_QUEUE"
+    TABLE_HOOK_OBSERVATION = "HOOK_OBSERVATION"
+    TABLE_SECURITY_SCAN_EVENT = "SECURITY_SCAN_EVENT"
 
-    # All tables
+    # All tables. MUST stay in sync with create_tables() — verify_schema() below
+    # returns False if any entry is missing, and ensure_schema_initialized()
+    # responds by calling create_tables(), which would recreate anything listed
+    # here. Leaving a dropped table in this list silently resurrects it on the
+    # next hook invocation.
+    #
+    # HOOK_OBSERVATION and SECURITY_SCAN_EVENT were previously absent — the two
+    # tables that matter most were never actually verified.
     ALL_TABLES = [
         TABLE_PROJECT,
         TABLE_SESSION,
@@ -629,9 +600,8 @@ class DatabaseSchema:
         TABLE_TOOL,
         TABLE_IO_TOKENS,
         TABLE_TOOL_TOKENS,
-        TABLE_OBSERVATION,
-        TABLE_SESSION_SUMMARY,
-        TABLE_TASK_QUEUE,
+        TABLE_HOOK_OBSERVATION,
+        TABLE_SECURITY_SCAN_EVENT,
     ]
 
     @classmethod

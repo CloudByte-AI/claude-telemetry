@@ -71,12 +71,12 @@
         <div style="margin-bottom:20px;">
             <div style="font-size:9px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:4px;">Avg Density</div>
             <div style="font-size:32px; font-weight:400; color:#fe4c02; line-height:1; letter-spacing:-0.04em;">
-                {% if session_task_counts|length > 0 %}{{ "%.1f"|format(total / session_task_counts|length) }}{% else %}0{% endif %}
+                {% if obs_sessions > 0 %}{{ "%.1f"|format(total / obs_sessions) }}{% else %}0{% endif %}
             </div>
         </div>
         <div>
             <div style="font-size:9px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:4px;">Unique Contexts</div>
-            <div style="font-size:32px; font-weight:400; color:var(--text); line-height:1; letter-spacing:-0.04em;">{{ session_task_counts|length }}</div>
+            <div style="font-size:32px; font-weight:400; color:var(--text); line-height:1; letter-spacing:-0.04em;">{{ obs_sessions }}</div>
         </div>
     </div>
 </div>
