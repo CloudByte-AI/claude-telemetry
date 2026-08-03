@@ -110,7 +110,21 @@ else {
     Write-Host "uv not found - installing..."
 
     try {
-        powershell -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex"
+        # Download and run as a FILE rather than `-Command "irm ... | iex"`.
+        # That form nests a pipeline inside a -Command string and the quoting
+        # does not survive every host: the pipe can bind in the caller, so the
+        # child only prints the script and the caller's iex parses its first
+        # line alone. uv's installer opens with a param() block, so that failed
+        # with "Missing ')' in function parameter list".
+        $uvInstaller = Join-Path $env:TEMP ("uv-install-" + [guid]::NewGuid().ToString("N").Substring(0, 8) + ".ps1")
+        try {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            Invoke-WebRequest -Uri "https://astral.sh/uv/install.ps1" -OutFile $uvInstaller -UseBasicParsing
+            powershell -ExecutionPolicy Bypass -NoProfile -File $uvInstaller
+        }
+        finally {
+            Remove-Item $uvInstaller -Force -ErrorAction SilentlyContinue
+        }
         Refresh-Path
 
         if (Get-Command uv -ErrorAction SilentlyContinue) {

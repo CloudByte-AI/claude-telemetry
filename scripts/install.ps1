@@ -343,9 +343,18 @@ function Find-ClaudeExe {
     return $null
 }
 
-# Run a vendor `irm ... | iex` installer in a child shell.
+# Fetch a vendor installer and run it in a child shell.
 #
-# Two things this gets right that a bare invocation does not:
+# Deliberately NOT `powershell -Command "irm <url> | iex"`. That form nests a
+# pipeline inside a -Command string, and the quoting does not survive every
+# host: the pipe can bind in the CALLER instead, so the child merely prints the
+# script and the caller's iex parses its first line alone - which fails with
+# "Missing ')' in function parameter list" on any installer that opens with a
+# param() block, as Claude Code's does. Downloading here and running the file
+# removes the nesting entirely, and -File is the correct entry point for a
+# script that declares parameters.
+#
+# Two further details this gets right:
 #   - Out-Host keeps the installer's progress visible without letting its stdout
 #     leak into the caller's return value (a non-empty array is truthy, so a
 #     failed install would otherwise read as success).
@@ -354,13 +363,25 @@ function Find-ClaudeExe {
 #     terminating NativeCommandError decorated with "At line:N char:N". Vendor
 #     installers write progress to stderr, so that would abort on a success.
 function Invoke-ChildInstaller {
-    param([string] $Command)
+    param([string] $Url)
+
+    $tmp = Join-Path $env:TEMP ("cloudbyte-vendor-" + [guid]::NewGuid().ToString("N").Substring(0, 8) + ".ps1")
+    log "Fetching vendor installer: $Url"
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri $Url -OutFile $tmp -UseBasicParsing
+    }
+    catch {
+        SayWarn "Could not download the installer from $Url : $($_.Exception.Message)"
+        log "Vendor installer download failed: $_"
+        return
+    }
 
     $shell   = Get-HostShell
     $prevEap = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
-        & $shell -ExecutionPolicy Bypass -NoProfile -Command $Command 2>&1 |
+        & $shell -ExecutionPolicy Bypass -NoProfile -File $tmp 2>&1 |
             ForEach-Object {
                 if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.ToString() } else { "$_" }
             } | Out-Host
@@ -368,6 +389,7 @@ function Invoke-ChildInstaller {
     }
     finally {
         $ErrorActionPreference = $prevEap
+        Remove-Item $tmp -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -376,7 +398,7 @@ function Install-ClaudeCode {
     Say "Installing Claude Code via the official installer..."
     Write-Host ""
     try {
-        Invoke-ChildInstaller "irm '$CLAUDE_CLI_INSTALL_URL' | iex"
+        Invoke-ChildInstaller $CLAUDE_CLI_INSTALL_URL
     }
     catch {
         SayWarn "Native installer failed: $_"
@@ -448,7 +470,7 @@ function Install-CursorAgent {
     # installer starts by deleting %LOCALAPPDATA%\cursor-agent outright, so
     # running it over a working install would replace it rather than repair it.
     try {
-        Invoke-ChildInstaller "irm '$CURSOR_CLI_INSTALL_URL' | iex"
+        Invoke-ChildInstaller $CURSOR_CLI_INSTALL_URL
     }
     catch {
         SayWarn "Cursor CLI installer failed: $_"
@@ -1015,7 +1037,7 @@ foreach ($e in $EDITORS) {
 # discard a working install into the other.
 if (-not (@($EDITORS | Where-Object { $_.MarketplaceOk }).Count)) {
     if (@($EDITORS | Where-Object { $_.AuthRequired }).Count -eq $EDITORS.Count) {
-        Fail-Exit "Sign in to your editor CLI (see above), then re-run this script." 5
+        Fail-Exit "Sign in to your editor CLI (see above), then re-run." 5
     }
     Fail-Exit "Failed to add the marketplace to any editor." 5
 }
