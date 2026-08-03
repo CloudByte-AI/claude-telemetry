@@ -1,33 +1,86 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    CloudByte / claude-telemetry plugin installer for Windows.
+    CloudByte telemetry plugin installer for Windows - Claude Code and Cursor.
 
 .DESCRIPTION
-    Installs the claude-telemetry plugin into Claude Code:
+    Installs the telemetry plugin into the supported editors found on the
+    machine. Dependencies are handled automatically - anything missing is
+    installed, anything in the way is cleared, and there is never a "do it
+    yourself" branch.
 
-      Step 1  - Check the Claude Code CLI (prompts, then installs it if missing)
-      Step 2  - Check Python and uv (prompts before installing them)
-      Step 3  - Run prerequisites validation (scripts/validate.ps1)
-      Step 4  - Add the marketplace
+    The one question it asks is which editors to install into, and only when
+    more than one was found and a console is attached. Everything else is
+    unattended. -Target skips the question, and it is skipped automatically
+    when stdin is redirected, so `irm | iex` in a pipeline cannot stall.
+
+      Step 1  - Detect editors, ask which to use, install any missing CLI
+      Step 2  - Ensure uv (installed by Step 3 if missing)
+      Step 3  - Run prerequisites validation (scripts/validate.ps1), which
+                installs uv and provisions Python 3.12 through it
+
+      Step 4  - Add the marketplace to each editor
       Step 5  - Install the plugin
-      Step 6  - Prepare the plugin environment (uv sync)
+      Step 6  - Prepare each plugin environment (uv sync), stopping any plugin
+                process that holds a virtualenv open
       Step 7  - Print activation instructions and the summary
 
+    Editor differences that the script has to work around:
+
+      Claude Code  CLI is `claude`. The plugin installs from the CLI, so
+                   Step 5 is automatic. Cache directories are named by version
+                   (0.1.40), so the newest is chosen by version.
+
+      Cursor       CLI is `cursor-agent`, a separate download from the IDE, so
+                   Step 1 installs it when Cursor is present but its CLI is not.
+                   Only the marketplace can be added from the CLI - the plugin
+                   itself must be enabled from the IDE (Settings > Plugins >
+                   cursor-telemetry > Install), so Step 5 prints those steps and
+                   then waits for the plugin to appear. Cache directories are
+                   named by commit sha, which cannot be ordered, so the newest
+                   is chosen by modification time.
+
+    It only exits non-zero when an automatic install genuinely fails, and then
+    it prints the manual command to run.
+
     Plugin activation (/reload-plugins or a session restart) cannot be
-    automated and remains a manual step.
+    automated and remains a manual step in both editors.
 
 .PARAMETER Yes
-    Answer "install" to every dependency prompt (Claude Code CLI, Python, uv).
-    Implies fully unattended dependency installation.
+    Do not ask which editors to use - take every one that was detected.
+    Dependency installation is automatic either way.
 
 .PARAMETER NonInteractive
-    Never prompt. If the Claude Code CLI is missing the script exits with code 2,
-    and if Python or uv are missing it exits with code 3, printing manual install
-    instructions in both cases (combine with -Yes to install them anyway).
+    Same as -Yes: never ask, use every detected editor. Both switches exist so
+    unattended runs and CI cannot block on the selection prompt.
 
 .PARAMETER SkipPrereqs
-    Skip Step 3 (validate.ps1). Use only when Python and uv are known good.
+    Skip Step 3 (validate.ps1). Ignored when uv is missing, since Step 3 is
+    what installs it.
+
+.PARAMETER Target
+    Which editors to install into: auto (default), ask, claude, cursor, or both.
+
+      auto    every editor found on the machine, minus anything deselected at
+              the prompt. For Cursor "found" means the IDE, not just its CLI,
+              since the CLI is installed automatically when missing. On a
+              machine with neither editor, the Claude Code CLI is installed.
+      ask     always show the selection prompt, even for a single editor.
+      claude
+      cursor
+      both    an explicit choice - the prompt is skipped entirely.
+
+.PARAMETER CursorWaitSeconds
+    How long Step 5 waits for the Cursor plugin to appear after printing the
+    IDE steps. 0 skips the wait. Timing out is not an error - the plugin builds
+    its own environment on first use.
+
+.PARAMETER CursorDir
+    Cursor's data directory. Defaults to ~/.cursor.
+
+.PARAMETER CursorCliInstallUrl
+    Where the cursor-agent installer is fetched from. Override for an internal
+    mirror, or to test the install path without hitting cursor.com.
 
 .PARAMETER UseLocalValidate
     Use scripts/validate.ps1 from this checkout instead of downloading it.
@@ -56,21 +109,30 @@
     Exit codes:
       0  success
       1  unexpected failure
-      2  Claude Code CLI missing and not installed (declined, non-interactive,
-         or the automatic install failed)
-      3  Python/uv missing and not installed (declined or non-interactive)
+      2  no usable editor CLI for the requested target, and the automatic
+         install of the missing CLI failed
+      3  reserved (uv failures are reported by validation as code 4)
       4  prerequisites validation failed
-      5  marketplace add failed
-      6  plugin install failed
+      5  marketplace add failed for every targeted editor
+      6  plugin install failed for every targeted editor
 #>
 
 [CmdletBinding()]
 param(
+    # Kept for backward compatibility only - the installer is always automatic.
     [switch] $Yes,
     [switch] $NonInteractive,
+
     [switch] $SkipPrereqs,
     [switch] $UseLocalValidate,
     [switch] $OpenDashboard,
+
+    [ValidateSet("auto", "ask", "claude", "cursor", "both")]
+    [string] $Target            = "auto",
+    [int]    $CursorWaitSeconds = 120,
+    [string] $CursorDir         = "",
+    [string] $CursorCliInstallUrl = "https://cursor.com/install?win32=true",
+
     [string] $MarketplaceUrl = "https://github.com/CloudByte-AI/claude-telemetry",
     [string] $PluginRef      = "claude-telemetry@claude-telemetry",
     [string] $DashboardUrl   = "http://localhost:8765",
@@ -88,6 +150,10 @@ $RAW_BASE       = $RawBase.TrimEnd("/")
 
 if ($env:CLAUDE_CONFIG_DIR) { $CLAUDE_DIR = $env:CLAUDE_CONFIG_DIR }
 else                        { $CLAUDE_DIR = Join-Path $USER_HOME ".claude" }
+
+if ($CursorDir)             { $CURSOR_DIR = $CursorDir }
+elseif ($env:CURSOR_DIR)    { $CURSOR_DIR = $env:CURSOR_DIR }
+else                        { $CURSOR_DIR = Join-Path $USER_HOME ".cursor" }
 
 New-Item -ItemType Directory -Force -Path $SETUP_LOG_DIR | Out-Null
 $LOG_FILE = Join-Path $SETUP_LOG_DIR ("install-" + (Get-Date -Format "yyyy-MM-dd") + ".log")
@@ -134,6 +200,7 @@ function Refresh-Path {
     $extra   = @(
         "$env:USERPROFILE\.local\bin"
         "$env:USERPROFILE\.cargo\bin"
+        "$env:LOCALAPPDATA\cursor-agent"
         "$env:LOCALAPPDATA\Programs\Python\Python312"
         "$env:LOCALAPPDATA\Programs\Python\Python312\Scripts"
         "$env:LOCALAPPDATA\Programs\Python\Python311"
@@ -172,30 +239,71 @@ function Get-HostShell {
     return "powershell"
 }
 
-# Shared decision for "dependency X is missing - install it?".
-# Returns "auto" (install now), "manual" (user will do it), or
-# "blocked" (running non-interactively without -Yes).
-function Get-DependencyChoice {
-    param([string] $Subject)
+# Whether it is safe to ask a question at all.
+#
+# Read-Host against a redirected or absent stdin either returns instantly with
+# nothing or throws, so the answer has to be decided before prompting rather
+# than recovered from afterwards. Note that `irm | iex` in a normal console is
+# still interactive - the script text arrived over HTTP, not over stdin.
+function Test-CanPrompt {
+    if ($Yes -or $NonInteractive) { return $false }
+    try {
+        if ([Console]::IsInputRedirected) { return $false }
+    }
+    catch {
+        return $false   # no console host at all
+    }
+    if (-not [Environment]::UserInteractive) { return $false }
+    return $true
+}
 
-    if ($Yes)            { return "auto" }
-    if ($NonInteractive) { return "blocked" }
+# Ask which of the detected editors should get the plugin. Always returns a
+# non-empty subset - an unusable answer falls back to all of them rather than
+# leaving the user with nothing installed.
+function Select-Editors {
+    param([array] $Candidates)
 
-    Write-Host "  OPTIONS:"
-    Write-Host "    1) Install $Subject now automatically"
-    Write-Host "    2) Install it manually and re-run this script"
+    Write-Host ""
+    Write-Host "  Install the plugin for which editors?"
+    Write-Host ""
+    for ($i = 0; $i -lt $Candidates.Count; $i++) {
+        Write-Host ("    {0}) {1}" -f ($i + 1), $Candidates[$i].Name)
+    }
+    Write-Host ""
+    Write-Host "  Enter numbers separated by commas (for example: 1,2),"
+    Write-Host "  or press Enter for all of them."
     Write-Host ""
 
-    # Bounded so a redirected/absent stdin (irm | iex in a non-console
-    # host) falls through to the manual path instead of spinning.
-    $choice = ""
-    for ($try = 0; $try -lt 3 -and $choice -ne "1" -and $choice -ne "2"; $try++) {
-        try   { $choice = ("" + (Read-Host "  Choose an option (1 or 2)")).Trim() }
-        catch { $choice = "2"; break }
+    for ($try = 0; $try -lt 3; $try++) {
+        $raw = ""
+        try { $raw = ("" + (Read-Host "  Selection")).Trim() }
+        catch {
+            SayWarn "No input available - using all detected editors."
+            return $Candidates
+        }
+
+        if ($raw -eq "" -or $raw -match "^(a|all)$") { return $Candidates }
+
+        # Dedupe by Key so "1,1" is one editor, not two passes over the same one.
+        $keys   = New-Object System.Collections.Generic.List[string]
+        $picked = New-Object System.Collections.Generic.List[object]
+        $bad    = $false
+        foreach ($tok in @($raw -split "[,\s]+" | Where-Object { $_ })) {
+            $n = 0
+            if (-not [int]::TryParse($tok, [ref] $n) -or $n -lt 1 -or $n -gt $Candidates.Count) {
+                $bad = $true
+                break
+            }
+            $c = $Candidates[$n - 1]
+            if (-not $keys.Contains($c.Key)) { [void] $keys.Add($c.Key); [void] $picked.Add($c) }
+        }
+
+        if (-not $bad -and $picked.Count -gt 0) { return $picked.ToArray() }
+        Write-Host "  Not a valid selection - use numbers between 1 and $($Candidates.Count)."
     }
-    if ($choice -eq "1") { return "auto" }
-    if ($choice -ne "2") { SayWarn "No answer received - assuming manual installation." }
-    return "manual"
+
+    SayWarn "No valid selection after 3 attempts - using all detected editors."
+    return $Candidates
 }
 
 function Find-ClaudeExe {
@@ -210,16 +318,40 @@ function Find-ClaudeExe {
     return $null
 }
 
+# Run a vendor `irm ... | iex` installer in a child shell.
+#
+# Two things this gets right that a bare invocation does not:
+#   - Out-Host keeps the installer's progress visible without letting its stdout
+#     leak into the caller's return value (a non-empty array is truthy, so a
+#     failed install would otherwise read as success).
+#   - ErrorActionPreference is forced to Continue and ErrorRecords are flattened,
+#     because PowerShell 5.1 turns any stderr line from a native command into a
+#     terminating NativeCommandError decorated with "At line:N char:N". Vendor
+#     installers write progress to stderr, so that would abort on a success.
+function Invoke-ChildInstaller {
+    param([string] $Command)
+
+    $shell   = Get-HostShell
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $shell -ExecutionPolicy Bypass -NoProfile -Command $Command 2>&1 |
+            ForEach-Object {
+                if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.ToString() } else { "$_" }
+            } | Out-Host
+        log "Child installer exit: $LASTEXITCODE"
+    }
+    finally {
+        $ErrorActionPreference = $prevEap
+    }
+}
+
 function Install-ClaudeCode {
     # 1) Official native installer - no Node.js required.
     Say "Installing Claude Code via the official installer..."
     Write-Host ""
-    $shell = Get-HostShell
     try {
-        # Out-Host keeps the installer's progress visible without letting it
-        # leak into this function's return value.
-        & $shell -ExecutionPolicy Bypass -NoProfile -Command "irm https://claude.ai/install.ps1 | iex" 2>&1 | Out-Host
-        log "Native installer exit: $LASTEXITCODE"
+        Invoke-ChildInstaller "irm https://claude.ai/install.ps1 | iex"
     }
     catch {
         SayWarn "Native installer failed: $_"
@@ -257,28 +389,73 @@ function Install-ClaudeCode {
     return $false
 }
 
-function Show-DepsManualInstructions {
+# Printed only when the automatic install of Claude Code has already failed -
+# never offered as a choice.
+function Show-ClaudeRecovery {
     Write-Host ""
-    Write-Host "  Manual installation:"
+    Write-Host "  Install Claude Code by hand with either:"
+    Write-Host "    irm https://claude.ai/install.ps1 | iex"
+    Write-Host "    npm install -g @anthropic-ai/claude-code"
     Write-Host ""
-    Write-Host "    Python 3.12:"
-    Write-Host "      winget install Python.Python.3.12"
-    Write-Host "      (or download from https://www.python.org/downloads/)"
-    Write-Host ""
-    Write-Host "    uv:"
-    Write-Host "      irm https://astral.sh/uv/install.ps1 | iex"
-    Write-Host "      (or: pip install uv)"
-    Write-Host ""
-    Write-Host "  Then open a new terminal and re-run this script. The dependency"
-    Write-Host "  check will pass and installation continues from Step 3."
+    Write-Host "  Then open a new terminal and re-run this script - it will pick up"
+    Write-Host "  from Step 2 automatically."
     Write-Host ""
 }
 
-function Show-ClaudeManualInstructions {
+$CURSOR_CLI_INSTALL_URL = $CursorCliInstallUrl
+
+function Find-CursorAgentExe {
+    # The official installer unpacks into %LOCALAPPDATA%\cursor-agent\versions\<v>
+    # and copies cursor-agent* up into %LOCALAPPDATA%\cursor-agent.
+    $base = Join-Path $env:LOCALAPPDATA "cursor-agent"
+    foreach ($name in @("cursor-agent.exe", "cursor-agent.cmd", "cursor-agent.ps1")) {
+        $p = Join-Path $base $name
+        if (Test-Path $p) { return $p }
+    }
+    return $null
+}
+
+function Install-CursorAgent {
+    Say "Installing the Cursor CLI via the official installer..."
     Write-Host ""
-    Write-Host "  Install Claude Code with either:"
-    Write-Host "    irm https://claude.ai/install.ps1 | iex"
-    Write-Host "    npm install -g @anthropic-ai/claude-code"
+
+    # Deliberately only called when cursor-agent is absent: the official
+    # installer starts by deleting %LOCALAPPDATA%\cursor-agent outright, so
+    # running it over a working install would replace it rather than repair it.
+    try {
+        Invoke-ChildInstaller "irm '$CURSOR_CLI_INSTALL_URL' | iex"
+    }
+    catch {
+        SayWarn "Cursor CLI installer failed: $_"
+    }
+
+    # The installer writes the User PATH, which Refresh-Path merges in; its own
+    # change to $env:PATH happened in the child process and is already gone.
+    Refresh-Path
+    if (Test-Command "cursor-agent") {
+        SayOk "Cursor CLI installed"
+        return $true
+    }
+
+    $exe = Find-CursorAgentExe
+    if ($exe) {
+        $env:PATH = (Split-Path $exe) + ";" + $env:PATH
+        if (Test-Command "cursor-agent") {
+            SayOk "Cursor CLI installed - found at $exe"
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Show-CursorCliRecovery {
+    Write-Host ""
+    Write-Host "  Install the Cursor CLI by hand with:"
+    Write-Host "    irm '$CURSOR_CLI_INSTALL_URL' | iex"
+    Write-Host ""
+    Write-Host "  If that fails, install or update Cursor itself first:"
+    Write-Host "    https://cursor.com/download"
     Write-Host ""
     Write-Host "  Then open a new terminal and re-run this script."
     Write-Host ""
@@ -316,9 +493,39 @@ function Invoke-Native {
     return $output
 }
 
+# An editor CLI can be installed and on PATH yet refuse to talk to the
+# marketplace because nobody has signed in. That is not a broken install and
+# must not be reported as one - it needs a one-time `login`, which is an
+# interactive browser flow this script cannot and should not automate.
+function Test-AuthError {
+    param([string] $Text)
+    return ($Text -match "(?i)authentication required|not (logged in|authenticated)|unauthorized|\b401\b|please (log ?in|sign ?in)|CURSOR_API_KEY")
+}
+
+function Show-CliAuthHelp {
+    param([object] $Editor)
+    Write-Host ""
+    Write-Host "  $($Editor.Name) is installed but not signed in, so its CLI cannot"
+    Write-Host "  reach the marketplace. Sign in once:"
+    Write-Host ""
+    if ($Editor.Key -eq "cursor") {
+        Write-Host "    cursor-agent login        (or:  agent login)"
+        Write-Host ""
+        Write-Host "  Non-interactively, set CURSOR_API_KEY instead."
+    }
+    else {
+        Write-Host "    $($Editor.Exe) login"
+    }
+    Write-Host ""
+    Write-Host "  Then re-run this script - everything else is already in place."
+    Write-Host ""
+}
+
 function Test-LockError {
     param([string] $Text)
-    return ($Text -match "EACCES|EPERM|permission denied|being used by another process|Access to the path")
+    # "Access is denied. (os error 5)" is how uv reports a held .venv on
+    # Windows; the others cover the Claude CLI and .NET file APIs.
+    return ($Text -match "EACCES|EPERM|permission denied|being used by another process|Access to the path|Access is denied|os error 5")
 }
 
 function Get-AncestorPids {
@@ -346,7 +553,9 @@ function Release-FileLock {
             Where-Object {
                 $targets -contains $_.Name -and
                 $_.CommandLine -and
-                ($_.CommandLine -like "*claude-telemetry*" -or $_.CommandLine -like "*cloudbyte*") -and
+                ($_.CommandLine -like "*claude-telemetry*" -or
+                 $_.CommandLine -like "*cursor-telemetry*" -or
+                 $_.CommandLine -like "*cloudbyte*") -and
                 $protected -notcontains [int] $_.ProcessId
             })
         foreach ($p in $procs) {
@@ -360,14 +569,15 @@ function Release-FileLock {
     Start-Sleep -Seconds 2
 }
 
-# Run a claude CLI command, retrying once after releasing file locks.
+# Run an editor CLI command, retrying once after releasing file locks.
 # Treats "already exists" style output as success.
-function Invoke-ClaudeStep {
+function Invoke-CliStep {
     param(
+        [string]   $Exe,
         [string[]] $Arguments,
         [string]   $What
     )
-    $out  = Invoke-Native "claude" $Arguments
+    $out  = Invoke-Native $Exe $Arguments
     $exit = $script:LastNativeExit
     if ($out.Trim()) { Write-Host $out.Trim() }
 
@@ -376,10 +586,13 @@ function Invoke-ClaudeStep {
         SayWarn "Permission / file lock error while $What"
         Release-FileLock
         Say "Retrying..."
-        $out  = Invoke-Native "claude" $Arguments
+        $out  = Invoke-Native $Exe $Arguments
         $exit = $script:LastNativeExit
         if ($out.Trim()) { Write-Host $out.Trim() }
     }
+
+    # Published so callers can tell a real failure from a missing login.
+    $script:LastCliOutput = $out
 
     if ($exit -ne 0 -and ($out -notmatch "(?i)already|exists")) {
         return $false
@@ -387,21 +600,100 @@ function Invoke-ClaudeStep {
     return $true
 }
 
-function Get-LatestPluginDir {
-    $base = Join-Path $CLAUDE_DIR "plugins\cache\claude-telemetry\claude-telemetry"
-    if (-not (Test-Path $base)) { return $null }
+# Pick the current plugin checkout under a cache root.
+#
+# Claude Code names these directories by version ("0.1.40"); Cursor names them
+# by commit sha ("7d91aa5f..."), which carries no ordering. So: order by version
+# when every name is a version, and fall back to modification time only when at
+# least one is not. The fallback is deliberately NOT the default - creating a
+# .venv inside a directory bumps that directory's mtime, so mtime alone would
+# rank an older version above a newer one purely because it was synced later.
+function Get-PluginDir {
+    param([string] $Root)
 
-    $dirs = Get-ChildItem -Path $base -Directory -ErrorAction SilentlyContinue
+    if (-not (Test-Path $Root)) { return $null }
+    $dirs = @(Get-ChildItem -Path $Root -Directory -ErrorAction SilentlyContinue)
     if (-not $dirs) { return $null }
 
-    $ranked = $dirs | ForEach-Object {
-        $parsed = $null
-        $clean  = $_.Name -replace '^[vV]', ''
-        if (-not [version]::TryParse($clean, [ref] $parsed)) { $parsed = [version] "0.0.0" }
-        [pscustomobject] @{ Dir = $_; Version = $parsed; Name = $_.Name }
-    } | Sort-Object Version, Name
+    $versions   = @{}
+    $allVersion = $true
+    foreach ($d in $dirs) {
+        $v = $null
+        if ([version]::TryParse(($d.Name -replace '^[vV]', ''), [ref] $v)) { $versions[$d.Name] = $v }
+        else { $allVersion = $false }
+    }
 
-    return $ranked[-1].Dir.FullName
+    if ($allVersion) {
+        $ranked = $dirs | Sort-Object @{ Expression = { $versions[$_.Name] } }, Name
+    }
+    else {
+        $ranked = $dirs | Sort-Object LastWriteTimeUtc, Name
+    }
+    return @($ranked)[-1].FullName
+}
+
+# Condition 1 of the uv sync check: is there a real environment in there?
+# A bare .venv directory is not enough - an interrupted build leaves one behind
+# with no interpreter, and uv sync has to run again to finish it.
+function Test-BuiltEnv {
+    param([string] $Dir)
+
+    $venv = Join-Path $Dir ".venv"
+    if (-not (Test-Path (Join-Path $venv "pyvenv.cfg"))) { return $false }
+    foreach ($py in @("Scripts\python.exe", "bin\python.exe", "bin\python")) {
+        if (Test-Path (Join-Path $venv $py)) { return $true }
+    }
+    return $false
+}
+
+# Condition 2 of the uv sync check: is the environment older than what it was
+# built from? pyvenv.cfg is written when the environment is created, so it is
+# the honest "built at" timestamp; uv.lock and pyproject.toml are the inputs.
+# An upgrade rewrites the inputs but leaves an existing .venv in place, which is
+# exactly the case a plain existence check would miss.
+function Test-EnvStale {
+    param([string] $Dir)
+
+    $marker = Join-Path $Dir ".venv\pyvenv.cfg"
+    if (-not (Test-Path $marker)) { return $true }
+
+    # Not named $input - that is an automatic variable inside a function.
+    $built = (Get-Item $marker).LastWriteTimeUtc
+    foreach ($src in @("uv.lock", "pyproject.toml")) {
+        $p = Join-Path $Dir $src
+        if ((Test-Path $p) -and ((Get-Item $p).LastWriteTimeUtc -gt $built)) {
+            log "Stale env: $src is newer than .venv ($((Get-Item $p).LastWriteTimeUtc) > $built)"
+            return $true
+        }
+    }
+    return $false
+}
+
+# Cursor cannot install a plugin from its CLI, so Step 5 prints the IDE steps
+# and then watches for the checkout to show up. Polling rather than prompting
+# keeps the script stdin-free; timing out is not an error.
+function Wait-ForPluginDir {
+    param([string] $Root, [int] $Seconds)
+
+    $dir = Get-PluginDir $Root
+    if ($dir) { return $dir }
+    if ($Seconds -le 0) { return $null }
+
+    Write-Host "  Waiting up to $Seconds seconds for the plugin to appear..."
+    Write-Host "  (Ctrl+C is safe - the plugin builds its own environment on first use)"
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Seconds 3
+        $dir = Get-PluginDir $Root
+        if ($dir) {
+            Write-Host ""
+            SayOk "Plugin detected"
+            return $dir
+        }
+        Write-Host "." -NoNewline
+    }
+    Write-Host ""
+    return $null
 }
 
 # ── Banner ─────────────────────────────────────────────────────────────────────
@@ -417,87 +709,190 @@ log "Marketplace: $MarketplaceUrl | Plugin: $PluginRef"
 
 # ── Step 1: Claude Code CLI ────────────────────────────────────────────────────
 
-Header "Step 1: Checking Claude Code CLI"
+Header "Step 1: Detecting Editors"
 
-if (-not (Test-Command "claude")) {
+if (-not (Test-Command "claude") -or -not (Test-Command "cursor-agent")) {
     Refresh-Path
 }
 
-if (-not (Test-Command "claude")) {
-    SayFail "Claude Code CLI not found on PATH"
-    Write-Host ""
-    Write-Host "  The plugin installs through the Claude Code CLI, so it has to be"
-    Write-Host "  present before the marketplace and plugin steps can run."
-    Write-Host ""
+$claudePresent = Test-Command "claude"
+$cursorPresent = Test-Command "cursor-agent"
 
-    switch (Get-DependencyChoice "Claude Code") {
-        "blocked" {
-            Write-Host "  Running non-interactively and -Yes was not supplied."
-            Show-ClaudeManualInstructions
-            log "Claude CLI missing, non-interactive without -Yes - aborting"
-            exit 2
-        }
-        "manual" {
-            Show-ClaudeManualInstructions
-            log "User chose manual Claude CLI installation"
-            exit 2
-        }
-        "auto" {
+# Cursor's CLI is a separate download from the IDE, so a machine can have Cursor
+# without cursor-agent. Detect the IDE too, so auto mode installs the CLI for it
+# instead of silently skipping the editor the user actually uses.
+$cursorIdePresent = (Test-Path $CURSOR_DIR) -or
+                    (Test-Path (Join-Path $env:LOCALAPPDATA "Programs\cursor\Cursor.exe")) -or
+                    (Test-Path (Join-Path ${env:ProgramFiles} "cursor\Cursor.exe"))
+
+if ($claudePresent) { SayOk "Claude Code CLI found (claude)" }  else { Say "Claude Code CLI not found" }
+if ($cursorPresent) { SayOk "Cursor CLI found (cursor-agent)" } else { Say "Cursor CLI not found" }
+if (-not $cursorPresent -and $cursorIdePresent) { Say "Cursor itself is installed - its CLI will be added" }
+
+switch ($Target) {
+    "claude" { $wantClaude = $true;           $wantCursor = $false }
+    "cursor" { $wantClaude = $false;          $wantCursor = $true }
+    "both"   { $wantClaude = $true;           $wantCursor = $true }
+    default  {
+        # auto: set up whatever is actually on the machine. Both CLIs can be
+        # installed automatically, so a missing CLI is not a reason to skip an
+        # editor that is clearly in use - only a missing editor is.
+        $wantClaude = $claudePresent
+        $wantCursor = $cursorPresent -or $cursorIdePresent
+        if (-not $wantClaude -and -not $wantCursor) {
             Write-Host ""
-            if (-not (Install-ClaudeCode)) {
-                Write-Host ""
-                SayFail "Could not install the Claude Code CLI automatically."
-                Show-ClaudeManualInstructions
-                log "Automatic Claude CLI install failed - aborting"
-                exit 2
-            }
+            Say "No editor found - installing the Claude Code CLI."
+            $wantClaude = $true
         }
     }
 }
+log "Target=$Target -> claude=$wantClaude cursor=$wantCursor"
 
-$claudeVersion = (Invoke-Native "claude" @("--version")).Trim()
-if (-not $claudeVersion) { $claudeVersion = "version unknown" }
-SayOk "Claude Code CLI ready - $claudeVersion"
+# Narrow the set before installing anything: pulling down a CLI for an editor
+# the user is about to deselect would be wasted work and an unwanted change.
+$candidates = @()
+if ($wantClaude) { $candidates += [pscustomobject] @{ Key = "claude"; Name = "Claude Code" } }
+if ($wantCursor) { $candidates += [pscustomobject] @{ Key = "cursor"; Name = "Cursor" } }
 
-# ── Step 2: Python and uv ──────────────────────────────────────────────────────
+# An explicit -Target is an answer already given, so do not ask again. Plain
+# "auto" only asks when there is a real choice to make.
+$explicitTarget = $PSBoundParameters.ContainsKey("Target") -and $Target -ne "ask"
+$shouldAsk = $false
+if ($Target -eq "ask")                                           { $shouldAsk = $true }
+elseif (-not $explicitTarget -and $candidates.Count -gt 1)       { $shouldAsk = $true }
 
-Header "Step 2: Checking Python and uv"
-
-$pythonOk = Test-PythonPresent
-$uvOk     = Test-Command "uv"
-
-if ($pythonOk) { SayOk "Python found" }  else { SayFail "Python not found" }
-if ($uvOk)     { SayOk "uv found" }      else { SayFail "uv not found" }
-
-$installDeps = $false
-
-if (-not $pythonOk -or -not $uvOk) {
+if ($shouldAsk -and (Test-CanPrompt)) {
+    $chosen     = @(Select-Editors $candidates)
+    $chosenKeys = @($chosen | ForEach-Object { $_.Key })
+    $wantClaude = $chosenKeys -contains "claude"
+    $wantCursor = $chosenKeys -contains "cursor"
     Write-Host ""
-    Write-Host "  Python and uv are both required by the CloudByte plugin."
-    Write-Host ""
+    SayOk "Selected: $(@($chosen | ForEach-Object { $_.Name }) -join ', ')"
+    log "User selected editors: $($chosenKeys -join ',')"
+}
+elseif ($shouldAsk) {
+    Say "No console attached - using all detected editors."
+    log "Prompt skipped (non-interactive)"
+}
 
-    switch (Get-DependencyChoice "Python and uv") {
-        "blocked" {
-            Write-Host "  Running non-interactively and -Yes was not supplied."
-            Show-DepsManualInstructions
-            log "Deps missing, non-interactive without -Yes - aborting"
-            exit 3
-        }
-        "manual" {
-            Show-DepsManualInstructions
-            log "User chose manual dependency install"
-            exit 3
-        }
-        "auto" {
-            # validate.ps1 in Step 3 performs the actual Python/uv install.
-            $installDeps = $true
-            log "Automatic dependency install selected"
+if ($wantClaude -and -not $claudePresent) {
+    Write-Host ""
+    SayWarn "Installing the Claude Code CLI"
+    Write-Host ""
+    if (Install-ClaudeCode) {
+        $claudePresent = $true
+    }
+    else {
+        Write-Host ""
+        SayFail "Could not install the Claude Code CLI automatically."
+        Show-ClaudeRecovery
+        $wantClaude = $false
+    }
+}
+
+if ($wantCursor -and -not $cursorPresent) {
+    Write-Host ""
+    SayWarn "Installing the Cursor CLI (cursor-agent)"
+    Write-Host ""
+    if (Install-CursorAgent) {
+        $cursorPresent = $true
+    }
+    else {
+        Write-Host ""
+        SayFail "Could not install the Cursor CLI automatically."
+        Show-CursorCliRecovery
+        $wantCursor = $false
+    }
+}
+
+if (-not $wantClaude -and -not $wantCursor) {
+    log "No usable editor CLI for -Target $Target - aborting"
+    # Say which target failed rather than "no editor found" - with -Target cursor
+    # on a Claude-only machine, an editor IS present, just not the requested one.
+    if ($Target -eq "auto") {
+        Fail-Exit "No usable editor CLI. Install Claude Code or Cursor and re-run." 2
+    }
+    Fail-Exit "No usable editor CLI for -Target $Target. Re-run without -Target to use whatever is installed." 2
+}
+
+# Editors to install into. CanInstallPlugin is the real difference between them:
+# Claude Code installs a plugin from its CLI, Cursor only from its IDE.
+$EDITORS = @()
+if ($wantClaude) {
+    $EDITORS += [pscustomobject] @{
+        Key              = "claude"
+        Name             = "Claude Code"
+        Exe              = "claude"
+        CacheRoot        = Join-Path $CLAUDE_DIR "plugins\cache\claude-telemetry\claude-telemetry"
+        PluginRef        = $PluginRef
+        CanInstallPlugin = $true
+        MarketplaceOk    = $false
+        AuthRequired     = $false
+        PluginOk         = $false
+        PluginDir        = $null
+        SyncOk           = $false
+    }
+}
+if ($wantCursor) {
+    $EDITORS += [pscustomobject] @{
+        Key              = "cursor"
+        Name             = "Cursor"
+        Exe              = "cursor-agent"
+        CacheRoot        = Join-Path $CURSOR_DIR "plugins\cache\cursor-telemetry\cursor-telemetry"
+        PluginRef        = "cursor-telemetry@cursor-telemetry"
+        CanInstallPlugin = $false
+        MarketplaceOk    = $false
+        AuthRequired     = $false
+        PluginOk         = $false
+        PluginDir        = $null
+        SyncOk           = $false
+    }
+}
+
+Write-Host ""
+foreach ($e in $EDITORS) {
+    $ver = (Invoke-Native $e.Exe @("--version")).Trim()
+    if (-not $ver) { $ver = "version unknown" }
+    SayOk "$($e.Name) ready - $ver"
+}
+
+# ── Step 2: uv (and, through it, Python) ───────────────────────────────────────
+
+Header "Step 2: Checking uv"
+
+# uv is the only hard dependency. Python 3.12 is provisioned BY uv in Step 3,
+# into uv's own directory - the user's existing python, whatever its version,
+# is neither required nor modified.
+$uvOk = Test-Command "uv"
+if ($uvOk) { SayOk "uv found" } else { SayWarn "uv not found" }
+
+if (Test-PythonPresent) {
+    $sysPy = $null
+    foreach ($cmd in @("python", "python3")) {
+        if (Test-Command $cmd) {
+            $v = (Invoke-Native $cmd @("--version")).Trim()
+            if ($v -match "^Python [0-9]") { $sysPy = $v -replace "Python ", ""; break }
         }
     }
+    if ($sysPy) { Say "Your default python is $sysPy - it will not be changed" }
+}
+
+# Set when uv has to be installed, which makes Step 3 mandatory: validate.ps1
+# is what installs uv, so -SkipPrereqs cannot be honoured in that case.
+$installDeps = $false
+
+if (-not $uvOk) {
+    Write-Host ""
+    Write-Host "  uv is required by the CloudByte plugin. It also supplies the"
+    Write-Host "  Python 3.12 the plugin runs on, without altering your own."
+    Write-Host ""
+    Say "It will be installed automatically in Step 3."
+    $installDeps = $true
+    log "uv missing - Step 3 will install it (forced, -SkipPrereqs ignored)"
 }
 else {
     Write-Host ""
-    Say "All dependencies present."
+    Say "uv is present - Step 3 will confirm Python 3.12 is available to it."
 }
 
 # ── Step 3: Prerequisites validation ───────────────────────────────────────────
@@ -508,6 +903,10 @@ if ($SkipPrereqs -and -not $installDeps) {
 }
 else {
     Header "Step 3: Running Prerequisites Validation"
+
+    if ($SkipPrereqs) {
+        SayWarn "-SkipPrereqs ignored - validation is what installs uv"
+    }
 
     # $PSScriptRoot is empty when the script is piped into iex - download then.
     $localValidate = $null
@@ -551,9 +950,8 @@ else {
     Write-Host ""
     SayOk "Prerequisites ready"
 
-    if (-not (Test-PythonPresent)) {
-        SayWarn "Python still not visible on this session's PATH - open a new terminal and re-run."
-    }
+    # Python deliberately is not checked here: it lives inside uv's own
+    # directory and is never expected on PATH.
     if (-not (Test-Command "uv")) {
         SayWarn "uv still not visible on this session's PATH - open a new terminal and re-run."
     }
@@ -564,42 +962,112 @@ else {
 Header "Step 4: Adding Marketplace"
 
 $mpArgs = @("plugin", "marketplace", "add", $MarketplaceUrl)
-if (-not (Invoke-ClaudeStep $mpArgs "adding the marketplace")) {
-    Fail-Exit "Failed to add marketplace." 5
+foreach ($e in $EDITORS) {
+    Say "$($e.Name): $($e.Exe) $($mpArgs -join ' ')"
+    $e.MarketplaceOk = Invoke-CliStep $e.Exe $mpArgs "adding the marketplace to $($e.Name)"
+
+    if ($e.MarketplaceOk) {
+        SayOk "$($e.Name): marketplace added"
+    }
+    elseif (Test-AuthError $script:LastCliOutput) {
+        $e.AuthRequired = $true
+        SayFail "$($e.Name): not signed in"
+        Show-CliAuthHelp $e
+        log "$($e.Key): marketplace add blocked by missing login"
+    }
+    else {
+        SayFail "$($e.Name): marketplace add failed"
+    }
+    Write-Host ""
 }
-Write-Host ""
-SayOk "Marketplace added"
+
+# Only fatal when no editor got the marketplace - one editor failing must not
+# discard a working install into the other.
+if (-not (@($EDITORS | Where-Object { $_.MarketplaceOk }).Count)) {
+    if (@($EDITORS | Where-Object { $_.AuthRequired }).Count -eq $EDITORS.Count) {
+        Fail-Exit "Sign in to your editor CLI (see above), then re-run this script." 5
+    }
+    Fail-Exit "Failed to add the marketplace to any editor." 5
+}
 
 # ── Step 5: Install plugin ─────────────────────────────────────────────────────
 
 Header "Step 5: Installing Plugin"
 
-$instArgs = @("plugin", "install", $PluginRef)
-if (-not (Invoke-ClaudeStep $instArgs "installing the plugin")) {
-    Fail-Exit "Plugin install failed." 6
+foreach ($e in $EDITORS) {
+    if (-not $e.MarketplaceOk) {
+        SayWarn "$($e.Name): skipping - marketplace was not added"
+        continue
+    }
+
+    if ($e.CanInstallPlugin) {
+        $instArgs = @("plugin", "install", $e.PluginRef)
+        Say "$($e.Name): $($e.Exe) $($instArgs -join ' ')"
+        $e.PluginOk = Invoke-CliStep $e.Exe $instArgs "installing the plugin in $($e.Name)"
+        if ($e.PluginOk) { SayOk "$($e.Name): plugin installed" }
+        else             { SayFail "$($e.Name): plugin install failed" }
+        Write-Host ""
+        continue
+    }
+
+    # Cursor: the CLI has no plugin install verb, so the last mile is the IDE.
+    Write-Host "  $($e.Name) installs plugins from the IDE, not the CLI."
+    Write-Host "  The marketplace is registered - finish it in Cursor:"
+    Write-Host ""
+    Write-Host "    1. Open Cursor"
+    Write-Host "    2. Settings  >  Plugins  >  cursor-telemetry"
+    Write-Host "    3. Click Install (or Add)"
+    Write-Host ""
+
+    $e.PluginDir = Wait-ForPluginDir $e.CacheRoot $CursorWaitSeconds
+    if ($e.PluginDir) {
+        $e.PluginOk = $true
+        SayOk "$($e.Name): plugin installed"
+        Say "  $($e.PluginDir)"
+    }
+    else {
+        SayWarn "$($e.Name): plugin not installed yet - do the 3 steps above."
+        Write-Host "       Nothing else is needed afterwards: the plugin builds its own"
+        Write-Host "       environment the first time Cursor runs it."
+    }
+    Write-Host ""
 }
-Write-Host ""
-SayOk "Plugin installed"
+
+# Fatal only when every editor that CAN install from its CLI failed. Cursor
+# waiting on its IDE step is an expected outcome, not a failure.
+$cliCapable = @($EDITORS | Where-Object { $_.CanInstallPlugin -and $_.MarketplaceOk })
+if ($cliCapable.Count -gt 0 -and -not @($cliCapable | Where-Object { $_.PluginOk }).Count) {
+    Fail-Exit "Plugin install failed in every editor that supports CLI installation." 6
+}
 
 # ── Step 6: Plugin environment ─────────────────────────────────────────────────
 
 Header "Step 6: Preparing Plugin Environment"
 
-$pluginDir = Get-LatestPluginDir
+# Sync one plugin checkout. Returns $true when the environment is usable,
+# whether it was just built or was already good.
+function Invoke-PluginSync {
+    param([string] $Name, [string] $Dir)
 
-if (-not $pluginDir) {
-    SayWarn "Plugin cache directory not found - environment will be built on first run."
-}
-elseif (-not (Test-Command "uv")) {
-    SayWarn "uv is not on this session's PATH - skipping 'uv sync'."
-    Write-Host "       Open a new terminal and run:"
-    Write-Host "         uv sync --frozen --python 3.12 --directory `"$pluginDir`""
-}
-else {
-    Say "Plugin directory: $pluginDir"
-    Say "Syncing dependencies (this can take a minute on first run)..."
+    # The two conditions that decide whether a sync is needed at all. Neither is
+    # sufficient alone: a .venv can exist without an interpreter (interrupted
+    # build), and a complete .venv can be older than the uv.lock it was built
+    # from (plugin upgraded in place).
+    $built = Test-BuiltEnv $Dir
+    $stale = Test-EnvStale $Dir
 
-    $syncArgs = @("sync", "--frozen", "--python", "3.12", "--directory", $pluginDir)
+    if ($built -and -not $stale) {
+        SayOk "$Name : environment already built and up to date"
+        Say  "  $Dir"
+        return $true
+    }
+    if ($built) { Say "$Name : environment is older than uv.lock - rebuilding" }
+    else        { Say "$Name : no environment yet - building" }
+
+    Say "  $Dir"
+    Say "  Syncing dependencies (this can take a minute on first run)..."
+
+    $syncArgs = @("sync", "--frozen", "--python", "3.12", "--directory", $Dir)
 
     # An inherited VIRTUAL_ENV from the caller's shell makes uv warn and target
     # the wrong environment - hide it for the duration of the sync.
@@ -609,29 +1077,21 @@ else {
         $syncOut = Invoke-Native "uv" $syncArgs
         if ($syncOut.Trim()) { Write-Host $syncOut.Trim() }
 
-        # A live Claude session running the MCP server holds .venv open, which
-        # surfaces as "Access is denied" while uv rebuilds it.
+        # A live editor session running the MCP server holds .venv open, which
+        # surfaces as "Access is denied" while uv rebuilds it. Clear it without
+        # asking: those processes belong to sessions that must restart anyway to
+        # pick up the plugin, and Release-FileLock never touches this script's
+        # own process tree.
         if ($script:LastNativeExit -ne 0 -and (Test-LockError $syncOut)) {
             Write-Host ""
-            SayWarn "The plugin virtualenv is locked by a running Claude/MCP process."
-
-            $doKill = $false
-            if ($Yes)                   { $doKill = $true }
-            elseif (-not $NonInteractive) {
-                Write-Host ""
-                Write-Host "  Those processes belong to Claude sessions that are still open."
-                Write-Host "  They have to restart anyway to pick up the plugin."
-                Write-Host ""
-                $ans = (Read-Host "  Stop them and retry the sync? [Y/n]").Trim()
-                $doKill = ($ans -eq "" -or $ans -match "^(y|yes)$")
-            }
-
-            if ($doKill) {
-                Release-FileLock
-                Say "Retrying sync..."
-                $syncOut = Invoke-Native "uv" $syncArgs
-                if ($syncOut.Trim()) { Write-Host $syncOut.Trim() }
-            }
+            SayWarn "The plugin virtualenv is locked by a running editor/MCP process."
+            Write-Host "       Stopping it - those sessions have to restart anyway to load"
+            Write-Host "       the plugin. The session running this script is not affected."
+            Write-Host ""
+            Release-FileLock
+            Say "Retrying sync..."
+            $syncOut = Invoke-Native "uv" $syncArgs
+            if ($syncOut.Trim()) { Write-Host $syncOut.Trim() }
         }
     }
     finally {
@@ -639,13 +1099,38 @@ else {
     }
 
     if ($script:LastNativeExit -eq 0) {
-        SayOk "Plugin environment ready"
+        SayOk "$Name : environment ready"
+        return $true
     }
-    else {
-        SayWarn "Environment setup incomplete - the MCP server may need a reconnect on first start."
-        Write-Host "       You can finish it later with:"
-        Write-Host "         uv sync --frozen --python 3.12 --directory `"$pluginDir`""
+
+    SayWarn "$Name : environment setup incomplete - it will be rebuilt on first use."
+    Write-Host "       You can finish it now with:"
+    Write-Host "         uv sync --frozen --python 3.12 --directory `"$Dir`""
+    return $false
+}
+
+$uvAvailable = Test-Command "uv"
+if (-not $uvAvailable) {
+    SayWarn "uv is not on this session's PATH - skipping 'uv sync'."
+    Write-Host "       Open a new terminal and re-run this script to finish."
+}
+
+foreach ($e in $EDITORS) {
+    if (-not $e.PluginDir) { $e.PluginDir = Get-PluginDir $e.CacheRoot }
+
+    if (-not $e.PluginDir) {
+        SayWarn "$($e.Name): no plugin checkout found - environment builds on first use."
+        Write-Host "         Looked in: $($e.CacheRoot)"
+        Write-Host ""
+        continue
     }
+    if (-not $uvAvailable) {
+        Write-Host "         $($e.Name): uv sync --frozen --python 3.12 --directory `"$($e.PluginDir)`""
+        continue
+    }
+
+    $e.SyncOk = Invoke-PluginSync $e.Name $e.PluginDir
+    Write-Host ""
 }
 
 # ── Step 7: Activation, dashboard, summary ─────────────────────────────────────
@@ -654,15 +1139,32 @@ Header "Step 7: Activate the Plugin (manual)"
 
 Write-Host "  The plugin is installed but not yet active in running sessions."
 Write-Host ""
-Write-Host "  Quickest path:"
-Write-Host "    In Claude Code, type:  /reload-plugins"
-Write-Host ""
-Write-Host "  If tools do not appear or you see an MCP error, restart instead:"
-Write-Host "    Claude Code CLI : Ctrl+C, then  claude --resume <session-id>"
-Write-Host "    VS Code/Desktop : close the Claude panel, reopen it, resume the session"
-Write-Host ""
-Write-Host "  Note: /reload-plugins only affects the current session. Any other"
-Write-Host "        open Claude sessions need their own restart."
+
+foreach ($e in $EDITORS) {
+    if ($e.Key -eq "claude") {
+        Write-Host "  Claude Code"
+        Write-Host "    Quickest path : type  /reload-plugins"
+        Write-Host "    If tools do not appear, or you see an MCP error, restart instead:"
+        Write-Host "      CLI            : Ctrl+C, then  claude --resume <session-id>"
+        Write-Host "      VS Code/Desktop: close the Claude panel, reopen it, resume"
+        Write-Host ""
+    }
+    else {
+        Write-Host "  Cursor"
+        if ($e.PluginOk) {
+            Write-Host "    Reload the window (Command Palette > Reload Window), or"
+            Write-Host "    quit and reopen Cursor."
+        }
+        else {
+            Write-Host "    Settings > Plugins > cursor-telemetry > Install, then reload"
+            Write-Host "    the window. No terminal step is needed afterwards."
+        }
+        Write-Host ""
+    }
+}
+
+Write-Host "  Note: reloading only affects the current window/session. Any other"
+Write-Host "        open sessions need their own restart."
 Write-Host ""
 
 if ($OpenDashboard) {
@@ -674,6 +1176,17 @@ Write-Host ""
 Write-Host "======================================================"
 Write-Host "            [OK] CloudByte is Ready!"
 Write-Host "======================================================"
+Write-Host ""
+
+foreach ($e in $EDITORS) {
+    if     ($e.PluginOk -and $e.SyncOk) { $state = "installed, environment ready" }
+    elseif ($e.PluginOk)                { $state = "installed, environment builds on first use" }
+    elseif ($e.MarketplaceOk)           { $state = "marketplace added - finish the install in the IDE" }
+    elseif ($e.AuthRequired)            { $state = "not signed in - run '$($e.Exe) login' and re-run" }
+    else                                { $state = "not installed" }
+    Write-Host ("  {0,-12} ->  {1}" -f $e.Name, $state)
+}
+
 Write-Host ""
 Write-Host "  Dashboard  ->  $DashboardUrl"
 Write-Host "  Logs       ->  $CLOUDBYTE_DIR\logs\"

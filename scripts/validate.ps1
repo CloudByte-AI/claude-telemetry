@@ -1,6 +1,14 @@
-﻿# CloudByte Prerequisites Script (Windows PowerShell)
-# Checks and installs Python 3.12 and uv
-# Run directly or via skill - no plugin context required
+# CloudByte Prerequisites Script (Windows PowerShell)
+# Ensures uv is installed, then ensures a Python 3.12 interpreter is available
+# TO UV - not to the user's shell.
+#
+# Python is provisioned through `uv python install`, which places a managed
+# interpreter under %APPDATA%\uv\python and touches neither PATH nor the `py`
+# launcher. A pre-existing Python of any version is left exactly as it is: an
+# older interpreter (3.9, say) is no longer an error, because nothing the
+# plugin runs depends on the user's default `python`.
+#
+# Run directly or via skill - no plugin context required.
 
 # Home directory
 $USER_HOME     = $env:USERPROFILE
@@ -23,6 +31,11 @@ function log {
     Add-Content -Path $LOG_FILE -Value $line
 }
 
+# Version of Python the plugin is locked against. Kept exact rather than
+# ">=3.12" so resolution matches uv.lock instead of drifting onto whatever
+# newest interpreter happens to be present.
+$PY_TARGET = "3.12"
+
 log "=== CloudByte Prerequisites Check ==="
 log "OS: Windows"
 log "Home: $USER_HOME"
@@ -32,7 +45,154 @@ Write-Host "  CloudByte Prerequisites Check"
 Write-Host "======================================"
 Write-Host ""
 
+# An activated virtualenv would make uv resolve to that environment instead of
+# a real interpreter, so probes run without it.
+if ($env:VIRTUAL_ENV) {
+    log "Ignoring active VIRTUAL_ENV for probes: $env:VIRTUAL_ENV"
+    Remove-Item Env:VIRTUAL_ENV -ErrorAction SilentlyContinue
+}
+
+# Run a native command and capture stdout+stderr as plain text, without
+# PowerShell 5.1 wrapping stderr lines in ErrorRecords.
+function Invoke-Native {
+    param([string] $Exe, [string[]] $Arguments = @())
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $global:LASTEXITCODE = 0
+    try {
+        $output = & $Exe @Arguments 2>&1 |
+            ForEach-Object {
+                if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.ToString() } else { "$_" }
+            } | Out-String
+        $script:LastNativeExit = $LASTEXITCODE
+    }
+    catch {
+        $output = "$_"
+        $script:LastNativeExit = 127
+    }
+    finally {
+        $ErrorActionPreference = $prevEap
+    }
+    return $output
+}
+
+function Refresh-Path {
+    $current = $env:PATH
+    $machine = [System.Environment]::GetEnvironmentVariable("PATH", "Machine")
+    $user    = [System.Environment]::GetEnvironmentVariable("PATH", "User")
+    $extra   = @(
+        "$env:USERPROFILE\.local\bin"
+        "$env:USERPROFILE\.cargo\bin"
+    )
+    $seen  = New-Object System.Collections.Generic.HashSet[string] ([StringComparer]::OrdinalIgnoreCase)
+    $parts = New-Object System.Collections.Generic.List[string]
+    foreach ($entry in (@($current, $machine, $user) -join ";").Split(";") + $extra) {
+        $e = $entry.Trim()
+        if ($e -and $seen.Add($e)) { [void] $parts.Add($e) }
+    }
+    $env:PATH = ($parts -join ";")
+}
+
+# ── uv ─────────────────────────────────────────────────────────────────────────
+# uv comes first: it is the hard requirement, and it is what provisions Python.
+
+Write-Host "-- Checking uv --------------------------"
+
+if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { Refresh-Path }
+
+if (Get-Command uv -ErrorAction SilentlyContinue) {
+    $UV_VERSION = (uv --version 2>&1)
+    log "uv found: $UV_VERSION"
+    Write-Host "[OK] $UV_VERSION"
+}
+else {
+    log "uv not found - installing..."
+    Write-Host "uv not found - installing..."
+
+    try {
+        powershell -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex"
+        Refresh-Path
+
+        if (Get-Command uv -ErrorAction SilentlyContinue) {
+            $UV_VERSION = (uv --version 2>&1)
+            log "uv installed: $UV_VERSION"
+            Write-Host "[OK] $UV_VERSION installed"
+        }
+        else {
+            log "uv installed but not on PATH"
+            Write-Host "[FAIL] uv installed but is not on PATH yet"
+            Write-Host "Open a new terminal and re-run, or install manually:"
+            Write-Host "  https://docs.astral.sh/uv/getting-started/installation/"
+            exit 1
+        }
+    }
+    catch {
+        log "Failed to install uv: $_"
+        Write-Host "[FAIL] Failed to install uv"
+        Write-Host "Please install manually: https://docs.astral.sh/uv/getting-started/installation/"
+        exit 1
+    }
+}
+
 # ── Python ─────────────────────────────────────────────────────────────────────
+
+Write-Host ""
+Write-Host "-- Checking Python $PY_TARGET ---------------"
+
+# Report whatever the user's shell currently resolves, purely so the log shows
+# it was seen and deliberately left alone.
+$systemPython = $null
+foreach ($cmd in @("python", "python3")) {
+    if (Get-Command $cmd -ErrorAction SilentlyContinue) {
+        $v = (Invoke-Native $cmd @("--version")).Trim()
+        if ($v -match "^Python [0-9]") { $systemPython = $v; break }
+    }
+}
+if ($systemPython) {
+    log "System python on PATH: $systemPython (left untouched)"
+    Write-Host "     Your default python is $($systemPython -replace 'Python ', '') - it will not be changed"
+}
+
+function Find-Python312 {
+    # --no-project  so a pyproject.toml in the working directory cannot redirect
+    #               the answer to an unrelated project environment
+    # --system      so a .venv in the working directory is not mistaken for an
+    #               interpreter; a venv cannot be used as a base for building
+    #               the plugin's own environment. uv-managed installs are still
+    #               included, only virtualenvs are excluded.
+    $out = Invoke-Native "uv" @("python", "find", $PY_TARGET, "--no-project", "--system")
+    if ($script:LastNativeExit -eq 0) {
+        $path = $out.Trim()
+        if ($path -and (Test-Path $path)) { return $path }
+    }
+    return $null
+}
+
+function Install-PythonViaUv {
+    log "Installing managed Python $PY_TARGET via uv..."
+    Write-Host "Python $PY_TARGET not available - downloading a managed copy (~30MB)..."
+    Write-Host "  (installs under $env:APPDATA\uv\python - PATH and the py launcher are untouched)"
+    Write-Host ""
+
+    # --no-bin: do not add even a versioned python3.12.exe shim to ~/.local/bin.
+    #   uv discovers its own managed installs without one, so the interpreter
+    #   stays completely invisible to the user's shell. (--default, which WOULD
+    #   take over bare `python`, is never passed.)
+    # uv writes progress to stderr; flatten ErrorRecords so PowerShell does not
+    # wrap each progress line in "At line:N char:N" decoration.
+    & uv python install $PY_TARGET --no-bin 2>&1 |
+        ForEach-Object {
+            if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.ToString() } else { "$_" }
+        } | Out-Host
+    $code = $LASTEXITCODE
+    log "uv python install exit: $code"
+    return ($code -eq 0)
+}
+
+# ── Legacy system-wide fallbacks ───────────────────────────────────────────────
+# Only reached when uv cannot provision Python at all (blocked download host,
+# for example). These install a real system Python, so they are deliberately
+# last and deliberately do not prepend to PATH.
 
 function Remove-GhostPythonRegistry {
     $regRoots = @("HKCU:\Software\Python\PythonCore", "HKLM:\Software\Python\PythonCore")
@@ -55,10 +215,8 @@ function Remove-GhostPythonRegistry {
 }
 
 function Get-RegisteredPythonVersion {
-    # Check MSI for any registered Python 3.12.x version
     try {
-        # Quick registry check first - skip slow WMI if no Python registered
-        $hasRegistry = (Test-Path "HKCU:\Software\Python\PythonCore") -or 
+        $hasRegistry = (Test-Path "HKCU:\Software\Python\PythonCore") -or
                        (Test-Path "HKLM:\Software\Python\PythonCore")
         if (-not $hasRegistry) {
             log "No Python registry entries - skipping MSI check"
@@ -68,8 +226,8 @@ function Get-RegisteredPythonVersion {
         $products = Get-WmiObject -Class Win32_Product -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -like "Python 3.12*Core*" }
         if ($products) {
-            # Version format is like 3.12.10150.0 - extract 3.12.x
-            $ver = $products[0].Version
+            $ver = @($products)[0].Version
+            if (-not $ver) { return $null }
             $parts = $ver.Split(".")
             if ($parts.Length -ge 3) {
                 $buildNum = [int]$parts[2]
@@ -85,57 +243,15 @@ function Get-RegisteredPythonVersion {
     return $null
 }
 
-function Get-PythonDownloadUrl {
-    param($version)
-    return "https://www.python.org/ftp/python/$version/python-$version-amd64.exe"
-}
-
-function Install-Python-Via-Winget {
-    log "Trying winget..."
-    Write-Host "Trying winget..."
-
-    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-        log "winget not available"
-        Write-Host "winget not available - skipping"
-        return $false
-    }
-
-    Write-Host "Initializing winget source..."
-    winget source update --disable-interactivity 2>$null
-    Start-Sleep -Seconds 2
-
-    winget install Python.Python.3.12 `
-        --silent `
-        --accept-package-agreements `
-        --accept-source-agreements `
-        --disable-interactivity
-
-    if ($LASTEXITCODE -ne 0) {
-        log "winget install failed (exit: $LASTEXITCODE)"
-        Write-Host "winget failed (exit: $LASTEXITCODE) - trying fallback..."
-        return $false
-    }
-
-    $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" +
-                [System.Environment]::GetEnvironmentVariable("PATH", "User")
-
-    log "Python 3.12 installed via winget"
-    Write-Host "[OK] Python 3.12 installed via winget"
-    return $true
-}
-
 function Install-Python-Via-Direct-Download {
     log "Trying direct download from python.org..."
     Write-Host "Downloading Python 3.12 from python.org..."
 
-    # Clean ghost registry entries first
     Remove-GhostPythonRegistry
 
-    # Default version to download
     $pythonVersion = "3.12.0"
 
-    # Check if a specific version is already registered in MSI
-    # If so, download that exact version to avoid 1638 error
+    # Match an already-registered version to avoid MSI error 1638.
     $registeredVersion = Get-RegisteredPythonVersion
     if ($registeredVersion) {
         log "MSI has Python $registeredVersion registered - downloading same version"
@@ -143,7 +259,7 @@ function Install-Python-Via-Direct-Download {
         $pythonVersion = $registeredVersion
     }
 
-    $pythonUrl     = Get-PythonDownloadUrl $pythonVersion
+    $pythonUrl     = "https://www.python.org/ftp/python/$pythonVersion/python-$pythonVersion-amd64.exe"
     $installerPath = "$env:TEMP\python-$pythonVersion-amd64.exe"
 
     log "Downloading: $pythonUrl"
@@ -161,21 +277,20 @@ function Install-Python-Via-Direct-Download {
         }
 
         Write-Host "Running Python installer silently..."
-        $installArgs = "/quiet InstallAllUsers=0 PrependPath=1 Include_test=0"
+        # PrependPath=0 on purpose: uv discovers this install through the
+        # Windows registry (PEP 514), so there is no reason to change which
+        # python the user's shell resolves.
+        $installArgs = "/quiet InstallAllUsers=0 PrependPath=0 Include_test=0"
         $proc = Start-Process -FilePath $installerPath -ArgumentList $installArgs -Wait -PassThru
 
-        # Exit 1638 = same or newer version already registered
-        # This means Python IS installed but files may be missing
-        # Try REINSTALL flag with same installer
         if ($proc.ExitCode -eq 1638) {
             log "Exit 1638 - attempting reinstall with REINSTALL=ALL..."
             Write-Host "Forcing reinstall..."
-            $reinstallArgs = "/quiet REINSTALL=ALL REINSTALLMODE=amus InstallAllUsers=0 PrependPath=1 Include_test=0"
+            $reinstallArgs = "/quiet REINSTALL=ALL REINSTALLMODE=amus InstallAllUsers=0 PrependPath=0 Include_test=0"
             $proc = Start-Process -FilePath $installerPath -ArgumentList $reinstallArgs -Wait -PassThru
             log "Reinstall exit code: $($proc.ExitCode)"
         }
 
-        # Clean up installer
         Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
 
         if ($proc.ExitCode -ne 0) {
@@ -184,19 +299,7 @@ function Install-Python-Via-Direct-Download {
             return $false
         }
 
-        # Refresh PATH with all common Python locations
-        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" +
-                    [System.Environment]::GetEnvironmentVariable("PATH", "User") + ";" +
-                    "$env:LOCALAPPDATA\Programs\Python\Python312;" +
-                    "$env:LOCALAPPDATA\Programs\Python\Python312\Scripts;" +
-                    "$env:LOCALAPPDATA\Programs\Python\Python311;" +
-                    "$env:LOCALAPPDATA\Programs\Python\Python311\Scripts;" +
-                    "$env:LOCALAPPDATA\Programs\Python\Python310;" +
-                    "$env:LOCALAPPDATA\Programs\Python\Python310\Scripts;" +
-                    "$env:PROGRAMFILES\Python312;" +
-                    "$env:PROGRAMFILES\Python312\Scripts"
-
-        log "Python $pythonVersion installed via direct download"
+        log "Python $pythonVersion installed via direct download (not added to PATH)"
         Write-Host "[OK] Python $pythonVersion installed"
         return $true
     }
@@ -208,210 +311,118 @@ function Install-Python-Via-Direct-Download {
     }
 }
 
-function Install-Python {
-    log "Python not found - installing 3.12..."
-    Write-Host "Python not found - installing 3.12..."
+function Install-Python-Via-Winget {
+    log "Trying winget..."
+    Write-Host "Trying winget..."
 
-    $wingetOk = $false
-    try { $wingetOk = Install-Python-Via-Winget } catch { $wingetOk = $false }
-    $global:LASTEXITCODE = 0
-    if ($wingetOk -eq $true) { return $true }
-
-    log "Falling back to direct download..."
-    Write-Host "Falling back to direct download..."
-    $directOk = $false
-    try { $directOk = Install-Python-Via-Direct-Download } catch { $directOk = $false }
-    $global:LASTEXITCODE = 0
-    if ($directOk -eq $true) { return $true }
-
-    log "All install methods failed"
-    Write-Host ""
-    Write-Host "[FAIL] Could not install Python automatically"
-    Write-Host "Please install Python 3.12 manually: https://www.python.org/downloads/"
-    Write-Host "Then re-run /cloudbyte-claude-plugin-install"
-    return $false
-}
-
-function Test-PythonWorks {
-    param($cmd)
-    try {
-        $ver = & $cmd --version 2>&1
-        return ($ver -match "^Python [0-9]")
-    }
-    catch {
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        log "winget not available"
+        Write-Host "winget not available - skipping"
         return $false
     }
+
+    Write-Host "[WARN] The winget package adds Python 3.12 to PATH, which changes"
+    Write-Host "       which python your shell resolves. This is the last resort."
+
+    winget source update --disable-interactivity 2>$null
+    Start-Sleep -Seconds 2
+
+    winget install Python.Python.3.12 `
+        --silent `
+        --accept-package-agreements `
+        --accept-source-agreements `
+        --disable-interactivity
+
+    if ($LASTEXITCODE -ne 0) {
+        log "winget install failed (exit: $LASTEXITCODE)"
+        Write-Host "winget failed (exit: $LASTEXITCODE)"
+        return $false
+    }
+
+    Refresh-Path
+    log "Python 3.12 installed via winget"
+    Write-Host "[OK] Python 3.12 installed via winget"
+    return $true
 }
 
-function Find-PythonExe {
-    # Search common install locations for python.exe
-    $searchPaths = @(
-        "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
-        "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe",
-        "$env:LOCALAPPDATA\Programs\Python\Python310\python.exe",
-        "$env:PROGRAMFILES\Python312\python.exe",
-        "$env:PROGRAMFILES\Python311\python.exe",
-        "C:\Python312\python.exe",
-        "C:\Python311\python.exe",
-        "C:\Python310\python.exe"
-    )
-    foreach ($path in $searchPaths) {
-        if (Test-Path $path) {
-            log "Found Python at: $path"
-            return $path
-        }
-    }
-    # Also check registry
-    $regEntry = Get-ItemProperty "HKCU:\Software\Python\PythonCore\*\InstallPath" -ErrorAction SilentlyContinue
-    if (-not $regEntry) {
-        $regEntry = Get-ItemProperty "HKLM:\Software\Python\PythonCore\*\InstallPath" -ErrorAction SilentlyContinue
-    }
-    if ($regEntry -and $regEntry.ExecutablePath -and (Test-Path $regEntry.ExecutablePath)) {
-        log "Found Python via registry: $($regEntry.ExecutablePath)"
-        return $regEntry.ExecutablePath
-    }
-    return $null
-}
+# ── Ensure a 3.12 interpreter exists for uv ────────────────────────────────────
 
-Write-Host "-- Checking Python ----------------------"
+$pythonPath = Find-Python312
 
-$PYTHON_CMD     = $null
-$PYTHON_VERSION = $null
-
-if ((Get-Command python3 -ErrorAction SilentlyContinue) -and (Test-PythonWorks "python3")) {
-    $PYTHON_CMD     = "python3"
-    $PYTHON_VERSION = (python3 --version 2>&1) -replace "Python ", ""
-    log "Python found: $PYTHON_VERSION (python3)"
-    Write-Host "[OK] Python $PYTHON_VERSION"
-}
-elseif ((Get-Command python -ErrorAction SilentlyContinue) -and (Test-PythonWorks "python")) {
-    $PYTHON_CMD     = "python"
-    $PYTHON_VERSION = (python --version 2>&1) -replace "Python ", ""
-    log "Python found: $PYTHON_VERSION (python)"
-    Write-Host "[OK] Python $PYTHON_VERSION"
+if ($pythonPath) {
+    log "Python $PY_TARGET already available at: $pythonPath"
+    Write-Host "[OK] Python $PY_TARGET available"
+    Write-Host "     $pythonPath"
 }
 else {
-    log "Python not found on PATH - checking other locations..."
+    log "No Python $PY_TARGET found - provisioning"
 
-    # Try to find Python in known locations before installing
-    $foundExe = Find-PythonExe
-    if ($foundExe) {
-        $pyDir = Split-Path $foundExe
-        $env:PATH = "$pyDir;$pyDir\Scripts;" + $env:PATH
-        log "Added $pyDir to PATH"
-        if (Test-PythonWorks $foundExe) {
-            $PYTHON_CMD     = $foundExe
-            $PYTHON_VERSION = (& $foundExe --version 2>&1) -replace "Python ", ""
-            log "Python found at: $foundExe version $PYTHON_VERSION"
-            Write-Host "[OK] Python $PYTHON_VERSION found at $foundExe"
-        }
-    }
+    $uvInstallOk = $false
+    try { $uvInstallOk = Install-PythonViaUv } catch { log "uv python install threw: $_"; $uvInstallOk = $false }
+    $global:LASTEXITCODE = 0
 
-    # Still not found - install
-    if (-not $PYTHON_CMD) {
-        log "Python not found anywhere - installing..."
-        $installed = Install-Python
-        if (-not $installed) { exit 1 }
+    if ($uvInstallOk) { $pythonPath = Find-Python312 }
 
-        # Refresh PATH after install
-        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" +
-                    [System.Environment]::GetEnvironmentVariable("PATH", "User") + ";" +
-                    "$env:LOCALAPPDATA\Programs\Python\Python312;" +
-                    "$env:LOCALAPPDATA\Programs\Python\Python312\Scripts;" +
-                    "$env:LOCALAPPDATA\Programs\Python\Python311;" +
-                    "$env:LOCALAPPDATA\Programs\Python\Python311\Scripts;" +
-                    "$env:LOCALAPPDATA\Programs\Python\Python310;" +
-                    "$env:LOCALAPPDATA\Programs\Python\Python310\Scripts"
-
-        # Check PATH commands first
-        if ((Get-Command python3 -ErrorAction SilentlyContinue) -and (Test-PythonWorks "python3")) {
-            $PYTHON_CMD     = "python3"
-            $PYTHON_VERSION = (python3 --version 2>&1) -replace "Python ", ""
-            log "Python now available: $PYTHON_VERSION"
-            Write-Host "[OK] Python $PYTHON_VERSION ready"
-        }
-        elseif ((Get-Command python -ErrorAction SilentlyContinue) -and (Test-PythonWorks "python")) {
-            $PYTHON_CMD     = "python"
-            $PYTHON_VERSION = (python --version 2>&1) -replace "Python ", ""
-            log "Python now available: $PYTHON_VERSION"
-            Write-Host "[OK] Python $PYTHON_VERSION ready"
-        }
-        else {
-            # Last resort - search by path
-            $foundExe = Find-PythonExe
-            if ($foundExe -and (Test-PythonWorks $foundExe)) {
-                $PYTHON_CMD     = $foundExe
-                $PYTHON_VERSION = (& $foundExe --version 2>&1) -replace "Python ", ""
-                log "Python found at path: $foundExe version $PYTHON_VERSION"
-                Write-Host "[OK] Python $PYTHON_VERSION"
-            }
-            else {
-                log "Python not available after install"
-                Write-Host "[FAIL] Python not available after install"
-                Write-Host "Please install Python 3.12 manually: https://www.python.org/downloads/"
-                exit 1
-            }
-        }
-    }
-}
-
-# Version check - 3.10+ required
-$versionParts = $PYTHON_VERSION.Split(".")
-$PYTHON_MAJOR = [int]$versionParts[0]
-$PYTHON_MINOR = [int]$versionParts[1]
-
-$VERSION_OK = $false
-if ($PYTHON_MAJOR -gt 3)                               { $VERSION_OK = $true }
-elseif ($PYTHON_MAJOR -eq 3 -and $PYTHON_MINOR -ge 10) { $VERSION_OK = $true }
-
-if (-not $VERSION_OK) {
-    log "Python $PYTHON_VERSION too old - need 3.10+"
-    Write-Host "[FAIL] Python $PYTHON_VERSION is too old. Need 3.10+"
-    Write-Host "Please install Python 3.12: https://www.python.org/downloads/"
-    exit 1
-}
-
-log "Python OK: $PYTHON_VERSION"
-Write-Host "[OK] Python $PYTHON_VERSION confirmed"
-
-# ── uv ─────────────────────────────────────────────────────────────────────────
-
-Write-Host ""
-Write-Host "-- Checking uv --------------------------"
-
-if (Get-Command uv -ErrorAction SilentlyContinue) {
-    $UV_VERSION = (uv --version 2>&1)
-    log "uv found: $UV_VERSION"
-    Write-Host "[OK] $UV_VERSION"
-}
-else {
-    log "uv not found - installing..."
-    Write-Host "uv not found - installing..."
-
-    try {
-        powershell -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex"
-
-        $env:PATH = "$env:USERPROFILE\.local\bin;" +
-                    "$env:USERPROFILE\.cargo\bin;" +
-                    [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" +
-                    [System.Environment]::GetEnvironmentVariable("PATH", "User")
-
-        if (Get-Command uv -ErrorAction SilentlyContinue) {
-            $UV_VERSION = (uv --version 2>&1)
-            log "uv installed: $UV_VERSION"
-            Write-Host "[OK] $UV_VERSION installed"
-        }
-        else {
-            log "uv installed but not on PATH yet"
-            Write-Host "[WARN] uv installed but needs terminal restart to be on PATH"
-        }
-    }
-    catch {
-        log "Failed to install uv: $_"
-        Write-Host "[FAIL] Failed to install uv"
-        Write-Host "Please install manually: https://docs.astral.sh/uv/getting-started/installation/"
+    # uv said it installed Python but cannot then see it. Installing a system
+    # Python would not help - uv is the thing that has to find it - and would
+    # modify the machine for nothing, so stop here with a real diagnostic.
+    if ($uvInstallOk -and -not $pythonPath) {
+        log "uv python install reported success but $PY_TARGET is not discoverable - uv looks broken"
+        Write-Host ""
+        Write-Host "[FAIL] uv installed Python $PY_TARGET but cannot find it afterwards."
+        Write-Host "       This usually means the uv installation itself is damaged."
+        Write-Host ""
+        Write-Host "  Check what uv reports:"
+        Write-Host "    uv --version"
+        Write-Host "    uv python list"
+        Write-Host ""
+        Write-Host "  Reinstalling uv normally fixes it:"
+        Write-Host "    irm https://astral.sh/uv/install.ps1 | iex"
+        Write-Host ""
         exit 1
     }
+
+    # uv genuinely could not download (blocked host, offline mirror). A real
+    # system install still helps, because uv discovers registered installs
+    # through the Windows registry.
+    $directOk = $false
+    if (-not $pythonPath) {
+        log "uv could not download Python - falling back to a system install"
+        Write-Host ""
+        Write-Host "[WARN] uv could not download Python $PY_TARGET - trying a system install..."
+
+        try { $directOk = Install-Python-Via-Direct-Download } catch { $directOk = $false }
+        $global:LASTEXITCODE = 0
+        if ($directOk) {
+            Refresh-Path
+            $pythonPath = Find-Python312
+        }
+    }
+
+    # winget last, and ONLY if the direct download failed outright - otherwise a
+    # working install would be layered over with a second copy that also
+    # rewrites PATH.
+    if (-not $pythonPath -and -not $directOk) {
+        $wingetOk = $false
+        try { $wingetOk = Install-Python-Via-Winget } catch { $wingetOk = $false }
+        $global:LASTEXITCODE = 0
+        if ($wingetOk) { $pythonPath = Find-Python312 }
+    }
+
+    if (-not $pythonPath) {
+        log "All Python provisioning methods failed"
+        Write-Host ""
+        Write-Host "[FAIL] Could not provide Python $PY_TARGET"
+        Write-Host "Install it manually with either:"
+        Write-Host "  uv python install $PY_TARGET"
+        Write-Host "  https://www.python.org/downloads/"
+        Write-Host "Then re-run the installer."
+        exit 1
+    }
+
+    log "Python $PY_TARGET ready at: $pythonPath"
+    Write-Host "[OK] Python $PY_TARGET ready"
+    Write-Host "     $pythonPath"
 }
 
 # ── Done ───────────────────────────────────────────────────────────────────────
