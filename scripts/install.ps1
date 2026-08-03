@@ -82,6 +82,10 @@
     Where the cursor-agent installer is fetched from. Override for an internal
     mirror, or to test the install path without hitting cursor.com.
 
+.PARAMETER ClaudeCliInstallUrl
+    Where the Claude Code installer is fetched from. Same purpose as
+    -CursorCliInstallUrl.
+
 .PARAMETER UseLocalValidate
     Use scripts/validate.ps1 from this checkout instead of downloading it.
     Automatic when the file exists next to this script.
@@ -132,6 +136,7 @@ param(
     [int]    $CursorWaitSeconds = 120,
     [string] $CursorDir         = "",
     [string] $CursorCliInstallUrl = "https://cursor.com/install?win32=true",
+    [string] $ClaudeCliInstallUrl = "https://claude.ai/install.ps1",
 
     [string] $MarketplaceUrl = "https://github.com/CloudByte-AI/claude-telemetry",
     [string] $PluginRef      = "claude-telemetry@claude-telemetry",
@@ -306,6 +311,8 @@ function Select-Editors {
     return $Candidates
 }
 
+$CLAUDE_CLI_INSTALL_URL = $ClaudeCliInstallUrl
+
 function Find-ClaudeExe {
     $candidates = @(
         "$env:USERPROFILE\.local\bin\claude.exe"
@@ -351,7 +358,7 @@ function Install-ClaudeCode {
     Say "Installing Claude Code via the official installer..."
     Write-Host ""
     try {
-        Invoke-ChildInstaller "irm https://claude.ai/install.ps1 | iex"
+        Invoke-ChildInstaller "irm '$CLAUDE_CLI_INSTALL_URL' | iex"
     }
     catch {
         SayWarn "Native installer failed: $_"
@@ -394,7 +401,7 @@ function Install-ClaudeCode {
 function Show-ClaudeRecovery {
     Write-Host ""
     Write-Host "  Install Claude Code by hand with either:"
-    Write-Host "    irm https://claude.ai/install.ps1 | iex"
+    Write-Host "    irm $CLAUDE_CLI_INSTALL_URL | iex"
     Write-Host "    npm install -g @anthropic-ai/claude-code"
     Write-Host ""
     Write-Host "  Then open a new terminal and re-run this script - it will pick up"
@@ -1011,6 +1018,15 @@ foreach ($e in $EDITORS) {
     }
 
     # Cursor: the CLI has no plugin install verb, so the last mile is the IDE.
+    # Warn when the IDE is missing entirely - otherwise -Target cursor on a
+    # machine without Cursor waits for a plugin that can never appear.
+    if (-not $cursorIdePresent) {
+        SayWarn "Cursor itself was not found on this machine."
+        Write-Host "       The CLI is installed and the marketplace is registered, but the"
+        Write-Host "       steps below need the Cursor IDE: https://cursor.com/download"
+        Write-Host ""
+    }
+
     Write-Host "  $($e.Name) installs plugins from the IDE, not the CLI."
     Write-Host "  The marketplace is registered - finish it in Cursor:"
     Write-Host ""
