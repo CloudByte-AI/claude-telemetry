@@ -9,10 +9,12 @@
     installed, anything in the way is cleared, and there is never a "do it
     yourself" branch.
 
-    The one question it asks is which editors to install into, and only when
-    more than one was found and a console is attached. Everything else is
-    unattended. -Target skips the question, and it is skipped automatically
-    when stdin is redirected, so `irm | iex` in a pipeline cannot stall.
+    The one question it asks is which editors to install into. Both supported
+    editors are always offered, even on a machine with neither installed, since
+    either CLI can be provisioned here - what is already present only decides
+    which entries Enter accepts. Everything else is unattended. -Target skips
+    the question, and it is skipped automatically when stdin is redirected, so
+    `irm | iex` in a pipeline cannot stall.
 
       Step 1  - Detect editors, ask which to use, install any missing CLI
       Step 2  - Ensure uv (installed by Step 3 if missing)
@@ -262,32 +264,48 @@ function Test-CanPrompt {
     return $true
 }
 
-# Ask which of the detected editors should get the plugin. Always returns a
-# non-empty subset - an unusable answer falls back to all of them rather than
-# leaving the user with nothing installed.
+# Ask which editors should get the plugin.
+#
+# Every supported editor is listed, not just the ones already on the machine -
+# both CLIs can be installed automatically, so "not detected" is not the same as
+# "not available", and a fresh machine would otherwise never get a choice.
+# Detection decides the DEFAULT (what Enter selects), never the menu.
+#
+# Always returns a non-empty subset: an unusable answer falls back to the
+# default rather than leaving the user with nothing installed.
 function Select-Editors {
-    param([array] $Candidates)
+    param(
+        [array]    $Candidates,
+        [string[]] $DefaultKeys
+    )
+
+    $defaults     = @($Candidates | Where-Object { $DefaultKeys -contains $_.Key })
+    $defaultLabel = (@($defaults | ForEach-Object { $_.Name }) -join ', ')
+    if (-not $defaultLabel) { $defaultLabel = "none" }
 
     Write-Host ""
     Write-Host "  Install the plugin for which editors?"
     Write-Host ""
     for ($i = 0; $i -lt $Candidates.Count; $i++) {
-        Write-Host ("    {0}) {1}" -f ($i + 1), $Candidates[$i].Name)
+        $c    = $Candidates[$i]
+        $mark = if ($DefaultKeys -contains $c.Key) { "*" } else { " " }
+        Write-Host ("   {0} {1}) {2,-12}  {3}" -f $mark, ($i + 1), $c.Name, $c.Note)
     }
     Write-Host ""
     Write-Host "  Enter numbers separated by commas (for example: 1,2),"
-    Write-Host "  or press Enter for all of them."
+    Write-Host "  'a' for all, or press Enter for the default (*): $defaultLabel"
     Write-Host ""
 
     for ($try = 0; $try -lt 3; $try++) {
         $raw = ""
         try { $raw = ("" + (Read-Host "  Selection")).Trim() }
         catch {
-            SayWarn "No input available - using all detected editors."
-            return $Candidates
+            SayWarn "No input available - using the default."
+            return $defaults
         }
 
-        if ($raw -eq "" -or $raw -match "^(a|all)$") { return $Candidates }
+        if ($raw -eq "")             { return $defaults }
+        if ($raw -match "^(a|all)$") { return $Candidates }
 
         # Dedupe by Key so "1,1" is one editor, not two passes over the same one.
         $keys   = New-Object System.Collections.Generic.List[string]
@@ -307,8 +325,8 @@ function Select-Editors {
         Write-Host "  Not a valid selection - use numbers between 1 and $($Candidates.Count)."
     }
 
-    SayWarn "No valid selection after 3 attempts - using all detected editors."
-    return $Candidates
+    SayWarn "No valid selection after 3 attempts - using the default."
+    return $defaults
 }
 
 $CLAUDE_CLI_INSTALL_URL = $ClaudeCliInstallUrl
@@ -737,39 +755,44 @@ if ($cursorPresent) { SayOk "Cursor CLI found (cursor-agent)" } else { Say "Curs
 if (-not $cursorPresent -and $cursorIdePresent) { Say "Cursor itself is installed - its CLI will be added" }
 
 switch ($Target) {
-    "claude" { $wantClaude = $true;           $wantCursor = $false }
-    "cursor" { $wantClaude = $false;          $wantCursor = $true }
-    "both"   { $wantClaude = $true;           $wantCursor = $true }
+    "claude" { $wantClaude = $true;  $wantCursor = $false }
+    "cursor" { $wantClaude = $false; $wantCursor = $true }
+    "both"   { $wantClaude = $true;  $wantCursor = $true }
     default  {
-        # auto: set up whatever is actually on the machine. Both CLIs can be
-        # installed automatically, so a missing CLI is not a reason to skip an
-        # editor that is clearly in use - only a missing editor is.
+        # auto / ask. Detection sets the default only - the menu below always
+        # offers both editors, because either CLI can be installed from here.
         $wantClaude = $claudePresent
         $wantCursor = $cursorPresent -or $cursorIdePresent
-        if (-not $wantClaude -and -not $wantCursor) {
-            Write-Host ""
-            Say "No editor found - installing the Claude Code CLI."
-            $wantClaude = $true
-        }
+        if (-not $wantClaude -and -not $wantCursor) { $wantClaude = $true }
     }
 }
-log "Target=$Target -> claude=$wantClaude cursor=$wantCursor"
+log "Target=$Target -> default claude=$wantClaude cursor=$wantCursor"
 
-# Narrow the set before installing anything: pulling down a CLI for an editor
-# the user is about to deselect would be wasted work and an unwanted change.
-$candidates = @()
-if ($wantClaude) { $candidates += [pscustomobject] @{ Key = "claude"; Name = "Claude Code" } }
-if ($wantCursor) { $candidates += [pscustomobject] @{ Key = "cursor"; Name = "Cursor" } }
+# Every supported editor is a candidate regardless of what is installed: the
+# script can provision either CLI, so a fresh machine still gets a real choice.
+# Detection only annotates the list and picks what Enter selects.
+$cursorNote = "not installed - needs the Cursor IDE"
+if     ($cursorPresent)    { $cursorNote = "installed" }
+elseif ($cursorIdePresent) { $cursorNote = "Cursor found - its CLI will be installed" }
 
-# An explicit -Target is an answer already given, so do not ask again. Plain
-# "auto" only asks when there is a real choice to make.
+$candidates = @(
+    [pscustomobject] @{
+        Key  = "claude"
+        Name = "Claude Code"
+        Note = if ($claudePresent) { "installed" } else { "not installed - will be installed for you" }
+    }
+    [pscustomobject] @{ Key = "cursor"; Name = "Cursor"; Note = $cursorNote }
+)
+
+$defaultKeys = @()
+if ($wantClaude) { $defaultKeys += "claude" }
+if ($wantCursor) { $defaultKeys += "cursor" }
+
+# An explicit -Target is an answer already given, so do not ask again.
 $explicitTarget = $PSBoundParameters.ContainsKey("Target") -and $Target -ne "ask"
-$shouldAsk = $false
-if ($Target -eq "ask")                                           { $shouldAsk = $true }
-elseif (-not $explicitTarget -and $candidates.Count -gt 1)       { $shouldAsk = $true }
 
-if ($shouldAsk -and (Test-CanPrompt)) {
-    $chosen     = @(Select-Editors $candidates)
+if (-not $explicitTarget -and (Test-CanPrompt)) {
+    $chosen     = @(Select-Editors -Candidates $candidates -DefaultKeys $defaultKeys)
     $chosenKeys = @($chosen | ForEach-Object { $_.Key })
     $wantClaude = $chosenKeys -contains "claude"
     $wantCursor = $chosenKeys -contains "cursor"
@@ -777,9 +800,9 @@ if ($shouldAsk -and (Test-CanPrompt)) {
     SayOk "Selected: $(@($chosen | ForEach-Object { $_.Name }) -join ', ')"
     log "User selected editors: $($chosenKeys -join ',')"
 }
-elseif ($shouldAsk) {
-    Say "No console attached - using all detected editors."
-    log "Prompt skipped (non-interactive)"
+elseif (-not $explicitTarget) {
+    Say "No console attached - using detected editors: $($defaultKeys -join ', ')"
+    log "Prompt skipped (non-interactive), using $($defaultKeys -join ',')"
 }
 
 if ($wantClaude -and -not $claudePresent) {
