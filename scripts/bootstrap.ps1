@@ -18,6 +18,11 @@
 
     Any arguments are forwarded verbatim to install.ps1.
 
+    The same bootstrap also fetches the UNINSTALLER, which needs identical ref
+    pinning and download-then-execute handling:
+
+        & ([scriptblock]::Create((irm https://raw.githubusercontent.com/CloudByte-AI/claude-telemetry/main/scripts/bootstrap.ps1))) -Script uninstall.ps1
+
     Installing from a branch other than main - note the ref appears TWICE,
     once in the URL you fetch and once as -Ref. This file cannot detect which
     branch it was downloaded from, so without -Ref it would pull install.ps1
@@ -35,6 +40,7 @@
 
         $env:CLOUDBYTE_INSTALL_ARGS = "-OpenDashboard"  # switches for install.ps1
         $env:CLOUDBYTE_REF          = "development"   # branch/tag/sha to install from
+        $env:CLOUDBYTE_SCRIPT       = "uninstall.ps1" # which script to run
         $env:CLOUDBYTE_INSTALL_URL  = "http://..."    # full override of the script URL
 
     The installer's own exit code is left in $LASTEXITCODE and $CloudByteExitCode.
@@ -45,6 +51,14 @@ param(
     # which URL it was fetched from, so fetching this file from a branch does
     # NOT imply install.ps1 comes from that branch - say so explicitly.
     [string] $Ref,
+
+    # Which script under scripts/ to fetch and run. The default is the
+    # installer; pass uninstall.ps1 to tear the plugin down instead. Everything
+    # this bootstrap does - ref pinning, download-then-execute, the
+    # ExecutionPolicy workaround - applies equally to either one, so they share
+    # it rather than duplicating 150 lines.
+    [ValidateSet("install.ps1", "uninstall.ps1")]
+    [string] $Script = "install.ps1",
 
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]] $InstallArgs
@@ -57,19 +71,24 @@ if     ($Ref)                 { $ref = $Ref }
 elseif ($env:CLOUDBYTE_REF)   { $ref = $env:CLOUDBYTE_REF }
 else                          { $ref = "main" }
 
+if     ($Script)                 { $scriptName = $Script }
+elseif ($env:CLOUDBYTE_SCRIPT)   { $scriptName = $env:CLOUDBYTE_SCRIPT }
+else                             { $scriptName = "install.ps1" }
+
 if ($env:CLOUDBYTE_INSTALL_URL) {
     $installUrl = $env:CLOUDBYTE_INSTALL_URL
     $rawBase    = $installUrl -replace "/[^/]+$", ""
 }
 else {
     $rawBase    = "https://raw.githubusercontent.com/$repo/$ref/scripts"
-    $installUrl = "$rawBase/install.ps1"
+    $installUrl = "$rawBase/$scriptName"
 }
 
+$what = if ($scriptName -like "uninstall*") { "uninstaller" } else { "installer" }
 $dest = Join-Path $env:TEMP ("cloudbyte-install-" + [guid]::NewGuid().ToString("N").Substring(0, 8) + ".ps1")
 
 Write-Host ""
-Write-Host "Fetching CloudByte installer..."
+Write-Host "Fetching CloudByte $what..."
 Write-Host "  $installUrl"
 
 try {
@@ -78,7 +97,7 @@ try {
 }
 catch {
     Write-Host ""
-    Write-Host "[FAIL] Could not download the installer: $_" -ForegroundColor Red
+    Write-Host "[FAIL] Could not download the $what : $_" -ForegroundColor Red
     Write-Host "       Check your connection, or that the ref '$ref' exists."
     Write-Host ""
     $global:CloudByteExitCode = 1
@@ -107,8 +126,12 @@ for ($i = 0; $i -lt $tokens.Count; $i++) {
     }
 }
 
-# Fetch validate.ps1 from the same ref install.ps1 came from.
-if (-not $params.ContainsKey("RawBase")) { $params["RawBase"] = $rawBase }
+# Fetch validate.ps1 from the same ref install.ps1 came from. Only the installer
+# needs it - the uninstaller runs no validation - so it is not passed to a script
+# that would reject it as an unknown parameter.
+if ($scriptName -eq "install.ps1" -and -not $params.ContainsKey("RawBase")) {
+    $params["RawBase"] = $rawBase
+}
 
 # Piping this file into iex works under any ExecutionPolicy because no script
 # FILE is involved - but install.ps1 is a file, and Windows clients default to

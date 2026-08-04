@@ -37,8 +37,8 @@
                    Step 1 installs it when Cursor is present but its CLI is not.
                    Only the marketplace can be added from the CLI - the plugin
                    itself must be enabled from the IDE (Settings > Plugins >
-                   cursor-telemetry > Install), so Step 5 prints those steps and
-                   then waits for the plugin to appear. Cache directories are
+                   cursor-telemetry > Install), so Step 5 prints those steps,
+                   asks you to confirm once done, then verifies. Cache directories are
                    named by commit sha, which cannot be ordered, so the newest
                    is chosen by modification time.
 
@@ -72,10 +72,13 @@
       cursor
       both    an explicit choice - the prompt is skipped entirely.
 
-.PARAMETER CursorWaitSeconds
-    How long Step 5 waits for the Cursor plugin to appear after printing the
-    IDE steps. 0 skips the wait. Timing out is not an error - the plugin builds
-    its own environment on first use.
+.PARAMETER CursorGraceSeconds
+    Step 5 does not wait on a timer - it asks you to confirm the manual Cursor
+    step and then verifies it. This is only the short grace window it keeps
+    re-checking for after each confirmation, because clicking Install starts a
+    download that takes a moment to land. Not reaching the plugin is not an
+    error - it builds its own environment on first use. Accepts
+    -CursorWaitSeconds as an alias.
 
 .PARAMETER CursorDir
     Cursor's data directory. Defaults to ~/.cursor.
@@ -134,15 +137,19 @@ param(
     [switch] $OpenDashboard,
 
     [ValidateSet("auto", "ask", "claude", "cursor", "both")]
-    [string] $Target            = "auto",
-    [int]    $CursorWaitSeconds = 120,
-    [string] $CursorDir         = "",
+    [string] $Target             = "auto",
+
+    # CursorWaitSeconds is the pre-confirmation-flow name, kept as an alias so
+    # anything already scripting it does not break.
+    [Alias("CursorWaitSeconds")]
+    [int]    $CursorGraceSeconds = 20,
+    [string] $CursorDir          = "",
     [string] $CursorCliInstallUrl = "https://cursor.com/install?win32=true",
     [string] $ClaudeCliInstallUrl = "https://claude.ai/install.ps1",
 
     [string] $MarketplaceUrl = "https://github.com/CloudByte-AI/claude-telemetry",
     [string] $PluginRef      = "claude-telemetry@claude-telemetry",
-    [string] $DashboardUrl   = "http://localhost:8765",
+    [string] $DashboardUrl   = "http://localhost:4723",
     [string] $RawBase        = "https://raw.githubusercontent.com/CloudByte-AI/claude-telemetry/main/scripts"
 )
 
@@ -716,30 +723,67 @@ function Test-EnvStale {
     return $false
 }
 
-# Cursor cannot install a plugin from its CLI, so Step 5 prints the IDE steps
-# and then watches for the checkout to show up. Polling rather than prompting
-# keeps the script stdin-free; timing out is not an error.
-function Wait-ForPluginDir {
-    param([string] $Root, [int] $Seconds)
+# Ask the user to confirm a manual IDE step, then verify it actually happened.
+#
+# This deliberately does NOT poll blindly for a fixed timeout. A fixed wait is
+# wrong in both directions: unattended it burns the entire timeout on a click
+# nobody is going to make, and attended it either finishes in five seconds and
+# keeps waiting anyway, or needs longer than the timeout allows. Asking puts the
+# pace in the user's hands and costs nothing.
+#
+# A SHORT grace poll still runs after the confirmation, because the IDE applies
+# the change asynchronously - clicking Install starts a download that takes a
+# moment to land. That is the only thing $GraceSeconds now controls.
+#
+# $Check is a scriptblock returning the plugin directory (or $null / $false).
+# Whatever it returns is handed back to the caller on success.
+function Confirm-ManualStep {
+    param(
+        [scriptblock] $Check,
+        [int]         $GraceSeconds
+    )
 
-    $dir = Get-PluginDir $Root
-    if ($dir) { return $dir }
-    if ($Seconds -le 0) { return $null }
+    # Already in the desired state - nothing to ask about.
+    $result = & $Check
+    if ($result) { return $result }
 
-    Write-Host "  Waiting up to $Seconds seconds for the plugin to appear..."
-    Write-Host "  (Ctrl+C is safe - the plugin builds its own environment on first use)"
-    $deadline = (Get-Date).AddSeconds($Seconds)
-    while ((Get-Date) -lt $deadline) {
-        Start-Sleep -Seconds 3
-        $dir = Get-PluginDir $Root
-        if ($dir) {
-            Write-Host ""
-            SayOk "Plugin detected"
-            return $dir
-        }
-        Write-Host "." -NoNewline
+    if (-not (Test-CanPrompt)) {
+        SayWarn "Running unattended - not waiting for the manual step above."
+        return $null
     }
-    Write-Host ""
+
+    for ($try = 0; $try -lt 3; $try++) {
+        $raw = ""
+        try { $raw = ("" + (Read-Host "  Press Enter once you have done this (or type s to skip)")).Trim() }
+        catch {
+            SayWarn "No input available - not waiting."
+            return $null
+        }
+
+        if ($raw -match "^(s|skip|n|no|q|quit)$") {
+            Say "  Skipped."
+            return $null
+        }
+
+        $waited = 0
+        while ($true) {
+            $result = & $Check
+            if ($result) {
+                if ($waited -ge 2) { Write-Host "" }
+                return $result
+            }
+            if ($waited -ge $GraceSeconds) { break }
+            Start-Sleep -Seconds 1
+            $waited++
+            if     ($waited -eq 2) { Write-Host "  Checking" -NoNewline }
+            elseif ($waited -gt 2) { Write-Host "." -NoNewline }
+        }
+        if ($waited -ge 2) { Write-Host "" }
+
+        if ($try -lt 2) {
+            SayWarn "Not there yet. If Cursor is still installing it, give it a moment and press Enter again."
+        }
+    }
     return $null
 }
 
@@ -944,7 +988,7 @@ if (-not $uvOk) {
 }
 else {
     Write-Host ""
-    Say "uv is present - Step 3 will confirm Python 3.12 is available to it."
+    Say "uv is present - Step 3 will make sure Python 3.12 is available to it."
 }
 
 # ── Step 3: Prerequisites validation ───────────────────────────────────────────
@@ -1080,7 +1124,10 @@ foreach ($e in $EDITORS) {
     Write-Host "    3. Click Install (or Add)"
     Write-Host ""
 
-    $e.PluginDir = Wait-ForPluginDir $e.CacheRoot $CursorWaitSeconds
+    # Ask, then verify - not a blind timer. See Confirm-ManualStep. Get-PluginDir
+    # doubles as the predicate: it returns the checkout path once one exists.
+    $cacheRoot   = $e.CacheRoot
+    $e.PluginDir = Confirm-ManualStep { Get-PluginDir $cacheRoot } $CursorGraceSeconds
     if ($e.PluginDir) {
         $e.PluginOk = $true
         SayOk "$($e.Name): plugin installed"
@@ -1103,7 +1150,7 @@ if ($cliCapable.Count -gt 0 -and -not @($cliCapable | Where-Object { $_.PluginOk
 
 # ── Step 6: Plugin environment ─────────────────────────────────────────────────
 
-Header "Step 6: Preparing Plugin Environment"
+Header "Step 6: Installing Plugin Dependencies"
 
 # Sync one plugin checkout. Returns $true when the environment is usable,
 # whether it was just built or was already good.
@@ -1118,15 +1165,15 @@ function Invoke-PluginSync {
     $stale = Test-EnvStale $Dir
 
     if ($built -and -not $stale) {
-        SayOk "$Name : environment already built and up to date"
-        Say  "  $Dir"
+        SayOk "${Name}: dependencies already installed and up to date"
+        Say  "  Location: $Dir"
         return $true
     }
-    if ($built) { Say "$Name : environment is older than uv.lock - rebuilding" }
-    else        { Say "$Name : no environment yet - building" }
+    if ($built) { Say "${Name}: dependencies changed since the last install - updating them" }
+    else        { Say "${Name}: installing dependencies for the first time" }
 
-    Say "  $Dir"
-    Say "  Syncing dependencies (this can take a minute on first run)..."
+    Say "  Location: $Dir"
+    Say "  This downloads Python packages and can take a minute the first time..."
 
     $syncArgs = @("sync", "--frozen", "--python", "3.12", "--directory", $Dir)
 
@@ -1160,19 +1207,19 @@ function Invoke-PluginSync {
     }
 
     if ($script:LastNativeExit -eq 0) {
-        SayOk "$Name : environment ready"
+        SayOk "${Name}: dependencies installed"
         return $true
     }
 
-    SayWarn "$Name : environment setup incomplete - it will be rebuilt on first use."
-    Write-Host "       You can finish it now with:"
+    SayWarn "${Name}: dependencies not fully installed - the plugin will retry on first use."
+    Write-Host "       To finish it now, run:"
     Write-Host "         uv sync --frozen --python 3.12 --directory `"$Dir`""
     return $false
 }
 
 $uvAvailable = Test-Command "uv"
 if (-not $uvAvailable) {
-    SayWarn "uv is not on this session's PATH - skipping 'uv sync'."
+    SayWarn "uv is not on this terminal's PATH - skipping the dependency install."
     Write-Host "       Open a new terminal and re-run this script to finish."
 }
 
@@ -1180,7 +1227,7 @@ foreach ($e in $EDITORS) {
     if (-not $e.PluginDir) { $e.PluginDir = Get-PluginDir $e.CacheRoot }
 
     if (-not $e.PluginDir) {
-        SayWarn "$($e.Name): no plugin checkout found - environment builds on first use."
+        SayWarn "$($e.Name): plugin files not found yet - dependencies will install on first use."
         Write-Host "         Looked in: $($e.CacheRoot)"
         Write-Host ""
         continue
@@ -1240,8 +1287,8 @@ Write-Host "======================================================"
 Write-Host ""
 
 foreach ($e in $EDITORS) {
-    if     ($e.PluginOk -and $e.SyncOk) { $state = "installed, environment ready" }
-    elseif ($e.PluginOk)                { $state = "installed, environment builds on first use" }
+    if     ($e.PluginOk -and $e.SyncOk) { $state = "installed and ready to use" }
+    elseif ($e.PluginOk)                { $state = "installed - dependencies install the first time you use it" }
     elseif ($e.MarketplaceOk)           { $state = "marketplace added - finish the install in the IDE" }
     elseif ($e.AuthRequired)            { $state = "not signed in - run '$($e.Exe) login' and re-run" }
     else                                { $state = "not installed" }
