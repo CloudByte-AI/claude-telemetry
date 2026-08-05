@@ -33,7 +33,8 @@ from src.integrations.claude.reader import (
     normalize_project_name,
     read_jsonl_file,
 )
-from src.observations.writer import save_observation
+from src.observations.writer import save_observation, obs_gate_enabled, was_rejected
+from src.common.obs_salvage import salvage_obs_args
 
 
 logger = get_logger(__name__)
@@ -194,6 +195,23 @@ def _find_tool_output(events: list, tool_use_id: str):
                         return json.dumps(content)
                     return str(content) if content else None
     return None
+
+
+def _find_tool_is_error(events: list, tool_use_id: str) -> bool:
+    """Return the is_error flag of a tool result, False when it cannot be found.
+
+    _find_tool_output deliberately returns only the content, so the error flag
+    needs its own lookup. Defaults to False so an interrupted turn with no
+    recorded result never costs an observation.
+    """
+    for event in events:
+        if event.get("type") != "user":
+            continue
+        for item in (event.get("message", {}).get("content", []) or []):
+            if isinstance(item, dict) and item.get("type") == "tool_result":
+                if item.get("tool_use_id") == tool_use_id:
+                    return bool(item.get("is_error"))
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -455,7 +473,15 @@ def _recover_interrupted_prompt(
                 obs_data = tool_use.get("input", {})
                 if isinstance(obs_data, str):
                     obs_data = json.loads(obs_data)
-                if obs_data.get("title"):
+                # Salvage first - an __unparsedToolInput payload has no title
+                # until unwrapped and would otherwise be discarded whole.
+                obs_data, _ = salvage_obs_args(obs_data)
+                if obs_gate_enabled() and _find_tool_is_error(events, tool_use.get("id")):
+                    logger.info(
+                        "OBS_REJECTED recovery pass1 skipped a draft the MCP server refused: "
+                        f"{str(obs_data.get('title', ''))[:60]!r}"
+                    )
+                elif obs_data.get("title"):
                     save_observation(session_id=session_id, prompt_id=db_prompt_id, obs_data=obs_data)
                     logger.info(f"recovery pass1: saved MCP observation: {obs_data.get('title')}")
             except Exception as obs_err:
@@ -587,7 +613,13 @@ def process_missed_pairs(session_id: str, cwd: str) -> dict:
                 try:
                     raw_input = tool.get("input_json", "{}")
                     obs_data = json.loads(raw_input) if isinstance(raw_input, str) else raw_input
-                    if obs_data.get("title"):
+                    obs_data, _ = salvage_obs_args(obs_data)
+                    if was_rejected(tool):
+                        logger.info(
+                            "OBS_REJECTED recovery pass2 skipped a draft the MCP server refused: "
+                            f"{str(obs_data.get('title', ''))[:60]!r}"
+                        )
+                    elif obs_data.get("title"):
                         save_observation(session_id=session_id, prompt_id=db_prompt_id, obs_data=obs_data)
                         logger.info(f"recovery pass2: saved MCP observation: {obs_data.get('title')}")
                 except Exception as obs_err:
