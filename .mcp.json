@@ -6,7 +6,11 @@
         "run",
         "--no-project",
         "${CLAUDE_PLUGIN_ROOT}/scripts/start_mcp.py"
-      ]
+      ],
+      "env": {
+        "CLOUDBYTE_MCP_CLIENT": "claude",
+        "CLOUDBYTE_OBS_STRICT": "1"
+      }
     }
   }
 }

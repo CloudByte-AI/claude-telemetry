@@ -63,9 +63,18 @@ _TYPE_INLINE = (
 )
 
 _JSON_SAFETY = (
-    "JSON SAFETY: every field value is a plain single-line string. "
-    "Forward slashes in paths, never backslashes. No inner quotes. "
-    "No newline characters inside any field value."
+    "FORMATTING: type, title, subtitle and narrative are single-line strings - no "
+    "newlines, no inner quotes. facts, concepts, files_read and files_modified are "
+    "arrays of strings. Forward slashes in paths, never backslashes. "
+    "Close every parameter block with </parameter>, never with a name-matched tag."
+)
+
+# Same rules, compressed - the reminder is injected on every turn, so it pays
+# the cost repeatedly and cannot afford the full wording.
+_JSON_SAFETY_INLINE = (
+    "FORMATTING: type/title/subtitle/narrative are single-line strings; "
+    "facts/concepts/files_read/files_modified are arrays of strings; "
+    "forward slashes in paths; close every parameter with </parameter>."
 )
 
 CLAUDE_TOOL_NAME = "mcp__plugin_claude-telemetry_cloudbyte__record_observation"
@@ -147,7 +156,7 @@ def build_obs_reminder(tool_name: str, call_notes_inline: str) -> str:
         "two types, never skip a type you did. Determine type from YOUR OWN ACTIONS, not "
         f"the user's words: {_TYPE_INLINE}.\n"
         f"{call_notes_inline}\n"
-        + _JSON_SAFETY
+        + _JSON_SAFETY_INLINE
     )
 
 

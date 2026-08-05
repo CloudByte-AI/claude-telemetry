@@ -22,7 +22,7 @@ import json
 from src.common.logging import get_logger, setup_logging
 from src.cursor.utils.hook_io import debug, read_stdin_json
 from src.cursor.utils.paths import get_cursor_logs_dir
-from src.observations.writer import save_observation
+from src.observations.writer import save_observation, was_rejected
 
 
 logger = get_logger(__name__)
@@ -52,6 +52,17 @@ def _write_observation(hook_data: dict) -> None:
     from src.db.manager import get_db_connection
     from src.db.schema import migrate_schema
     migrate_schema(get_db_connection())
+
+    # Skip drafts the MCP server refused, same as the two Claude write paths.
+    # Cursor delivers the result as result_json holding the raw MCP envelope
+    # {"content": [...], "isError": bool}, so the flag is camelCase here where
+    # Claude's ingest normalises it to is_error. was_rejected handles both.
+    if was_rejected(hook_data):
+        logger.info(
+            "OBS_REJECTED afterMCPExecution skipped a draft the MCP server refused: "
+            f"{str(obs_data.get('title', ''))[:60]!r}"
+        )
+        return
 
     obs_id = save_observation(session_id, generation_id, obs_data)
     if obs_id:

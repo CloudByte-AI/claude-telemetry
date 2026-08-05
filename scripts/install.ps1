@@ -31,7 +31,7 @@
 
       Claude Code  CLI is `claude`. The plugin installs from the CLI, so
                    Step 5 is automatic. Cache directories are named by version
-                   (0.1.40), so the newest is chosen by version.
+                   (0.1.41), so the newest is chosen by version.
 
       Cursor       CLI is `cursor-agent`, a separate download from the IDE, so
                    Step 1 installs it when Cursor is present but its CLI is not.
@@ -656,7 +656,7 @@ function Invoke-CliStep {
 
 # Pick the current plugin checkout under a cache root.
 #
-# Claude Code names these directories by version ("0.1.40"); Cursor names them
+# Claude Code names these directories by version ("0.1.41"); Cursor names them
 # by commit sha ("7d91aa5f..."), which carries no ordering. So: order by version
 # when every name is a version, and fall back to modification time only when at
 # least one is not. The fallback is deliberately NOT the default - creating a
