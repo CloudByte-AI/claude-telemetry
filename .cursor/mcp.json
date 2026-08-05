@@ -9,7 +9,8 @@
         "${CURSOR_PLUGIN_ROOT}/scripts/start_mcp.py"
       ],
       "env": {
-        "CLOUDBYTE_MCP_CLIENT": "cursor"
+        "CLOUDBYTE_MCP_CLIENT": "cursor",
+        "CLOUDBYTE_OBS_STRICT": "1"
       }
     }
   }

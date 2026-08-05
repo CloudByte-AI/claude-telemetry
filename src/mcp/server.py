@@ -12,8 +12,10 @@ Start command (declared in plugin.json mcpServers):
     uv run --directory "${CLAUDE_PLUGIN_ROOT}" python -m src.mcp.server
 """
 import os
+import hashlib
 import json
 import logging
+import re
 import sys
 import time
 from datetime import datetime
@@ -87,6 +89,10 @@ _SERVER_VERSION   = "1.0.0"
 # support for the full set is safe rather than aspirational.
 _SUPPORTED_PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 _LATEST_PROTOCOL_VERSION = _SUPPORTED_PROTOCOL_VERSIONS[0]
+
+# Set at initialize. Only gates optional response fields, so a client that never
+# handshakes simply gets the plain content-only result.
+_NEGOTIATED_VERSION: str = ""
 
 
 def _negotiate_protocol_version(requested: Any) -> str:
@@ -224,8 +230,10 @@ _TOOLS: list = [
             "narrative that says what was done, how it works and why it matters. Do not "
             "reply with a one-line stub.\n"
             "\n"
-            "FORMATTING: every value is a plain single-line string - no newline characters, "
-            "no inner quotes, forward slashes in every path (never backslashes). "
+            "FORMATTING: type, title, subtitle and narrative are single-line strings - no "
+            "newline characters, no inner quotes. facts, concepts, files_read and "
+            "files_modified are JSON arrays of strings. Forward slashes in every path "
+            "(never backslashes). Close every parameter block with </parameter>. "
             "The tool replies with a short confirmation and never changes your work; it is "
             "routine background telemetry, so there is no need to mention the call in your "
             "reply."
@@ -285,6 +293,10 @@ _TOOLS: list = [
                 "narrative": {
                     "type": "string",
                     "minLength": 60,
+                    # Bounded like title and subtitle. Observed narratives run
+                    # 360-950 chars, so this is generous, but an unbounded prose
+                    # field is the one the model loses the parameter frame on.
+                    "maxLength": 1200,
                     "description": (
                         "REQUIRED - never send this empty; it is the most valuable field in "
                         "the record. 2-4 sentences, structured as what was done -> how it "
@@ -340,6 +352,31 @@ _TOOLS: list = [
             },
             "examples": [_OBS_EXAMPLE, _OBS_EXAMPLE_NO_WRITES],
         },
+        # Declared so a client on 2025-06-18+ can validate structuredContent.
+        # `warnings` is the soft corrective channel: a call can be stored and
+        # still tell the model what to do differently next time, without
+        # costing a rejection round-trip.
+        "outputSchema": {
+            "type": "object",
+            "required": ["recorded", "title", "warnings", "repairs"],
+            "properties": {
+                "recorded": {
+                    "type": "boolean",
+                    "description": "False when the call was refused and must be resent.",
+                },
+                "title": {"type": "string"},
+                "warnings": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Contract problems to correct on the next call.",
+                },
+                "repairs": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Deterministic fixes the server applied before storing.",
+                },
+            },
+        },
     }
 ]
 
@@ -364,6 +401,257 @@ def _audit_obs_args(args: dict) -> dict:
         "unknown": unknown,
         "dropped_chars": sum(len(json.dumps(args[k], default=str)) for k in unknown),
     }
+
+
+# ── Payload salvage ────────────────────────────────────────────────────────────
+#
+# Models deviate from the advertised contract in four observed ways: they omit
+# fields, they rename them, the client fails to parse their JSON, and - when the
+# tool is delivered as a deferred tool and must be invoked in the XML parameter
+# protocol - they close a parameter block with a name-matched tag such as
+# </narrative> instead of the generic </parameter>. That last one is silent and
+# destructive: the harness scans on to the next real </parameter>, so the field
+# that followed is swallowed whole into the prose field and never arrives.
+#
+# Everything here is deterministic repair, no model round-trip. Anything that
+# cannot be repaired is reported back through _obs_hard_errors.
+
+# Non-schema keys observed carrying real content, mapped to where they belong.
+# Grow this from the `unknown=[...]` lists in the OBS_INCOMPLETE log lines.
+_OBS_ALIASES = {
+    "summary": "subtitle",
+    "description": "subtitle",
+    "details": "narrative",
+    "what_happened": "narrative",
+    "body": "narrative",
+    "key_facts": "facts",
+    "observation_type": "type",
+    "tags": "concepts",
+    "files_touched": "files_read",
+}
+
+# Editorial inventions that map to nothing. Dropped, but named in the log.
+_OBS_DROP = ("assumptions", "project", "autocancel")
+
+# A prose value that swallowed the parameter block after it. Non-greedy head so
+# the FIRST mis-close wins, which is where the real narrative ends.
+_XML_LEAK_RE = re.compile(
+    r"^(?P<head>.*?)</(?P<tag>[A-Za-z_][A-Za-z0-9_]*)>\s*"
+    r'<parameter name="(?P<field>[A-Za-z_][A-Za-z0-9_]*)">\s*(?P<value>.*)$',
+    re.S,
+)
+
+_SCALAR_RE = r'"%s"\s*:\s*"((?:[^"\\]|\\.)*)"'
+_ARRAY_RE = r'"%s"\s*:\s*(\[[^\]]*\])'
+
+
+def _coerce_obs_value(field: str, text: str):
+    """Parse a recovered parameter value into the type its schema declares."""
+    text = (text or "").strip()
+    want_list = field in ("facts", "concepts", "files_read", "files_modified")
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return [text] if want_list and text else text
+    if want_list and not isinstance(parsed, list):
+        return [parsed] if parsed else []
+    return parsed
+
+
+def _extract_fields_from_raw(text: str) -> dict:
+    """Best-effort field recovery from tool input JSON the client could not parse.
+
+    Deliberately regex-based rather than a JSON repairer: the payload is broken
+    by definition, so the goal is to rescue the well-formed leading fields
+    rather than to reconstruct a valid document.
+    """
+    out: dict = {}
+    if not isinstance(text, str):
+        return out
+    for field in _OBS_FIELDS:
+        pattern = _ARRAY_RE if field in ("facts", "concepts", "files_read", "files_modified") \
+            else _SCALAR_RE
+        match = re.search(pattern % re.escape(field), text)
+        if not match:
+            continue
+        raw = match.group(1)
+        try:
+            out[field] = json.loads(raw if raw.startswith("[") else f'"{raw}"')
+        except (json.JSONDecodeError, ValueError):
+            continue
+    return out
+
+
+def _salvage_obs_args(args: Any) -> tuple:
+    """Repair a deviant payload in place. Returns (payload, repairs_applied)."""
+    repairs: list = []
+    if not isinstance(args, dict):
+        return {}, repairs
+    args = dict(args)
+
+    # 1. The client could not parse the model's JSON and wrapped it whole.
+    if "__unparsedToolInput" in args:
+        wrapper = args.pop("__unparsedToolInput")
+        raw = wrapper.get("raw") if isinstance(wrapper, dict) else wrapper
+        recovered: dict = {}
+        if isinstance(raw, str):
+            try:
+                parsed = json.loads(raw)
+                recovered = parsed if isinstance(parsed, dict) else {}
+            except (json.JSONDecodeError, ValueError):
+                recovered = _extract_fields_from_raw(raw)
+        if recovered:
+            repairs.append(f"unwrapped __unparsedToolInput ({len(recovered)} fields recovered)")
+            recovered.update({k: v for k, v in args.items() if v})
+            args = recovered
+
+    # 2. A prose parameter closed with a name-matched tag and swallowed the
+    #    block after it. Loop, because a chain of mis-closes nests.
+    for _ in range(len(_OBS_FIELDS)):
+        leaked = None
+        for key, value in args.items():
+            if isinstance(value, str) and "<parameter name=" in value:
+                match = _XML_LEAK_RE.match(value)
+                if match:
+                    leaked = (key, match)
+                    break
+        if not leaked:
+            break
+        key, match = leaked
+        field, tail = match.group("field"), match.group("value")
+        # The swallowed block ends at the real </parameter>, if one survived.
+        tail = tail.split("</parameter>", 1)[0].strip()
+        if args.get(field):
+            break  # already populated - do not clobber real content
+        args[key] = match.group("head")
+        args[field] = _coerce_obs_value(field, tail)
+        repairs.append(f"recovered {field} from a </{match.group('tag')}> mis-close in {key}")
+
+    # 3. Content sent under a name we recognise but do not use.
+    for wrong, right in _OBS_ALIASES.items():
+        if wrong in args and not args.get(right):
+            args[right] = args.pop(wrong)
+            repairs.append(f"mapped {wrong} to {right}")
+
+    # 4. Inventions that map to nothing.
+    for junk in [k for k in _OBS_DROP if k in args]:
+        args.pop(junk)
+        repairs.append(f"dropped {junk}")
+
+    return args, repairs
+
+
+# ── Validation ─────────────────────────────────────────────────────────────────
+
+_OBS_ENUM = tuple(_TOOLS[0]["inputSchema"]["properties"]["type"]["enum"])
+
+# Rejection is reserved for content that is genuinely absent. Constraint
+# violations (short narrative, unknown type) are reported as warnings so a
+# terse-but-real observation is never thrown away.
+_OBS_HARD_REQUIRED = _OBS_NEVER_EMPTY
+
+# One rejection per distinct observation. The retry carries the same type and
+# title, so it maps to the same fingerprint and is always accepted - a second
+# failure stores a degraded row rather than losing it. Keyed on content rather
+# than on connection identity because MCP 2026-07-28 states that an open stdio
+# process is not a session.
+_OBS_REJECTED: set = set()
+_OBS_REJECT_BUDGET = 50  # process-wide backstop against a pathological loop
+
+
+def _obs_strict_enabled() -> bool:
+    """False when CLOUDBYTE_OBS_STRICT is switched off - salvage and warn only."""
+    return os.environ.get("CLOUDBYTE_OBS_STRICT", "1").strip().lower() not in ("0", "false", "no")
+
+
+def _obs_fingerprint(args: dict) -> str:
+    basis = json.dumps(
+        {"type": args.get("type"), "title": (args.get("title") or "").strip().lower()},
+        sort_keys=True, default=str,
+    )
+    return hashlib.sha256(basis.encode()).hexdigest()[:16]
+
+
+def _obs_hard_errors(args: dict) -> list:
+    """Fields that are absent or empty and cannot be recovered."""
+    return [f for f in _OBS_HARD_REQUIRED if not args.get(f)]
+
+
+def _obs_soft_warnings(args: dict) -> list:
+    """Contract violations worth telling the model about, but not worth a retry."""
+    warnings: list = []
+    obs_type = args.get("type")
+    if obs_type and obs_type not in _OBS_ENUM:
+        warnings.append(f"type {obs_type!r} is not one of {', '.join(_OBS_ENUM)}")
+    props = _TOOLS[0]["inputSchema"]["properties"]
+    for field in ("title", "subtitle", "narrative"):
+        value = args.get(field)
+        if not isinstance(value, str):
+            continue
+        low = props[field].get("minLength")
+        high = props[field].get("maxLength")
+        if low and len(value) < low:
+            warnings.append(f"{field} is {len(value)} chars, below the {low} minimum")
+        if high and len(value) > high:
+            warnings.append(f"{field} is {len(value)} chars, above the {high} maximum")
+    for field in ("facts", "concepts"):
+        value = args.get(field)
+        high = props[field].get("maxItems")
+        if isinstance(value, list) and high and len(value) > high:
+            warnings.append(f"{field} has {len(value)} entries, above the {high} maximum")
+    return warnings
+
+
+def _obs_rejection_text(missing: list, repairs: list) -> str:
+    """The corrective message the model reads before retrying.
+
+    Names the mechanism when we can see it. A model told which token to change
+    can correct; a model told only that a field is missing re-sends the same
+    broken framing.
+    """
+    lines = [
+        "Observation NOT recorded. Required field(s) arrived empty or absent: "
+        + ", ".join(missing) + "."
+    ]
+    if any("mis-close" in r for r in repairs):
+        lines.append(
+            "Cause: a parameter block was closed with a name-matched tag (for example "
+            "</narrative>) instead of the generic </parameter>, so the block after it was "
+            "swallowed. Close EVERY parameter with </parameter>."
+        )
+    lines.append("Resend the call once with those fields populated. All 8 fields are required.")
+    return " ".join(lines)
+
+
+def _supports_structured_output() -> bool:
+    """True when the negotiated revision understands structuredContent.
+
+    Introduced in 2025-06-18. Older clients would receive a field they do not
+    know, so it is withheld rather than sent speculatively.
+    """
+    return str(_NEGOTIATED_VERSION or "") >= "2025-06-18"
+
+
+def _obs_result(text: str, is_error: bool, recorded: bool,
+                title: str, warnings: list, repairs: list) -> dict:
+    """Build the tools/call result.
+
+    `content` carries the human/model-readable message on every revision.
+    `structuredContent` mirrors it as typed data for clients that support it,
+    matching the tool's declared outputSchema.
+    """
+    result: dict = {
+        "content": [{"type": "text", "text": text}],
+        "isError": is_error,
+    }
+    if _supports_structured_output():
+        result["structuredContent"] = {
+            "recorded": recorded,
+            "title": title,
+            "warnings": warnings,
+            "repairs": repairs,
+        }
+    return result
 
 
 # ── JSON-RPC transport ─────────────────────────────────────────────────────────
@@ -397,8 +685,10 @@ def _dispatch(req: dict) -> None:
     params = req.get("params", {})
 
     if method == "initialize":
+        global _NEGOTIATED_VERSION
         requested_version = params.get("protocolVersion")
         negotiated_version = _negotiate_protocol_version(requested_version)
+        _NEGOTIATED_VERSION = negotiated_version
         _log.info("Client connected - initialize received")
         _log.info(f"Client requested protocolVersion: {requested_version!r}")
         _log.info(f"Client capabilities: {json.dumps(params.get('capabilities', {}))}")
@@ -430,34 +720,89 @@ def _dispatch(req: dict) -> None:
         args = params.get("arguments", {})
 
         if name == "record_observation":
-            title = args.get("title", "observation")
             audit = _audit_obs_args(args)
-
             if "__unparsedToolInput" in audit["unknown"]:
                 _log.warning(
-                    f"OBS_UNPARSED record_observation: client could not parse the model's "
-                    f"tool input JSON - payload arrived wrapped in __unparsedToolInput and "
-                    f"this observation will be dropped downstream. title={title!r}"
+                    "OBS_UNPARSED record_observation: client could not parse the model's "
+                    "tool input JSON - attempting salvage from the raw payload."
                 )
             elif audit["missing"] or audit["unknown"]:
                 _log.warning(
-                    f"OBS_INCOMPLETE record_observation: title={title!r} "
+                    f"OBS_INCOMPLETE record_observation: "
+                    f"title={str(args.get('title', ''))[:60]!r} "
                     f"missing={audit['missing']} absent={audit['absent']} "
                     f"unknown={audit['unknown']} dropped_chars={audit['dropped_chars']}"
                 )
-            else:
-                _log.info(
-                    f"record_observation ok: title={title!r} "
-                    f"fields={len(_OBS_FIELDS) - len(audit['absent'])}/{len(_OBS_FIELDS)}"
-                )
 
-            _reply_ok(id_, {
-                "content": [{"type": "text", "text": f"Observation recorded: {title}."}],
-                "isError": False,
-            })
+            repaired, repairs = _salvage_obs_args(args)
+            title = repaired.get("title") or "observation"
+            missing = _obs_hard_errors(repaired)
+            warnings = _obs_soft_warnings(repaired)
+
+            if repairs:
+                _log.warning(f"OBS_SALVAGED record_observation: title={title[:60]!r} {repairs}")
+
+            fingerprint = _obs_fingerprint(repaired)
+            may_reject = (
+                bool(missing)
+                and _obs_strict_enabled()
+                and fingerprint not in _OBS_REJECTED
+                and len(_OBS_REJECTED) < _OBS_REJECT_BUDGET
+            )
+
+            if may_reject:
+                # Reject once per observation. The retry carries the same title,
+                # so it maps to this fingerprint and is accepted unconditionally -
+                # a second failure stores a degraded row rather than losing it.
+                _OBS_REJECTED.add(fingerprint)
+                _log.warning(
+                    f"OBS_REJECTED record_observation: title={title[:60]!r} "
+                    f"missing={missing} - asked the model to resend"
+                )
+                _reply_ok(id_, _obs_result(
+                    text=_obs_rejection_text(missing, repairs),
+                    is_error=True,
+                    recorded=False,
+                    title=title,
+                    warnings=[f"missing: {f}" for f in missing] + warnings,
+                    repairs=repairs,
+                ))
+            else:
+                notes = list(warnings)
+                if repairs:
+                    notes.append(
+                        "Your call was repaired before storing: " + "; ".join(repairs)
+                        + ". Close EVERY parameter with </parameter>, not a name-matched tag."
+                        if any("mis-close" in r for r in repairs)
+                        else "Your call was repaired before storing: " + "; ".join(repairs) + "."
+                    )
+                if missing:
+                    notes.append(
+                        "Stored with empty field(s): " + ", ".join(missing)
+                        + ". Populate all 8 fields on the next call."
+                    )
+                if not (missing or repairs):
+                    _log.info(
+                        f"record_observation ok: title={title[:60]!r} "
+                        f"fields={len(_OBS_FIELDS) - len(_audit_obs_args(repaired)['absent'])}"
+                        f"/{len(_OBS_FIELDS)}"
+                    )
+                text = f"Observation recorded: {title}."
+                if notes:
+                    text += " " + " ".join(notes)
+                _reply_ok(id_, _obs_result(
+                    text=text,
+                    is_error=False,
+                    recorded=True,
+                    title=title,
+                    warnings=notes,
+                    repairs=repairs,
+                ))
         else:
+            # The spec's tools page uses -32602 for an unknown tool; -32601
+            # stays correct for an unknown *method*, handled further down.
             _log.warning(f"Unknown tool called: {name}")
-            _reply_err(id_, -32601, f"Unknown tool: {name}")
+            _reply_err(id_, -32602, f"Unknown tool: {name}")
 
     elif method.startswith("notifications/"):
         _log.debug(f"notification received: {method}")

@@ -36,7 +36,8 @@ from src.common.file_io import read_json, write_json
 from src.handlers.session_start import handle_session_start, _ensure_mcp_permission
 from src.handlers.user_prompt import handle_user_prompt
 from src.handlers.session_end import handle_session_end
-from src.observations.writer import save_observation
+from src.observations.writer import save_observation, was_rejected
+from src.common.obs_salvage import salvage_obs_args
 import json as _json
 import glob as _glob
 from ftfy import fix_text as _fix_text
@@ -50,7 +51,7 @@ def _plugin_version() -> str:
     Read the plugin version from .claude-plugin/plugin.json.
 
     Sourced from the manifest rather than hardcoded because the two drifted before:
-    the default config said 0.1.36 while plugin.json said 0.1.40. One source of
+    the default config said 0.1.36 while plugin.json said 0.1.41. One source of
     truth means a version bump only has to happen in one place.
     """
     try:
@@ -486,7 +487,17 @@ def stop() -> None:
                         obs_data = _json.loads(raw_input) if isinstance(raw_input, str) else raw_input
                     except Exception:
                         obs_data = {}
+                    # Salvage before the title check: an __unparsedToolInput
+                    # payload has no title until it is unwrapped, and would
+                    # otherwise be discarded whole.
+                    obs_data, _ = salvage_obs_args(obs_data)
                     if not obs_data.get("title"):
+                        continue
+                    if was_rejected(tool):
+                        logger.info(
+                            "OBS_REJECTED stop hook skipped a draft the MCP server refused: "
+                            f"{str(obs_data.get('title', ''))[:60]!r}"
+                        )
                         continue
                     obs_id = save_observation(
                         session_id=session_id,

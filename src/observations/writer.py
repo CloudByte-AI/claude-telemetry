@@ -5,12 +5,14 @@ Saves extracted observations to the database.
 """
 
 import json
+import os
 import uuid
 from src.common.time_utils import get_now_ist_iso
 from typing import Any, Dict, List, Optional
 
 from src.db.manager import get_db_connection
 from src.common.logging import get_logger
+from src.common.obs_salvage import salvage_obs_args
 
 
 logger = get_logger(__name__)
@@ -56,6 +58,62 @@ def _log_obs_audit(prompt_id: str, obs_data: Dict[str, Any]) -> None:
     )
 
 
+def obs_gate_enabled() -> bool:
+    """True unless CLOUDBYTE_OBS_STRICT is switched off in this process.
+
+    Only consulted where a write path must decide something on its own (see
+    recovery pass1). It deliberately does NOT gate was_rejected - see there.
+    """
+    return os.environ.get("CLOUDBYTE_OBS_STRICT", "1").strip().lower() not in ("0", "false", "no")
+
+
+# Each client hands us the tool result under a different key, and wraps the flag
+# in a different case. Claude's ingest normalises to {"result", "is_error"};
+# Cursor passes the raw MCP envelope {"content": [...], "isError": bool} through
+# afterMCPExecution.result_json and postToolUse.tool_output.
+_RESULT_KEYS = ("output_json", "result_json", "tool_output")
+_ERROR_KEYS = ("is_error", "isError")
+
+
+def was_rejected(tool: Dict[str, Any]) -> bool:
+    """True when the MCP server refused this record_observation call.
+
+    The MCP server holds no database handle - it only answers the model. The row
+    is written later by whichever path re-reads the transcript or hook payload,
+    so a call the server rejected would still be persisted unless that path
+    skips it here. Without this gate, turning on rejection stores the rejected
+    draft *and* its corrected retry, because save_observation dedups on
+    content_hash and the two payloads differ.
+
+    Accepts any of the client result shapes. Returns False whenever no readable
+    error flag is present, so an absent, unparseable or unrecognised tool result
+    never costs an observation.
+
+    Deliberately NOT gated on CLOUDBYTE_OBS_STRICT. The kill switch belongs to
+    the MCP server, which is what decides to reject; with it off no call is ever
+    refused and this gate is inert anyway. Honouring it here would instead open
+    a footgun: hooks read env from the shell while the server reads it from
+    mcp.json, so the two can diverge, and a strict server paired with a lenient
+    writer stores the refused draft *and* its retry.
+    """
+    if not isinstance(tool, dict):
+        return False
+    for result_key in _RESULT_KEYS:
+        raw = tool.get(result_key)
+        if raw is None:
+            continue
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except (json.JSONDecodeError, ValueError):
+                continue
+        if isinstance(raw, dict):
+            for error_key in _ERROR_KEYS:
+                if error_key in raw:
+                    return bool(raw[error_key])
+    return False
+
+
 def _to_list(value: Any) -> list:
     """Normalize a value to a list - handles both native lists and JSON-encoded strings."""
     if isinstance(value, list):
@@ -88,6 +146,17 @@ def save_observation(
     """
     try:
         obs_id = str(uuid.uuid4())
+
+        # Repair before anything else, so every write path benefits and the
+        # audit reports what will actually be stored rather than what arrived.
+        # The MCP server salvages too, but a row can reach here from the JSONL
+        # transcript or a Cursor hook without ever passing back through it.
+        obs_data, repairs = salvage_obs_args(obs_data)
+        if repairs:
+            logger.warning(
+                f"OBS_SALVAGED save_observation: prompt_id={prompt_id} "
+                f"title={str(obs_data.get('title', ''))[:60]!r} {repairs}"
+            )
 
         _log_obs_audit(prompt_id, obs_data)
 
