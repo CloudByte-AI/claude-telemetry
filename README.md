@@ -140,16 +140,13 @@ Python is provisioned **through uv**, into uv's own data directory. It does not 
 
 ```powershell
 # Windows
-$env:CLOUDBYTE_SCRIPT = "uninstall.ps1"
-irm https://raw.githubusercontent.com/CloudByte-AI/claude-telemetry/main/scripts/bootstrap.ps1 | iex
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/CloudByte-AI/claude-telemetry/main/scripts/bootstrap.ps1))) -Script uninstall.ps1
 ```
 
 ```bash
 # macOS / Linux
 curl -fsSL https://raw.githubusercontent.com/CloudByte-AI/claude-telemetry/main/scripts/bootstrap.sh | bash -s -- --script uninstall.sh
 ```
-
-Or from a clone: `bash ./scripts/uninstall.sh` / `powershell -ExecutionPolicy Bypass -File .\scripts\uninstall.ps1`.
 
 Nothing is removed without being asked for, and both destructive answers - removing the marketplace entry and deleting `~/.cloudbyte` - default to **No**.
 
