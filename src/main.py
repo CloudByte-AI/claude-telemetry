@@ -153,8 +153,7 @@ def stop() -> None:
         from src.db.schema import migrate_schema
         from src.db.manager import get_db_connection
         from src.common.time_utils import get_now_ist_iso, to_ist
-        import uuid
-        MCP_OBS_TOOL = "mcp__plugin_claude-telemetry_cloudbyte__record_observation"
+        MCP_OBS_TOOL ="mcp__plugin_claude-telemetry_cloudbyte__record_observation"
 
         # Run migrations before writing - handles mid-session plugin updates
         try:
@@ -166,7 +165,10 @@ def stop() -> None:
         # Read hook data from stdin
         hook_data = {}
         try:
-            data = sys.stdin.read().strip()
+            # Decode UTF-8 explicitly - sys.stdin uses the locale codepage on
+            # Windows (cp1252), which corrupts any non-ASCII field in the
+            # payload (last_assistant_message in particular).
+            data = sys.stdin.buffer.read().decode("utf-8", errors="replace").strip()
             if data:
                 hook_data = json.loads(data)
                 logger.debug(f"Got hook data: {list(hook_data.keys())}")
@@ -249,6 +251,24 @@ def stop() -> None:
             except Exception as _te:
                 logger.warning(f"Could not update session titles: {_te}")
 
+        # ── Interrupt status for earlier turns in this session ───────────────
+        # A denied or cancelled turn fires no Stop of its own, so it can only be
+        # recorded by a later pass. Doing it here - on the events this hook has
+        # already read for tokens - costs no extra I/O and picks turn N up at
+        # turn N+1's Stop, instead of waiting for the recovery pass in
+        # user_prompt/session_end (the latter running inside a 1.5s budget that
+        # plugin-declared timeouts don't raise).
+        #
+        # Hooks can't supply this: a real denial capture showed PreToolUse and
+        # PermissionRequest and then silence, with no event stating the denial.
+        try:
+            from src.integrations.claude.prompt_status import detect_interrupt_status
+            _statuses = detect_interrupt_status(events)
+            if _statuses:
+                DatabaseWriter().apply_interrupt_statuses(_statuses)
+        except Exception as _se:
+            logger.warning(f"Interrupt status detection failed (non-fatal): {_se}")
+
         pairs = extract_prompt_response_pairs(events)
 
         # Filter out hook/system output (e.g., "● Ran X hooks", "⎿")
@@ -287,12 +307,6 @@ def stop() -> None:
         # Fix: iterate ALL pairs and skip any whose message_id is already in RESPONSE.
         # This processes every unwritten pair in one invocation, regardless of how
         # many future pairs the JSONL already contains when the hook reads it.
-        import re as _re
-        import time
-
-        def _norm(text: str) -> str:
-            return _re.sub(r'\s+', ' ', (text or '').strip().lower())
-
         # Convert ALL pairs to DB format once (per-pair filtering happens below)
         db_data = convert_pairs_to_db_format(pairs)
         db_data["user_prompts"] = []  # prompts are written by UserPromptSubmit hook
@@ -317,119 +331,68 @@ def stop() -> None:
             if cursor.fetchone():
                 continue
 
-            jsonl_prompt_id = current_pair["prompt_id"]
+            pair_prompt_id = current_pair["prompt_id"]
             prompt_text = _fix_text(current_pair.get("prompt", ""))
-            prompt_text_norm = _norm(prompt_text)
             logger.info(
-                f"Processing unwritten pair: prompt_id={jsonl_prompt_id}, "
+                f"Processing unwritten pair: prompt_id={pair_prompt_id}, "
                 f"msg={pair_message_id}, prompt=\"{prompt_text[:50]}\""
             )
 
-            # ── DB matching: find or create USER_PROMPT record ─────────────────
-            # Fetch recent unresponded prompts and compare in Python so both sides
-            # use identical whitespace normalization.
-            cursor.execute("""
-                SELECT p.prompt_id, p.prompt FROM USER_PROMPT p
-                LEFT JOIN RESPONSE r ON r.prompt_id = p.prompt_id
-                WHERE p.session_id = ? AND r.message_id IS NULL
-                ORDER BY p.timestamp DESC LIMIT 30
-            """, (session_id,))
-            candidates = cursor.fetchall()
+            # ── Link to the USER_PROMPT record ────────────────────────────────
+            # The transcript's promptId and the hook's prompt_id are the same
+            # UUID, and UserPromptSubmit already wrote the row under it. So the
+            # link is an identity, not a search - the three-pass text matcher
+            # (norm-exact, fuzzy substring, create-new) and its 10-attempt
+            # DB-lock retry loop that used to live here are gone.
+            db_prompt_id = pair_prompt_id
+            prompt_rec = current_pair.get("prompt_rec", {})
 
-            db_prompt_id = None
-            prompt_created = False
-
-            # Pass 1: normalized exact match
-            for cand_id, cand_text in candidates:
-                if _norm(cand_text) == prompt_text_norm:
-                    db_prompt_id = cand_id
-                    logger.info(f"Found DB prompt_id (norm-exact): {db_prompt_id} (JSONL: {jsonl_prompt_id})")
-                    break
-
-            # Pass 2: fuzzy substring match
-            if not db_prompt_id:
-                logger.info(f"Norm-exact not found for: \"{prompt_text[:50]}\", trying fuzzy match...")
-                for cand_id, cand_text in candidates:
-                    cand_norm = _norm(cand_text)
-                    if prompt_text_norm in cand_norm or cand_norm in prompt_text_norm:
-                        db_prompt_id = cand_id
-                        logger.info(f"Fuzzy match found: {db_prompt_id}")
-                        break
-
-            # Pass 3: create new record
-            if not db_prompt_id:
-                logger.warning(f"No DB match, creating new record for: \"{prompt_text[:50]}\"")
-                prompt_rec = current_pair.get("prompt_rec", {})
-                new_prompt_id = jsonl_prompt_id
-                max_retries = 10
-                retry_delay = 0.3
-
-                for attempt in range(max_retries):
-                    try:
-                        conn3 = get_db_connection()
-                        conn3.cursor().execute("""
-                            INSERT INTO USER_PROMPT (
-                                prompt_id, session_id, uuid, parent_uuid, prompt, timestamp,
-                                entrypoint, client_version, git_branch, mode,
-                                jsonl_prompt_id
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (
-                            new_prompt_id, session_id,
-                            prompt_rec.get("uuid", str(uuid.uuid4())),
-                            prompt_rec.get("parentUuid"),
-                            prompt_text,
-                            to_ist(prompt_rec.get("timestamp")),
-                            prompt_rec.get("entrypoint"),
-                            prompt_rec.get("version"),
-                            prompt_rec.get("gitBranch"),
-                            prompt_rec.get("permissionMode"),
-                            new_prompt_id,
-                        ))
-                        conn3.commit()
-                        break
-                    except Exception as e:
-                        if "database is locked" in str(e) and attempt < max_retries - 1:
-                            if attempt == 0:
-                                logger.warning(f"Database locked on prompt insert, retrying (up to {max_retries} attempts)")
-                            time.sleep(retry_delay)
-                            continue
-                        else:
-                            logger.error(f"Failed to insert prompt after {attempt + 1} attempts: {e}")
-                            break
-
-                db_prompt_id = new_prompt_id
-                prompt_created = True
-                logger.info(f"Created new prompt record: {db_prompt_id}")
-
-            # Store jsonl_prompt_id and metadata on the matched record
-            if not prompt_created:
-                try:
-                    prompt_rec = current_pair.get("prompt_rec", {})
-                    cursor.execute(
-                        """UPDATE USER_PROMPT
-                           SET jsonl_prompt_id = ?,
-                               timestamp = ?,
-                               parent_uuid = COALESCE(parent_uuid, ?),
-                               entrypoint = ?,
-                               client_version = ?,
-                               git_branch = ?,
-                               mode = ?
-                           WHERE prompt_id = ?""",
-                        (
-                            jsonl_prompt_id,
-                            to_ist(prompt_rec.get("timestamp")),
-                            prompt_rec.get("parentUuid"),
-                            prompt_rec.get("entrypoint"),
-                            prompt_rec.get("version"),
-                            prompt_rec.get("gitBranch"),
-                            prompt_rec.get("permissionMode"),
-                            db_prompt_id,
-                        ),
-                    )
-                    conn.commit()
-                    logger.info(f"Stored jsonl_prompt_id={jsonl_prompt_id} for prompt_id={db_prompt_id}")
-                except Exception as e:
-                    logger.warning(f"Could not store jsonl_prompt_id: {e}")
+            # Back-fill the fields only the transcript carries. INSERT OR IGNORE
+            # first so a turn whose UserPromptSubmit never landed (plugin
+            # installed mid-session, hook error) still gets a row to hang the
+            # response and tools off, instead of failing the FK.
+            try:
+                cursor.execute(
+                    """INSERT OR IGNORE INTO USER_PROMPT
+                       (prompt_id, session_id, prompt, timestamp)
+                       VALUES (?, ?, ?, ?)""",
+                    (db_prompt_id, session_id, prompt_text, to_ist(prompt_rec.get("timestamp"))),
+                )
+                # COALESCE on every metadata column: UserPromptSubmit already
+                # resolved entrypoint and client_version from the environment
+                # and git_branch from .git/HEAD. The transcript is now only a
+                # fallback for whatever came back empty - relevant because the
+                # two env vars are undocumented and could disappear.
+                #
+                # timestamp is COALESCE'd for the same reason plus one of its
+                # own. Measured on a real turn, the hook fires at the same
+                # second the transcript records (12:26:34 both), so overwriting
+                # only rewrote an identical value - but to_ist(None) returns
+                # *now*, so a transcript record that ever arrived without a
+                # timestamp would have replaced the submit time with the Stop
+                # time, i.e. wrong by the length of the turn. Keeping hook time
+                # also makes the column consistent: an interrupted turn fires no
+                # Stop, so those rows only ever had hook time anyway.
+                cursor.execute(
+                    """UPDATE USER_PROMPT
+                       SET timestamp      = COALESCE(timestamp, ?),
+                           entrypoint     = COALESCE(entrypoint, ?),
+                           client_version = COALESCE(client_version, ?),
+                           git_branch     = COALESCE(git_branch, ?),
+                           mode           = COALESCE(mode, ?)
+                       WHERE prompt_id = ?""",
+                    (
+                        to_ist(prompt_rec.get("timestamp")),
+                        prompt_rec.get("entrypoint"),
+                        prompt_rec.get("version"),
+                        prompt_rec.get("gitBranch"),
+                        prompt_rec.get("permissionMode"),
+                        db_prompt_id,
+                    ),
+                )
+                conn.commit()
+            except Exception as e:
+                logger.warning(f"Could not back-fill transcript metadata for {db_prompt_id}: {e}")
 
             effective_prompt_id = db_prompt_id
             last_processed_pair = current_pair
@@ -439,26 +402,26 @@ def stop() -> None:
             pair_counts = {"responses": 0, "tools": 0, "thinking": 0, "io_tokens": 0, "tool_tokens": 0}
 
             for response in db_data.get("responses", []):
-                if response["prompt_id"] == jsonl_prompt_id:
+                if response["prompt_id"] == pair_prompt_id:
                     if writer.write_response({**response, "prompt_id": effective_prompt_id}):
                         pair_counts["responses"] += 1
                         total_counts["responses"] += 1
 
             for tool in db_data.get("tools", []):
-                if tool["prompt_id"] == jsonl_prompt_id:
+                if tool["prompt_id"] == pair_prompt_id:
                     if writer.write_tool({**tool, "prompt_id": effective_prompt_id}):
                         if tool.get("tool_name") != MCP_OBS_TOOL:
                             pair_counts["tools"] += 1
                             total_counts["tools"] += 1
 
             for thinking in db_data.get("thinking", []):
-                if thinking["prompt_id"] == jsonl_prompt_id:
+                if thinking["prompt_id"] == pair_prompt_id:
                     if writer.write_thinking({**thinking, "prompt_id": effective_prompt_id}):
                         pair_counts["thinking"] += 1
                         total_counts["thinking"] += 1
 
             for io_tokens in db_data.get("io_tokens", []):
-                if io_tokens["prompt_id"] == jsonl_prompt_id:
+                if io_tokens["prompt_id"] == pair_prompt_id:
                     if writer.write_io_tokens({**io_tokens, "prompt_id": effective_prompt_id}):
                         pair_counts["io_tokens"] += 1
                         total_counts["io_tokens"] += 1
@@ -466,19 +429,19 @@ def stop() -> None:
             for tool_tokens in db_data.get("tool_tokens", []):
                 tool_id = tool_tokens["tool_id"]
                 for tool in db_data.get("tools", []):
-                    if tool["tool_id"] == tool_id and tool["prompt_id"] == jsonl_prompt_id:
+                    if tool["tool_id"] == tool_id and tool["prompt_id"] == pair_prompt_id:
                         if writer.write_tool_tokens(tool_tokens):
                             pair_counts["tool_tokens"] += 1
                             total_counts["tool_tokens"] += 1
                         break
 
-            logger.info(f"Pair {jsonl_prompt_id[:8]} stored: {pair_counts}")
+            logger.info(f"Pair {pair_prompt_id[:8]} stored: {pair_counts}")
 
             # ── Save MCP record_observation calls to HOOK_OBSERVATION ─────────
             logger.debug("Observation capture handled by MCP tool (record_observation)")
             try:
                 for tool in db_data.get("tools", []):
-                    if tool["prompt_id"] != jsonl_prompt_id:
+                    if tool["prompt_id"] != pair_prompt_id:
                         continue
                     if tool.get("tool_name") != MCP_OBS_TOOL:
                         continue

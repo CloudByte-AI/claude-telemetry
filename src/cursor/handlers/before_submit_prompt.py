@@ -16,7 +16,11 @@ Field mapping:
   client_version <- cursor_version
   mode           <- composer_mode (agent/ask/edit - Cursor's closest
                      equivalent to Claude Code's permission_mode)
-  git_branch     <- self-derived via `git rev-parse --abbrev-ref HEAD`
+  git_branch     <- self-derived by src.common.git_utils.get_git_branch, shared
+                    with the Claude Code path. Reads .git/HEAD rather than
+                    shelling out to `git rev-parse --abbrev-ref HEAD` as this
+                    used to: ~0.4ms against ~26ms, and a detached HEAD yields
+                    the short sha instead of the literal string "HEAD".
                      against workspace_roots[0] - no hook gives this
   entrypoint     <- hardcoded "cursor-ide"
   timestamp      <- stamped locally
@@ -34,8 +38,8 @@ Security scanning:
 """
 
 import json
-import subprocess
 
+from src.common.git_utils import get_git_branch
 from src.common.logging import get_logger, setup_logging
 from src.common.time_utils import get_now_ist_iso
 from src.cursor.utils import obs_state
@@ -48,25 +52,6 @@ from src.db.writers import DatabaseWriter
 logger = get_logger(__name__)
 
 CURSOR_ENTRYPOINT = "cursor-ide"
-
-
-def _get_git_branch(cwd: str | None) -> str | None:
-    """Best-effort current git branch for cwd. Returns None on any failure."""
-    if not cwd:
-        return None
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=3,
-        )
-        branch = result.stdout.strip()
-        return branch if result.returncode == 0 and branch else None
-    except Exception as e:
-        debug(f"git branch lookup failed for {cwd}: {e}")
-        return None
 
 
 def _build_block_user_message(findings: list, masked_text: str, scan_result) -> str:
@@ -271,7 +256,7 @@ def handle_before_submit_prompt() -> None:
             "client_version": hook_data.get("cursor_version"),
             "attachments": json.dumps(attachments) if attachments is not None else None,
             "mode": hook_data.get("composer_mode"),
-            "git_branch": _get_git_branch(cwd),
+            "git_branch": get_git_branch(cwd),
             "entrypoint": CURSOR_ENTRYPOINT,
         })
 

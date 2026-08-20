@@ -32,11 +32,16 @@ def read_stdin_data() -> dict:
         dict: Parsed hook data
     """
     try:
-        data = sys.stdin.read().strip()
+        # Decode UTF-8 explicitly - sys.stdin uses the locale codepage on
+        # Windows (cp1252), which corrupts any non-ASCII field in the payload.
+        raw = sys.stdin.buffer.read()
+        data = raw.decode("utf-8", errors="replace").strip()
         if data:
             return json.loads(data)
     except json.JSONDecodeError as e:
         logger.error(f"Error parsing stdin JSON: {e}")
+    except Exception as e:
+        logger.error(f"Error reading stdin: {e}")
 
     return {}
 

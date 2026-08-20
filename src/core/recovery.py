@@ -16,7 +16,6 @@ Two recovery passes:
 """
 
 import json
-import re as _re
 import uuid as _uuid_mod
 from ftfy import fix_text as _fix_text
 
@@ -27,6 +26,10 @@ from src.db.writers import DatabaseWriter
 from src.integrations.claude.prompt_response import (
     convert_pairs_to_db_format,
     extract_prompt_response_pairs,
+)
+from src.integrations.claude.prompt_status import (
+    INTERRUPT_TEXTS,
+    detect_interrupt_status,
 )
 from src.integrations.claude.reader import (
     get_claude_dir,
@@ -41,44 +44,9 @@ logger = get_logger(__name__)
 
 MCP_OBS_TOOL = "mcp__plugin_claude-telemetry_cloudbyte__record_observation"
 
-# Maps interrupt text → status value stored in USER_PROMPT
-INTERRUPT_TEXT_TO_REASON = {
-    "[Request interrupted by user for tool use]": "tool_use",
-    "[Request interrupted by user]": "request",
-}
-INTERRUPT_TEXTS = frozenset(INTERRUPT_TEXT_TO_REASON)
-
-
 # ---------------------------------------------------------------------------
 # JSONL helpers
 # ---------------------------------------------------------------------------
-
-def _find_interrupted_prompt_ids(events: list) -> dict:
-    """
-    Return {promptId: status} for all interrupted turns.
-
-    status values:
-      'tool_use' - user denied a tool call
-      'request'  - user hit ESC / cancelled the entire request
-    """
-    result = {}
-    for event in events:
-        if event.get("type") != "user":
-            continue
-        pid = event.get("promptId")
-        if not pid:
-            continue
-        # Detect from synthetic text in message content
-        for item in (event.get("message", {}).get("content", []) or []):
-            if isinstance(item, dict) and item.get("type") == "text":
-                reason = INTERRUPT_TEXT_TO_REASON.get(item.get("text", ""))
-                if reason:
-                    result[pid] = reason
-        # Also detect from top-level toolUseResult (tool_use denial)
-        if event.get("toolUseResult") == "User rejected tool use":
-            result[pid] = "tool_use"
-    return result
-
 
 def _get_user_prompt_event(events: list, prompt_id: str):
     """
@@ -218,10 +186,6 @@ def _find_tool_is_error(events: list, tool_use_id: str) -> bool:
 # DB helpers
 # ---------------------------------------------------------------------------
 
-def _norm(text: str) -> str:
-    return _re.sub(r"\s+", " ", (text or "").strip().lower())
-
-
 def _find_or_create_db_prompt(
     session_id: str,
     jsonl_prompt_id: str,
@@ -231,105 +195,51 @@ def _find_or_create_db_prompt(
     status: str = None,
 ) -> str:
     """
-    Find an existing USER_PROMPT record by text match (3 passes), or create one.
-    Returns the db_prompt_id to use for all child records.
+    Ensure a USER_PROMPT row exists for this promptId and return its id.
+
+    The transcript's promptId is the same UUID the UserPromptSubmit hook wrote
+    the row under, so there is nothing to search for - this used to run the same
+    three-pass text matcher as stop() (norm-exact, fuzzy substring with a
+    20-char guard, create-new) purely to rediscover a link we are now handed.
+
+    The row is normally already present; INSERT OR IGNORE covers the interrupted
+    turn where it isn't, then the UPDATE back-fills the transcript-only fields
+    without clobbering anything the hook already knew.
     """
     cursor = conn.cursor()
-    prompt_text_norm = _norm(prompt_text)
+    db_prompt_id = jsonl_prompt_id
 
-    cursor.execute(
-        """
-        SELECT p.prompt_id, p.prompt FROM USER_PROMPT p
-        LEFT JOIN RESPONSE r ON r.prompt_id = p.prompt_id
-        WHERE p.session_id = ? AND r.message_id IS NULL
-        ORDER BY p.timestamp DESC LIMIT 30
-        """,
-        (session_id,),
-    )
-    candidates = cursor.fetchall()
-
-    db_prompt_id = None
-
-    # Pass 1 - normalized exact
-    for cid, ctxt in candidates:
-        if _norm(ctxt) == prompt_text_norm:
-            db_prompt_id = cid
-            break
-
-    # Pass 2 - fuzzy substring
-    # Minimum-length guard prevents short prompts ("ok", "yes", etc.) from
-    # false-matching any longer candidate and attaching records to the wrong
-    # prompt (Bug #3).
-    if not db_prompt_id:
-        for cid, ctxt in candidates:
-            cn = _norm(ctxt)
-            if len(prompt_text_norm) > 20 and len(cn) > 20:
-                if prompt_text_norm in cn or cn in prompt_text_norm:
-                    db_prompt_id = cid
-                    break
-
-    # Pass 3 - create new record
-    if not db_prompt_id:
-        new_id = jsonl_prompt_id
-        try:
-            conn2 = get_db_connection()
-            conn2.cursor().execute(
-                """
-                INSERT INTO USER_PROMPT (
-                    prompt_id, session_id, uuid, parent_uuid, prompt, timestamp,
-                    entrypoint, client_version, git_branch, mode,
-                    jsonl_prompt_id, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    new_id, session_id,
-                    prompt_event.get("uuid", str(_uuid_mod.uuid4())),
-                    prompt_event.get("parentUuid"),
-                    prompt_text,
-                    to_ist(prompt_event.get("timestamp")),
-                    prompt_event.get("entrypoint"),
-                    prompt_event.get("version"),
-                    prompt_event.get("gitBranch"),
-                    prompt_event.get("permissionMode"),
-                    new_id,
-                    status,
-                ),
-            )
-            conn2.commit()
-            db_prompt_id = new_id
-            logger.info(f"recovery: created prompt record {db_prompt_id}")
-        except Exception as exc:
-            logger.error(f"recovery: failed to insert prompt: {exc}")
-            db_prompt_id = jsonl_prompt_id  # best effort
-    else:
-        # Update jsonl_prompt_id + status + metadata on matched record
-        try:
-            cursor.execute(
-                """
-                UPDATE USER_PROMPT
-                SET jsonl_prompt_id  = ?,
-                    status           = COALESCE(status, ?),
-                    parent_uuid      = COALESCE(parent_uuid, ?),
-                    entrypoint       = COALESCE(entrypoint, ?),
-                    client_version   = COALESCE(client_version, ?),
-                    git_branch       = COALESCE(git_branch, ?),
-                    mode             = COALESCE(mode, ?)
-                WHERE prompt_id = ?
-                """,
-                (
-                    jsonl_prompt_id,
-                    status,
-                    prompt_event.get("parentUuid"),
-                    prompt_event.get("entrypoint"),
-                    prompt_event.get("version"),
-                    prompt_event.get("gitBranch"),
-                    prompt_event.get("permissionMode"),
-                    db_prompt_id,
-                ),
-            )
-            conn.commit()
-        except Exception as exc:
-            logger.warning(f"recovery: could not update jsonl_prompt_id: {exc}")
+    try:
+        cursor.execute(
+            """
+            INSERT OR IGNORE INTO USER_PROMPT
+                (prompt_id, session_id, prompt, timestamp)
+            VALUES (?, ?, ?, ?)
+            """,
+            (db_prompt_id, session_id, prompt_text, to_ist(prompt_event.get("timestamp"))),
+        )
+        cursor.execute(
+            """
+            UPDATE USER_PROMPT
+            SET status         = COALESCE(status, ?),
+                entrypoint     = COALESCE(entrypoint, ?),
+                client_version = COALESCE(client_version, ?),
+                git_branch     = COALESCE(git_branch, ?),
+                mode           = COALESCE(mode, ?)
+            WHERE prompt_id = ?
+            """,
+            (
+                status,
+                prompt_event.get("entrypoint"),
+                prompt_event.get("version"),
+                prompt_event.get("gitBranch"),
+                prompt_event.get("permissionMode"),
+                db_prompt_id,
+            ),
+        )
+        conn.commit()
+    except Exception as exc:
+        logger.warning(f"recovery: could not upsert prompt {db_prompt_id}: {exc}")
 
     return db_prompt_id
 
@@ -542,7 +452,7 @@ def process_missed_pairs(session_id: str, cwd: str) -> dict:
         writer = DatabaseWriter()
 
         # ── Pass 1: interrupt-based recovery ──────────────────────────────────
-        interrupted_ids = _find_interrupted_prompt_ids(events)  # {prompt_id: reason}
+        interrupted_ids = detect_interrupt_status(events)  # {prompt_id: reason}
         for prompt_id, reason in interrupted_ids.items():
             if _recover_interrupted_prompt(session_id, prompt_id, reason, events, conn, writer):
                 counts["pass1"] += 1

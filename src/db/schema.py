@@ -110,9 +110,23 @@ def create_tables(conn: sqlite3.Connection) -> None:
     """)
 
     # ---------------- USER_PROMPT ----------------
-    # prompt_id      : stable auto-gen UUID - URL key, never changes (Claude Code);
-    #                  Cursor uses the hook's generation_id directly instead
-    # jsonl_prompt_id: real ID from Claude Code JSONL - stored by stop() hook
+    # prompt_id      : the turn's real ID, taken straight from the hook payload -
+    #                  Claude Code's UserPromptSubmit `prompt_id` (same UUID that
+    #                  reappears on PreToolUse/PostToolUse/Stop for the same turn,
+    #                  and the same value the transcript calls `promptId`), or
+    #                  Cursor's `generation_id`. Never generated locally.
+    #
+    #                  This used to be a locally generated UUID, which forced
+    #                  stop() to reverse-match the transcript's promptId back onto
+    #                  the row by fuzzy prompt-text comparison and stash the result
+    #                  in a second column, jsonl_prompt_id. Both the matcher and
+    #                  that column are gone - the hook hands us the real id up
+    #                  front, so the link is exact instead of inferred.
+    #
+    #                  uuid/parent_uuid (the transcript record's own identifiers)
+    #                  went with them: they existed only to walk the parentUuid
+    #                  chain back to a promptId, which is exactly the work the hook
+    #                  now does for us. Nothing in the app layer ever read them.
     # entrypoint     : client used for this prompt (claude-vscode, claude-terminal, etc.)
     # client_version : app version at time of prompt - Claude Code version or Cursor version,
     #                  shared column across both clients (renamed from claude_version)
@@ -131,11 +145,8 @@ def create_tables(conn: sqlite3.Connection) -> None:
     CREATE TABLE IF NOT EXISTS USER_PROMPT (
         prompt_id TEXT PRIMARY KEY,
         session_id TEXT,
-        uuid TEXT,
-        parent_uuid TEXT,
         prompt TEXT,
         timestamp DATETIME,
-        jsonl_prompt_id TEXT,
         entrypoint TEXT,
         client_version TEXT,
         git_branch TEXT,
@@ -275,7 +286,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
 # DatabaseManager.ensure_schema_initialized() is the single choke point
 # that compares this against the stored value on every process's first
 # connection and re-runs migrate_schema() only when behind.
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
 
 def get_schema_version(conn: sqlite3.Connection) -> int:
@@ -323,10 +334,10 @@ def migrate_schema(conn: sqlite3.Connection) -> list:
     cursor.execute("PRAGMA table_info(USER_PROMPT)")
     columns = [row[1] for row in cursor.fetchall()]
 
-    if "jsonl_prompt_id" not in columns:
-        _safe_alter(cursor, "ALTER TABLE USER_PROMPT ADD COLUMN jsonl_prompt_id TEXT",
-                    "Migration: added jsonl_prompt_id column to USER_PROMPT", changes,
-                    {"table": "USER_PROMPT", "action": "add_column", "column": "jsonl_prompt_id"})
+    # NOTE: there is deliberately no "add jsonl_prompt_id" step here any more.
+    # v3 below drops that column, and migrate_schema() runs top-to-bottom on
+    # every invocation - an add step here would re-create the column moments
+    # before the drop step removed it again, on every single hook call.
     if "entrypoint" not in columns:
         _safe_alter(cursor, "ALTER TABLE USER_PROMPT ADD COLUMN entrypoint TEXT",
                     "Migration: added entrypoint column to USER_PROMPT", changes,
@@ -487,6 +498,40 @@ def migrate_schema(conn: sqlite3.Connection) -> list:
             {"table": _legacy, "action": "drop_table"},
         )
 
+    # ── v3: USER_PROMPT identity now comes from the hook ─────────────────────
+    # prompt_id is the hook's own prompt_id (Claude Code) / generation_id
+    # (Cursor), so the three columns that existed purely to re-derive that link
+    # from the transcript are dead:
+    #
+    #   jsonl_prompt_id - the transcript promptId, reverse-matched onto the row
+    #                     by stop(). Now identical to prompt_id by construction.
+    #   uuid            - the transcript record's own id, only ever used as the
+    #                     starting point for a parentUuid walk to find promptId.
+    #   parent_uuid     - the walk itself. routers/db.py:11 already documents
+    #                     this chain as broken (most parents point at assistant
+    #                     wrapper blocks that are stored in no table).
+    #
+    # Verified before dropping: no query, route, service, template or test reads
+    # any of the three. Every app-layer join goes through prompt_id.
+    #
+    # The index has to go first - SQLite refuses to drop an indexed column.
+    # Re-reads table_info because the ALTERs above may have changed it.
+    cursor.execute("PRAGMA table_info(USER_PROMPT)")
+    up_cols_now = [row[1] for row in cursor.fetchall()]
+
+    if "jsonl_prompt_id" in up_cols_now:
+        cursor.execute("DROP INDEX IF EXISTS idx_prompt_jsonl_id")
+
+    for _dead_col in ("jsonl_prompt_id", "uuid", "parent_uuid"):
+        if _dead_col in up_cols_now:
+            _safe_alter(
+                cursor,
+                f"ALTER TABLE USER_PROMPT DROP COLUMN {_dead_col}",
+                f"Migration: dropped USER_PROMPT.{_dead_col} (superseded by hook prompt_id)",
+                changes,
+                {"table": "USER_PROMPT", "action": "drop_column", "column": _dead_col},
+            )
+
     conn.commit()
     return changes
 
@@ -520,7 +565,10 @@ def create_indexes(conn: sqlite3.Connection) -> None:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_io_message ON IO_TOKENS(message_id);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_tool_tokens_tool ON TOOL_TOKENS(tool_id);")
 
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_prompt_jsonl_id ON USER_PROMPT(jsonl_prompt_id);")
+    # idx_prompt_jsonl_id is gone with the jsonl_prompt_id column (schema v3).
+    # Do not re-add an index here for a column migrate_schema() drops - this
+    # function runs immediately after it and would raise "no such column",
+    # aborting before set_schema_version() and leaving the DB migrating forever.
 
     conn.commit()
     logger.info("Database indexes created successfully")

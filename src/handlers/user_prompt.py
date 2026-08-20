@@ -5,10 +5,16 @@ Called when the user submits a prompt.
 Stores the prompt in the USER_PROMPT and RAW_LOG tables.
 Also reminds Claude to emit obs blocks in its response.
 
-prompt_id is always a generated UUID at insert time.
-The stop hook reads from JSONL and updates jsonl_prompt_id on the stored record.
-Prompts containing non-ASCII characters (emojis, special symbols) are deferred
-entirely to the stop hook to avoid text representation mismatches.
+prompt_id comes straight from the hook payload and is used as the USER_PROMPT
+primary key. Claude Code puts the same UUID on PreToolUse, PostToolUse and Stop
+for this turn, so every downstream row links by exact id.
+
+Two things this replaced:
+  - the generated-UUID + fuzzy-text reverse match in stop(), and
+  - the special-character deferral, which skipped the insert for any prompt
+    containing non-ASCII text because the hook's text and the transcript's text
+    had to be string-compared to find each other. Nothing compares text any
+    more, so the hook's text is simply authoritative.
 """
 
 import json
@@ -21,11 +27,13 @@ from ftfy import fix_text
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from src.common.git_utils import get_git_branch
 from src.common.logging import get_logger, setup_logging
 from src.common.obs_instructions import CLAUDE_OBS_REMINDER
 from src.common.paths import get_claude_logs_dir
 from src.common.time_utils import get_now_ist_iso
 from src.core.event_processor import process_user_prompt
+from src.integrations.claude.env import get_client_version, get_entrypoint
 
 
 logger = get_logger(__name__)
@@ -206,11 +214,6 @@ def filter_system_messages(content: str) -> str:
     return content.strip()
 
 
-def _has_special_chars(text: str) -> bool:
-    """Return True if text contains emojis or non-ASCII special characters."""
-    return any(ord(c) > 127 for c in text)
-
-
 def extract_user_text_from_hook_data(hook_data: dict) -> str:
     """
     Extract the user's actual text from hook data.
@@ -253,17 +256,29 @@ def read_stdin_data() -> dict:
     """
     Read hook data from stdin (JSON).
 
-    Claude Code passes hook data via stdin.
+    Reads the raw bytes and decodes UTF-8 explicitly rather than using
+    sys.stdin.read(). Claude Code always writes UTF-8, but sys.stdin on Windows
+    decodes using the locale codepage - cp1252 here - so any prompt containing
+    an emoji, an em-dash or a non-Latin character either raised
+    UnicodeDecodeError or silently produced mojibake, and json.loads then failed
+    and returned {}. That is the bug the old "defer prompts with special
+    characters to the stop hook" branch was working around.
+
+    errors="replace" keeps a partially-undecodable payload parseable instead of
+    losing the whole hook invocation.
 
     Returns:
         dict: Parsed hook data, or {} on error
     """
     try:
-        data = sys.stdin.read().strip()
+        raw = sys.stdin.buffer.read()
+        data = raw.decode("utf-8", errors="replace").strip()
         if data:
             return json.loads(data)
     except json.JSONDecodeError as e:
         logger.error(f"Error parsing stdin JSON: {e}")
+    except Exception as e:
+        logger.error(f"Error reading stdin: {e}")
 
     return {}
 
@@ -281,14 +296,13 @@ def handle_user_prompt():
         "session_id"      : "uuid",
         "transcript_path" : "/path/to/session.jsonl",
         "cwd"             : "/path/to/project",
-        "message"         : {
-            "content": [{"type": "text", "text": "user prompt here"}]
-        }
+        "prompt_id"       : "b47ca807-f863-4e3e-b143-7251ede274d4",
+        "permission_mode" : "default",
+        "prompt"          : "user prompt here"
     }
 
-    NOTE: promptId and parentUuid are NOT present in hook stdin - they are
-    read from the transcript file (with retry logic to avoid the race condition
-    where the hook fires before Claude writes the entry to the JSONL).
+    prompt_id and permission_mode are read directly off this payload - no
+    transcript read, no retry loop, no reverse matching.
     """
     setup_logging(log_to_file=True, log_to_console=False, log_dir=get_claude_logs_dir())
     logger.info("=== UserPromptSubmit Handler ===")
@@ -313,6 +327,7 @@ def handle_user_prompt():
                     f"  {key}: (length={len(value)}, preview={value[:100]})"
                 )
 
+
         # ── Basic fields available directly in hook stdin ────────────────────
         session_id = (
             hook_data.get("session_id")
@@ -325,8 +340,20 @@ def handle_user_prompt():
             or os.environ.get("PWD")
             or os.environ.get("cwd")
         )
-        event_uuid = hook_data.get("uuid") or hook_data.get("id")
         event_timestamp = hook_data.get("timestamp") or hook_data.get("time")
+
+        # The turn's real id and permission mode, straight off the hook payload.
+        prompt_id = hook_data.get("prompt_id")
+        mode = hook_data.get("permission_mode")
+
+        # Three fields no hook payload carries. Sourced without touching the
+        # transcript: entrypoint and version from the environment Claude Code
+        # gives the hook process, branch from .git/HEAD under cwd. All three are
+        # best-effort and return None on any problem - stop() still back-fills
+        # from the transcript for whatever comes back empty.
+        entrypoint = get_entrypoint()
+        client_version = get_client_version()
+        git_branch = get_git_branch(cwd)
 
         # ── Heartbeat this session in the shared active-session registry ─────
         # Uses register() (not a separate "touch if exists" call) so a session
@@ -469,21 +496,19 @@ def handle_user_prompt():
             # Scan failure must never block the user - log and continue
             logger.warning(f"Security scan error (non-fatal, prompt proceeding): {_sec_err}")
 
-        # ── Defer prompts with emojis / special characters ───────────────────
-        # Hook text and JSONL canonical text can differ when non-ASCII chars are
-        # present (different unicode normalisation, ftfy transforms, etc.).
-        # Skip the DB insert here; the stop hook reads directly from JSONL and
-        # will insert the prompt once with the correct promptId.
-        if _has_special_chars(prompt_text):
-            logger.info(
-                f"Prompt contains non-ASCII/emoji characters - deferring DB insert to stop hook "
-                f"(length={len(prompt_text)}, preview={prompt_text[:50]!r})"
+        # ── Store prompt in DB ───────────────────────────────────────────────
+        # No prompt_id means a Claude Code build older than v2.1.196, which is
+        # the version that added the field. Writing the row anyway would mean
+        # minting a local id that nothing downstream can link to, so skip the
+        # write and say why - rather than silently producing orphan rows.
+        if not prompt_id:
+            logger.error(
+                "UserPromptSubmit payload carried no prompt_id - skipping USER_PROMPT write. "
+                "This field requires Claude Code v2.1.196 or later."
             )
-            if session_id and cwd:
-                ensure_session_initialized(session_id, cwd)
             print(json.dumps({
-                "status": "deferred",
-                "prompt_id": None,
+                "status": "error",
+                "message": "No prompt_id in hook payload (requires Claude Code v2.1.196+)",
                 "hookSpecificOutput": {
                     "hookEventName": "UserPromptSubmit",
                     "additionalContext": OBS_REMINDER,
@@ -491,15 +516,10 @@ def handle_user_prompt():
             }))
             return
 
-        # prompt_id is always None here - a UUID is generated by process_user_prompt.
-        # The stop hook reads from JSONL and updates jsonl_prompt_id on the stored record.
-        prompt_id = None
-        parent_uuid = None
-        
-        # ── Store prompt in DB ───────────────────────────────────────────────
         logger.info(
             f"Storing prompt: session_id={session_id}, "
-            f"prompt_id={prompt_id}, parent_uuid={parent_uuid}, "
+            f"prompt_id={prompt_id}, mode={mode}, entrypoint={entrypoint}, "
+            f"client_version={client_version}, git_branch={git_branch}, "
             f"length={len(prompt_text)}"
         )
 
@@ -507,8 +527,10 @@ def handle_user_prompt():
             prompt=prompt_text,
             session_id=session_id,
             prompt_id=prompt_id,
-            parent_uuid=parent_uuid,      # FIX 2: now actually populated
-            event_uuid=event_uuid,
+            mode=mode,
+            entrypoint=entrypoint,
+            client_version=client_version,
+            git_branch=git_branch,
             event_timestamp=event_timestamp,
             cwd=cwd,
         )

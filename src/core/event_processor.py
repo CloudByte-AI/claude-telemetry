@@ -126,50 +126,67 @@ class EventProcessor:
         self,
         prompt: str,
         session_id: str,
-        prompt_id: Optional[str] = None,
-        parent_uuid: Optional[str] = None,
-        event_uuid: Optional[str] = None,
+        prompt_id: str,
+        mode: Optional[str] = None,
+        entrypoint: Optional[str] = None,
+        client_version: Optional[str] = None,
+        git_branch: Optional[str] = None,
         event_timestamp: Optional[str] = None,
         cwd: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Process a user prompt event.
 
+        prompt_id is required and must be the hook's own `prompt_id` - the same
+        UUID Claude Code puts on PreToolUse/PostToolUse/Stop for this turn. It is
+        never generated here: a locally minted id is precisely what forced stop()
+        to fuzzy-match prompt text against the transcript to recover the real one.
+
         Args:
             prompt: The user's prompt text (already filtered)
             session_id: Session UUID
-            prompt_id: Optional prompt ID
-            parent_uuid: Optional parent UUID
-            event_uuid: Original event UUID from JSONL (if available)
-            event_timestamp: Original event timestamp from JSONL (if available)
+            prompt_id: The hook's prompt_id for this turn (required)
+            mode: Permission mode from the hook (default/plan/acceptEdits/...)
+            entrypoint: Launch mode from $CLAUDE_CODE_ENTRYPOINT (cli, claude-vscode)
+            client_version: Claude Code version parsed from $AI_AGENT
+            git_branch: Current branch derived from .git/HEAD under cwd
+            event_timestamp: Original event timestamp (if available)
             cwd: Optional current working directory
 
         Returns:
             Dict with processed data
         """
         import uuid
-        from datetime import datetime
 
         logger.debug(f"Processing user prompt for session: {session_id}")
 
+        if not prompt_id:
+            logger.error("process_user_prompt called without a prompt_id - refusing to write")
+            return {"prompt_id": None, "status": "error"}
+
         prompt_data = {
-            "prompt_id": prompt_id or str(uuid.uuid4()),
+            "prompt_id": prompt_id,
             "session_id": session_id,
-            "uuid": event_uuid or str(uuid.uuid4()),  # Use original if available
-            "parent_uuid": parent_uuid,
             "prompt": prompt,
+            "mode": mode,
+            "entrypoint": entrypoint,
+            "client_version": client_version,
+            "git_branch": git_branch,
             "cwd": cwd,  # Pass cwd for project/session creation if needed
-            "timestamp": to_ist(event_timestamp),  # Use original if available, will fallback to IST now if None
+            "timestamp": to_ist(event_timestamp),  # Falls back to IST now if None
         }
 
         success = self.db_writer.write_user_prompt(prompt_data)
 
-        # Also store as raw log
+        # Also store as raw log.
+        # uuid/parent_uuid are the transcript record's identifiers, which the
+        # hook payload does not carry - left NULL rather than inventing a value
+        # that links to nothing.
         raw_log = {
             "id": str(uuid.uuid4()),
             "session_id": session_id,
-            "uuid": prompt_data["uuid"],
-            "parent_uuid": parent_uuid,
+            "uuid": None,
+            "parent_uuid": None,
             "type": "user",
             "raw_json": f'{{"type": "user", "prompt": "{prompt[:100]}..."}}',
             "timestamp": prompt_data["timestamp"],
@@ -197,12 +214,18 @@ def process_session_start(
 def process_user_prompt(
     prompt: str,
     session_id: str,
-    prompt_id: Optional[str] = None,
-    parent_uuid: Optional[str] = None,
-    event_uuid: Optional[str] = None,
+    prompt_id: str,
+    mode: Optional[str] = None,
+    entrypoint: Optional[str] = None,
+    client_version: Optional[str] = None,
+    git_branch: Optional[str] = None,
     event_timestamp: Optional[str] = None,
     cwd: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Process user prompt event."""
     processor = EventProcessor()
-    return processor.process_user_prompt(prompt, session_id, prompt_id, parent_uuid, event_uuid, event_timestamp, cwd)
+    return processor.process_user_prompt(
+        prompt, session_id, prompt_id, mode,
+        entrypoint, client_version, git_branch,
+        event_timestamp, cwd,
+    )

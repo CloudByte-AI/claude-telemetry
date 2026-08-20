@@ -245,6 +245,47 @@ class DatabaseWriter:
             return False
 
     @retry_on_lock(retries=3, delay=0.5)
+    def apply_interrupt_statuses(self, statuses: Dict[str, str]) -> int:
+        """
+        Persist {prompt_id: status} for interrupted turns, writing each row once.
+
+        Guarded on `status IS NULL` rather than overwriting like
+        update_user_prompt_status above. The caller detects interrupts by
+        scanning the whole transcript, so it hands over every interrupted turn
+        in the session on every invocation - without the guard, each Stop would
+        rewrite the same rows for the entire session history. An interrupt is
+        also terminal: once a turn is known to have been denied or cancelled,
+        a later pass has nothing new to say about it.
+
+        Args:
+            statuses: {prompt_id: 'tool_use' | 'request'}, typically from
+                detect_interrupt_status()
+
+        Returns:
+            int: number of rows actually updated - 0 when everything was
+            already recorded, which is the steady state.
+        """
+        if not statuses:
+            return 0
+
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            cursor.executemany(
+                "UPDATE USER_PROMPT SET status = ? WHERE prompt_id = ? AND status IS NULL",
+                [(status, prompt_id) for prompt_id, status in statuses.items()],
+            )
+            conn.commit()
+            updated = cursor.rowcount if cursor.rowcount and cursor.rowcount > 0 else 0
+            if updated:
+                logger.info(f"Recorded interrupt status for {updated} turn(s)")
+            return updated
+
+        except Exception as e:
+            logger.error(f"Error applying interrupt statuses: {e}")
+            return 0
+
+    @retry_on_lock(retries=3, delay=0.5)
     def write_raw_log(self, log_data: Dict[str, Any]) -> bool:
         """
         Insert a raw log record.
@@ -291,10 +332,14 @@ class DatabaseWriter:
 
         Skips if prompt_id already exists (idempotent).
 
+        prompt_id must be the id the client handed us - Claude Code's hook
+        `prompt_id` or Cursor's `generation_id`. It is never generated here.
+
         Note: Session should already exist (initialized by UserPromptSubmit handler).
 
         Args:
-            prompt_data: Dict with prompt_id, session_id, uuid, parent_uuid, prompt, timestamp
+            prompt_data: Dict with prompt_id, session_id, prompt, timestamp, and
+                optionally mode, git_branch, entrypoint, client_version, attachments
 
         Returns:
             bool: True if written or already exists, False on error
@@ -309,32 +354,30 @@ class DatabaseWriter:
             conn = self.get_connection()
             cursor = conn.cursor()
 
-            # Check if prompt_id already exists - update timestamp if so (for correct JSONL ordering)
+            # Already recorded - leave the row alone.
+            #
+            # This used to re-stamp timestamp on every call, from a time when
+            # the value came from the transcript and was treated as more
+            # authoritative than the hook. It now arrives from the hook itself,
+            # so the "refresh" wrote the same value back, and re-stamping an
+            # existing row would only ever move a prompt's time later than the
+            # moment it was actually submitted.
             prompt_id = prompt_data["prompt_id"]
             cursor.execute("SELECT 1 FROM USER_PROMPT WHERE prompt_id = ? LIMIT 1", (prompt_id,))
             if cursor.fetchone() is not None:
-                # Update timestamp with correct value from JSONL (more reliable than hook timestamp)
-                cursor.execute("""
-                    UPDATE USER_PROMPT
-                    SET timestamp = ?
-                    WHERE prompt_id = ?
-                """, (prompt_data["timestamp"], prompt_id))
-                conn.commit()
-                logger.debug(f"Updated user prompt timestamp: {prompt_id} → {prompt_data['timestamp']}")
+                logger.debug(f"User prompt already recorded, no update needed: {prompt_id}")
                 return True
 
             session_id = prompt_data["session_id"]
 
             cursor.execute("""
                 INSERT INTO USER_PROMPT
-                (prompt_id, session_id, uuid, parent_uuid, prompt, timestamp, client_version,
+                (prompt_id, session_id, prompt, timestamp, client_version,
                  attachments, mode, git_branch, entrypoint)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 prompt_id,
                 session_id,
-                prompt_data.get("uuid"),
-                prompt_data.get("parent_uuid"),
                 prompt_text,
                 prompt_data["timestamp"],
                 prompt_data.get("client_version"),
