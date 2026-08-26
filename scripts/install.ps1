@@ -36,8 +36,9 @@
       Cursor       CLI is `cursor-agent`, a separate download from the IDE, so
                    Step 1 installs it when Cursor is present but its CLI is not.
                    Only the marketplace can be added from the CLI - the plugin
-                   itself must be enabled from the IDE (Settings > Plugins >
-                   cursor-telemetry > Install), so Step 5 prints those steps,
+                   itself must be added from the IDE (Cursor Settings >
+                   Customize > Browse Marketplace > cursor-telemetry > Add), so
+                   Step 5 links the visual guide, prints the same steps as text,
                    asks you to confirm once done, then verifies. Cache directories are
                    named by commit sha, which cannot be ordered, so the newest
                    is chosen by modification time.
@@ -108,6 +109,12 @@
 .PARAMETER PluginRef
     Plugin reference in <plugin>@<marketplace> form.
 
+.PARAMETER PluginGuideUrl
+    Link to the visual (screenshot) walkthrough of Cursor's plugin install,
+    offered ahead of the text steps in Step 5. Empty by default; the guide is
+    only mentioned when this is a real http(s) URL, so the text steps are never
+    prefaced with a dead link.
+
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
 
@@ -150,7 +157,14 @@ param(
     [string] $MarketplaceUrl = "https://github.com/CloudByte-AI/claude-telemetry",
     [string] $PluginRef      = "claude-telemetry@claude-telemetry",
     [string] $DashboardUrl   = "http://localhost:4723",
-    [string] $RawBase        = "https://raw.githubusercontent.com/CloudByte-AI/claude-telemetry/main/scripts"
+    [string] $RawBase        = "https://raw.githubusercontent.com/CloudByte-AI/claude-telemetry/main/scripts",
+
+    # TODO: put the published visual guide URL here.
+    #
+    # Left empty on purpose until then. Step 5 only offers the guide when this
+    # looks like an http(s) URL, so an unfinished placeholder can never ship as
+    # a broken link in front of a user - the text steps simply stand alone.
+    [string] $PluginGuideUrl = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -193,11 +207,23 @@ function Header {
 }
 
 function Fail-Exit {
-    param([string] $Message, [int] $Code)
-    Write-Host ""
-    SayFail $Message
-    Write-Host "  Full logs      : $SETUP_LOG_DIR"
-    Write-Host "  Troubleshooting: https://github.com/CloudByte-AI/claude-telemetry/issues"
+    # -Expected marks a stop that is waiting on the user rather than a defect:
+    # the log path and the issue tracker are noise when the instructions to
+    # finish are already on screen, and pointing at "report a bug" for a missing
+    # login sends people to the wrong place.
+    param([string] $Message, [int] $Code, [switch] $Expected)
+    if ($Expected) {
+        # No leading blank: the help text above already ends with one, and a
+        # second only pushes the closing line further from what it refers to.
+        Write-Host "  $Message" -ForegroundColor Yellow
+        log "STOP (expected): $Message"
+    }
+    else {
+        Write-Host ""
+        SayFail $Message
+        Write-Host "  Full logs      : $SETUP_LOG_DIR"
+        Write-Host "  Troubleshooting: https://github.com/CloudByte-AI/claude-telemetry/issues"
+    }
     Write-Host ""
     exit $Code
 }
@@ -556,23 +582,79 @@ function Test-AuthError {
     return ($Text -match "(?i)authentication required|not (logged in|authenticated)|unauthorized|\b401\b|please (log ?in|sign ?in)|CURSOR_API_KEY")
 }
 
+# Rebuild the command that started this run, so the "re-run" step is something
+# the user can paste rather than something they have to remember. $RawBase
+# already carries the ref this install came from, so a re-run stays on the same
+# branch. A plain `irm | iex` cannot take arguments, hence the scriptblock form
+# whenever an explicit -Target has to be preserved.
+function Get-RerunCommand {
+    # $RAW_BASE, not $RawBase - the normalised copy has any trailing slash
+    # stripped, so the URL cannot come out with a doubled separator.
+    $boot = "$RAW_BASE/bootstrap.ps1"
+
+    $extra = @()
+
+    # The ref has to be named twice: once in the URL that fetches bootstrap.ps1,
+    # and once as -Ref, because a script piped into iex cannot tell which branch
+    # it came from and would otherwise pull install.ps1 from main. Anything that
+    # is not a github raw URL (an internal mirror, -RawBase pointed elsewhere)
+    # has no ref to recover, so it is left alone.
+    if ($RAW_BASE -match "githubusercontent\.com/[^/]+/[^/]+/(.+)/scripts$") {
+        $ref = $Matches[1]
+        if ($ref -ne "main") { $extra += "-Ref $ref" }
+    }
+
+    # Only an explicit editor choice is worth carrying over; auto and ask are
+    # what a re-run does anyway.
+    if ($Target -in @("claude", "cursor", "both")) { $extra += "-Target $Target" }
+
+    # A plain `irm | iex` cannot take arguments at all - the scriptblock form is
+    # the only way to pass any, so it appears exactly when there are some.
+    if ($extra.Count) {
+        return "& ([scriptblock]::Create((irm $boot))) $($extra -join ' ')"
+    }
+    return "irm $boot | iex"
+}
+
+# Explain a missing login as three numbered actions, not as a description of the
+# problem. This is the one failure that is entirely in the user's hands and not
+# a fault in the install, so it must read like an instruction sheet: what to
+# type, what will happen, what to do afterwards.
 function Show-CliAuthHelp {
     param([object] $Editor)
+
+    $isCursor  = $Editor.Key -eq "cursor"
+    $loginCmd  = if ($isCursor) { "cursor-agent login" } else { "$($Editor.Exe) login" }
+    $accountOf = if ($isCursor) { "Cursor" } else { $Editor.Name }
+
     Write-Host ""
-    Write-Host "  $($Editor.Name) is installed but not signed in, so its CLI cannot"
-    Write-Host "  reach the marketplace. Sign in once:"
+    Write-Host "  It looks like you are not signed in to the $($Editor.Name) CLI yet."
+    Write-Host "  Nothing is broken - the CLI just needs your account before it can"
+    Write-Host "  download the plugin. Three steps, about a minute:"
     Write-Host ""
-    if ($Editor.Key -eq "cursor") {
-        Write-Host "    cursor-agent login        (or:  agent login)"
+    Write-Host "    1. Sign in - run this command:" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "         $loginCmd"
+    Write-Host ""
+    Write-Host "    2. A browser window opens - sign in with your $accountOf account," -ForegroundColor Cyan
+    Write-Host "       then come back to this terminal." -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "    3. Run the installer again:" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "         $(Get-RerunCommand)"
+    Write-Host ""
+    Write-Host "  You only ever do this once on this machine."
+    Write-Host ""
+
+    if ($isCursor) {
+        Write-Host "  No browser on this machine? Use an API key from"
+        Write-Host "  https://cursor.com/dashboard instead of step 1:"
         Write-Host ""
-        Write-Host "  Non-interactively, set CURSOR_API_KEY instead."
+        Write-Host "         `$env:CURSOR_API_KEY = `"<your-key>`""
+        Write-Host ""
     }
-    else {
-        Write-Host "    $($Editor.Exe) login"
-    }
-    Write-Host ""
-    Write-Host "  Then re-run this script - everything else is already in place."
-    Write-Host ""
+
+    log "$($Editor.Key): printed login instructions (login='$loginCmd')"
 }
 
 function Test-LockError {
@@ -633,7 +715,12 @@ function Invoke-CliStep {
     )
     $out  = Invoke-Native $Exe $Arguments
     $exit = $script:LastNativeExit
-    if ($out.Trim()) { Write-Host $out.Trim() }
+    # A missing login is reported by Show-CliAuthHelp in plain language. Echoing
+    # the CLI's own "Authentication required. Run 'agent login', pass
+    # --api-key/--auth-token, or set CURSOR_API_KEY/..." on top of that buries
+    # the instructions in flags nobody needs. Invoke-Native has already written
+    # the raw text to the log, so nothing is lost by keeping it off the console.
+    if ($out.Trim() -and -not (Test-AuthError $out)) { Write-Host $out.Trim() }
 
     if (Test-LockError $out) {
         Write-Host ""
@@ -642,7 +729,9 @@ function Invoke-CliStep {
         Say "Retrying..."
         $out  = Invoke-Native $Exe $Arguments
         $exit = $script:LastNativeExit
-        if ($out.Trim()) { Write-Host $out.Trim() }
+        # Same gate as the first attempt - a retry that comes back with an auth
+        # error must not print what the first one was spared.
+        if ($out.Trim() -and -not (Test-AuthError $out)) { Write-Host $out.Trim() }
     }
 
     # Published so callers can tell a real failure from a missing login.
@@ -1067,7 +1156,10 @@ foreach ($e in $EDITORS) {
     }
     elseif (Test-AuthError $script:LastCliOutput) {
         $e.AuthRequired = $true
-        SayFail "$($e.Name): not signed in"
+        # Deliberately a warning, not a failure: the install stops, but nothing
+        # went wrong and there is nothing to debug - one login and a re-run
+        # finishes it. A red [FAIL] here reads as "your machine is broken".
+        SayWarn "$($e.Name): sign-in needed before the plugin can be downloaded"
         Show-CliAuthHelp $e
         log "$($e.Key): marketplace add blocked by missing login"
     }
@@ -1081,7 +1173,7 @@ foreach ($e in $EDITORS) {
 # discard a working install into the other.
 if (-not (@($EDITORS | Where-Object { $_.MarketplaceOk }).Count)) {
     if (@($EDITORS | Where-Object { $_.AuthRequired }).Count -eq $EDITORS.Count) {
-        Fail-Exit "Sign in to your editor CLI (see above), then re-run." 5
+        Fail-Exit "Stopped here - do the 3 steps above and the install will finish." 5 -Expected
     }
     Fail-Exit "Failed to add the marketplace to any editor." 5
 }
@@ -1117,12 +1209,34 @@ foreach ($e in $EDITORS) {
     }
 
     Write-Host "  $($e.Name) installs plugins from the IDE, not the CLI."
-    Write-Host "  The marketplace is registered - finish it in Cursor:"
+    Write-Host "  The marketplace is registered - one short task left in Cursor."
+    Write-Host ""
+
+    # The screenshot walkthrough is easier to follow than any amount of prose,
+    # so it goes first when there is one. Gated on a real URL: an unset
+    # $PluginGuideUrl must not print "see <nothing>" above the steps.
+    $hasGuide = $PluginGuideUrl -match "^https?://"
+    if ($hasGuide) {
+        Write-Host "  Easiest way - the visual guide, with a screenshot per step:"
+        Write-Host ""
+        Write-Host "    $PluginGuideUrl"
+        Write-Host ""
+        Write-Host "  Rather not open a browser? The same thing in text:"
+    }
+    else {
+        Write-Host "  Do this in Cursor:"
+    }
+
     Write-Host ""
     Write-Host "    1. Open Cursor"
-    Write-Host "    2. Settings  >  Plugins  >  cursor-telemetry"
-    Write-Host "    3. Click Install (or Add)"
+    Write-Host "    2. Cursor Settings  >  Customize  >  Browse Marketplace"
+    Write-Host "    3. Search for  cursor-telemetry  and click Add"
+    Write-Host "    4. Go to the Plugins section and check cursor-telemetry is"
+    Write-Host "       listed there as installed"
+    Write-Host "    5. Start a new agent session, then just start prompting -"
+    Write-Host "       from that point on your work is being recorded"
     Write-Host ""
+    log "cursor: printed manual IDE steps (visual guide: $(if ($hasGuide) { $PluginGuideUrl } else { 'not configured' }))"
 
     # Ask, then verify - not a blind timer. See Confirm-ManualStep. Get-PluginDir
     # doubles as the predicate: it returns the checkout path once one exists.
@@ -1134,7 +1248,7 @@ foreach ($e in $EDITORS) {
         Say "  $($e.PluginDir)"
     }
     else {
-        SayWarn "$($e.Name): plugin not installed yet - do the 3 steps above."
+        SayWarn "$($e.Name): plugin not installed yet - do the steps above."
         Write-Host "       Nothing else is needed afterwards: the plugin builds its own"
         Write-Host "       environment the first time Cursor runs it."
     }
@@ -1260,12 +1374,14 @@ foreach ($e in $EDITORS) {
     else {
         Write-Host "  Cursor"
         if ($e.PluginOk) {
-            Write-Host "    Reload the window (Command Palette > Reload Window), or"
-            Write-Host "    quit and reopen Cursor."
+            Write-Host "    Start a new agent session and begin prompting. If the tools do"
+            Write-Host "    not show up, reload the window (Command Palette > Reload Window)"
+            Write-Host "    or quit and reopen Cursor."
         }
         else {
-            Write-Host "    Settings > Plugins > cursor-telemetry > Install, then reload"
-            Write-Host "    the window. No terminal step is needed afterwards."
+            Write-Host "    Cursor Settings > Customize > Browse Marketplace, add"
+            Write-Host "    cursor-telemetry, then start a new agent session."
+            Write-Host "    No terminal step is needed afterwards."
         }
         Write-Host ""
     }
@@ -1290,7 +1406,7 @@ foreach ($e in $EDITORS) {
     if     ($e.PluginOk -and $e.SyncOk) { $state = "installed and ready to use" }
     elseif ($e.PluginOk)                { $state = "installed - dependencies install the first time you use it" }
     elseif ($e.MarketplaceOk)           { $state = "marketplace added - finish the install in the IDE" }
-    elseif ($e.AuthRequired)            { $state = "not signed in - run '$($e.Exe) login' and re-run" }
+    elseif ($e.AuthRequired)            { $state = "sign in first: run '$($e.Exe) login', then run the installer again" }
     else                                { $state = "not installed" }
     Write-Host ("  {0,-12} ->  {1}" -f $e.Name, $state)
 }

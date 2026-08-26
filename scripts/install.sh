@@ -35,11 +35,12 @@
 #     Cursor       CLI is `cursor-agent`, a separate download from the IDE, so
 #                  Step 1 installs it when Cursor is present but its CLI is not.
 #                  Only the marketplace can be added from the CLI - the plugin
-#                  itself must be enabled from the IDE (Settings > Plugins >
-#                  cursor-telemetry > Install), so Step 5 prints those steps,
-#                  asks you to confirm once done, then verifies. Cache directories are
-#                  named by commit sha, which cannot be ordered, so the newest
-#                  is chosen by modification time.
+#                  itself must be added from the IDE (Cursor Settings >
+#                  Customize > Browse Marketplace > cursor-telemetry > Add),
+#                  so Step 5 links the visual guide, prints the same steps as
+#                  text, asks you to confirm once done, then verifies. Cache
+#                  directories are named by commit sha, which cannot be
+#                  ordered, so the newest is chosen by modification time.
 #
 #   Differences from the PowerShell version, all of them deliberate:
 #
@@ -143,6 +144,13 @@ OPT_USE_LOCAL_VALIDATE=0
 OPT_OPEN_DASHBOARD=0
 
 TARGET="auto"
+
+# TODO: put the published visual guide URL here.
+#
+# Left empty on purpose until then. Step 5 only offers the guide when this
+# looks like an http(s) URL, so an unfinished placeholder can never ship as a
+# broken link in front of a user - the text steps simply stand alone.
+PLUGIN_GUIDE_URL="${PLUGIN_GUIDE_URL:-}"
 TARGET_GIVEN=0
 CURSOR_GRACE_SECONDS=20
 CURSOR_DIR_OPT=""
@@ -179,6 +187,7 @@ CloudByte telemetry plugin installer for macOS and Linux.
   --plugin-ref REF              <plugin>@<marketplace>
   --dashboard-url URL           dashboard URL shown in the summary
   --raw-base URL                where validate.sh is fetched from
+  --plugin-guide-url URL        visual guide linked from Cursor's manual step
 
 Full documentation is in the comment header of scripts/install.sh.
 EOF
@@ -206,6 +215,8 @@ while [ $# -gt 0 ]; do
 
         --target)               need_value "$1" $(($# - 1)); TARGET="$2"; TARGET_GIVEN=1; shift 2 ;;
         --target=*)             TARGET="${1#--target=}"; TARGET_GIVEN=1; shift ;;
+        --plugin-guide-url)     need_value "$1" $(($# - 1)); PLUGIN_GUIDE_URL="$2"; shift 2 ;;
+        --plugin-guide-url=*)   PLUGIN_GUIDE_URL="${1#--plugin-guide-url=}"; shift ;;
 
         # --cursor-wait-seconds is the pre-confirmation-flow name, kept as a
         # silent alias so anything already scripting it does not break.
@@ -322,11 +333,22 @@ header() {
     log "=== $title ==="
 }
 
+# A third argument of "expected" marks a stop that is waiting on the user rather
+# than a defect: the log path and the issue tracker are noise when the
+# instructions to finish are already on screen, and pointing at "report a bug"
+# for a missing login sends people to the wrong place.
 fail_exit() {
-    printf '\n'
-    say_fail "$1"
-    printf '%s\n' "  Full logs      : $SETUP_LOG_DIR"
-    printf '%s\n' "  Troubleshooting: https://github.com/CloudByte-AI/claude-telemetry/issues"
+    if [ "${3:-}" = "expected" ]; then
+        # No leading blank: the help text above already ends with one, and a
+        # second only pushes the closing line further from what it refers to.
+        printf '%s\n' "  $1"
+        log "STOP (expected): $1"
+    else
+        printf '\n'
+        say_fail "$1"
+        printf '%s\n' "  Full logs      : $SETUP_LOG_DIR"
+        printf '%s\n' "  Troubleshooting: https://github.com/CloudByte-AI/claude-telemetry/issues"
+    fi
     printf '\n'
     exit "$2"
 }
@@ -747,22 +769,76 @@ is_auth_error() {
         'authentication required|not (logged in|authenticated)|unauthorized|(^|[^0-9])401([^0-9]|$)|please (log ?in|sign ?in)|CURSOR_API_KEY'
 }
 
-show_cli_auth_help() {
-    local key="$1" name="$2" exe="$3"
-    printf '\n'
-    printf '%s\n' "  $name is installed but not signed in, so its CLI cannot"
-    printf '%s\n' "  reach the marketplace. Sign in once:"
-    printf '\n'
-    if [ "$key" = "cursor" ]; then
-        printf '%s\n' "    cursor-agent login        (or:  agent login)"
-        printf '\n'
-        printf '%s\n' "  Non-interactively, set CURSOR_API_KEY instead."
+# Rebuild the command that started this run, so the "re-run" step is something
+# the user can paste rather than something they have to remember. RAW_BASE
+# already carries the ref this install came from, so a re-run stays on the same
+# branch, and an explicit --target has to survive into the new command line.
+rerun_command() {
+    local boot="$RAW_BASE/bootstrap.sh" extra="" ref=""
+
+    # The ref has to be named twice: once in the URL that fetches bootstrap.sh,
+    # and once as --ref, because a script piped into bash cannot tell which
+    # branch it came from and would otherwise pull install.sh from main.
+    # Anything that is not a github raw URL (an internal mirror, --raw-base
+    # pointed elsewhere) has no ref to recover, so it is left alone.
+    ref="$(printf '%s' "$RAW_BASE" | sed -n 's#^.*githubusercontent[.]com/[^/][^/]*/[^/][^/]*/\(.*\)/scripts$#\1#p')"
+    [ -n "$ref" ] && [ "$ref" != "main" ] && extra=" --ref $ref"
+
+    # Only an explicit editor choice is worth carrying over; auto and ask are
+    # what a re-run does anyway.
+    case "$TARGET" in
+        claude|cursor|both) extra="$extra --target $TARGET" ;;
+    esac
+
+    if [ -n "$extra" ]; then
+        printf 'curl -fsSL %s | bash -s --%s\n' "$boot" "$extra"
     else
-        printf '%s\n' "    $exe login"
+        printf 'curl -fsSL %s | bash\n' "$boot"
     fi
+}
+
+# Explain a missing login as three numbered actions, not as a description of the
+# problem. This is the one failure that is entirely in the user's hands and not
+# a fault in the install, so it must read like an instruction sheet: what to
+# type, what will happen, what to do afterwards.
+show_cli_auth_help() {
+    local key="$1" name="$2" exe="$3" login_cmd account_of
+    if [ "$key" = "cursor" ]; then
+        login_cmd="cursor-agent login"
+        account_of="Cursor"
+    else
+        login_cmd="$exe login"
+        account_of="$name"
+    fi
+
     printf '\n'
-    printf '%s\n' "  Then re-run this script - everything else is already in place."
+    printf '%s\n' "  It looks like you are not signed in to the $name CLI yet."
+    printf '%s\n' "  Nothing is broken - the CLI just needs your account before it can"
+    printf '%s\n' "  download the plugin. Three steps, about a minute:"
     printf '\n'
+    printf '%s\n' "    1. Sign in - run this command:"
+    printf '\n'
+    printf '%s\n' "         $login_cmd"
+    printf '\n'
+    printf '%s\n' "    2. A browser window opens - sign in with your $account_of account,"
+    printf '%s\n' "       then come back to this terminal."
+    printf '\n'
+    printf '%s\n' "    3. Run the installer again:"
+    printf '\n'
+    printf '%s\n' "         $(rerun_command)"
+    printf '\n'
+    printf '%s\n' "  You only ever do this once on this machine."
+    printf '\n'
+
+    if [ "$key" = "cursor" ]; then
+        printf '%s\n' "  No browser on this machine? Use an API key from"
+        printf '%s\n' "  https://cursor.com/dashboard instead of step 1:"
+        printf '\n'
+        printf '%s\n' "         export CURSOR_API_KEY=<your-key>"
+        printf '\n'
+    fi
+
+    log "$key: printed login instructions (login='$login_cmd')"
 }
 
 # The POSIX counterpart of install.ps1's Test-LockError. Windows holds mandatory
@@ -804,7 +880,14 @@ run_cli_step() {
 
     run_native "$exe" "$@"
     LAST_CLI_OUTPUT="$NATIVE_OUT"
-    [ -n "$NATIVE_OUT" ] && printf '%s\n' "$NATIVE_OUT"
+    # A missing login is reported by show_cli_auth_help in plain language.
+    # Echoing the CLI's own "Authentication required. Run 'agent login', pass
+    # --api-key/--auth-token, ..." on top of that buries the instructions in
+    # flags nobody needs. run_native has already written the raw text to the
+    # log, so nothing is lost by keeping it off the console.
+    if [ -n "$NATIVE_OUT" ] && ! is_auth_error "$NATIVE_OUT"; then
+        printf '%s\n' "$NATIVE_OUT"
+    fi
 
     if [ "$NATIVE_EXIT" -ne 0 ] && is_perm_error "$NATIVE_OUT"; then
         printf '\n'
@@ -1318,7 +1401,10 @@ for k in $EDITORS; do
     elif is_auth_error "$LAST_CLI_OUTPUT"; then
         ed_set "$k" auth_required 1
         auth_blocked=$((auth_blocked + 1))
-        say_fail "$name: not signed in"
+        # Deliberately a warning, not a failure: the install stops, but nothing
+        # went wrong and there is nothing to debug - one login and a re-run
+        # finishes it. A red [FAIL] here reads as "your machine is broken".
+        say_warn "$name: sign-in needed before the plugin can be downloaded"
         show_cli_auth_help "$k" "$name" "$exe"
         log "$k: marketplace add blocked by missing login"
     else
@@ -1334,7 +1420,7 @@ done
 # discard a working install into the other.
 if [ "$marketplace_any" -eq 0 ]; then
     if [ "$auth_blocked" -eq "$editor_count" ]; then
-        fail_exit "Sign in to your editor CLI (see above), then re-run." 5
+        fail_exit "Stopped here - do the 3 steps above and the install will finish." 5 expected
     fi
     fail_exit "Failed to add the marketplace to any editor." 5
 fi
@@ -1384,11 +1470,32 @@ for k in $EDITORS; do
     fi
 
     printf '%s\n' "  $name installs plugins from the IDE, not the CLI."
-    printf '%s\n' "  The marketplace is registered - finish it in Cursor:"
+    printf '%s\n' "  The marketplace is registered - one short task left in Cursor."
+    printf '\n'
+
+    # The screenshot walkthrough is easier to follow than any amount of
+    # prose, so it goes first when there is one. Gated on a real URL: an
+    # unset PLUGIN_GUIDE_URL must not print "see <nothing>" above the steps.
+    if printf '%s' "$PLUGIN_GUIDE_URL" | grep -Eq '^https?://'; then
+        printf '%s\n' "  Easiest way - the visual guide, with a screenshot per step:"
+        printf '\n'
+        printf '%s\n' "    $PLUGIN_GUIDE_URL"
+        printf '\n'
+        printf '%s\n' "  Rather not open a browser? The same thing in text:"
+        log "cursor: printed manual IDE steps (visual guide: $PLUGIN_GUIDE_URL)"
+    else
+        printf '%s\n' "  Do this in Cursor:"
+        log "cursor: printed manual IDE steps (visual guide: not configured)"
+    fi
+
     printf '\n'
     printf '%s\n' "    1. Open Cursor"
-    printf '%s\n' "    2. Settings  >  Plugins  >  cursor-telemetry"
-    printf '%s\n' "    3. Click Install (or Add)"
+    printf '%s\n' "    2. Cursor Settings  >  Customize  >  Browse Marketplace"
+    printf '%s\n' "    3. Search for  cursor-telemetry  and click Add"
+    printf '%s\n' "    4. Go to the Plugins section and check cursor-telemetry is"
+    printf '%s\n' "       listed there as installed"
+    printf '%s\n' "    5. Start a new agent session, then just start prompting -"
+    printf '%s\n' "       from that point on your work is being recorded"
     printf '\n'
 
     # Ask, then verify - not a blind timer. See confirm_manual_step.
@@ -1400,7 +1507,7 @@ for k in $EDITORS; do
         say_ok "$name: plugin installed"
         say "  $PLUGIN_DIR"
     else
-        say_warn "$name: plugin not installed yet - do the 3 steps above."
+        say_warn "$name: plugin not installed yet - do the steps above."
         printf '%s\n' "       Nothing else is needed afterwards: the plugin builds its own"
         printf '%s\n' "       environment the first time Cursor runs it."
     fi
@@ -1525,11 +1632,13 @@ for k in $EDITORS; do
     else
         printf '%s\n' "  Cursor"
         if [ "$(ed_get "$k" plugin_ok)" = "1" ]; then
-            printf '%s\n' "    Reload the window (Command Palette > Reload Window), or"
-            printf '%s\n' "    quit and reopen Cursor."
+            printf '%s\n' "    Start a new agent session and begin prompting. If the tools do"
+            printf '%s\n' "    not show up, reload the window (Command Palette > Reload Window)"
+            printf '%s\n' "    or quit and reopen Cursor."
         else
-            printf '%s\n' "    Settings > Plugins > cursor-telemetry > Install, then reload"
-            printf '%s\n' "    the window. No terminal step is needed afterwards."
+            printf '%s\n' "    Cursor Settings > Customize > Browse Marketplace, add"
+            printf '%s\n' "    cursor-telemetry, then start a new agent session."
+            printf '%s\n' "    No terminal step is needed afterwards."
         fi
         printf '\n'
     fi
@@ -1558,7 +1667,7 @@ for k in $EDITORS; do
     elif [ "$(ed_get "$k" marketplace_ok)" = "1" ]; then
         state="marketplace added - finish the install in the IDE"
     elif [ "$(ed_get "$k" auth_required)" = "1" ]; then
-        state="not signed in - run '$(ed_get "$k" exe) login' and re-run"
+        state="sign in first: run '$(ed_get "$k" exe) login', then run the installer again"
     else
         state="not installed"
     fi
