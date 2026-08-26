@@ -586,7 +586,7 @@ function Test-AuthError {
 # the user can paste rather than something they have to remember. $RawBase
 # already carries the ref this install came from, so a re-run stays on the same
 # branch. A plain `irm | iex` cannot take arguments, hence the scriptblock form
-# whenever an explicit -Target has to be preserved.
+# whenever a ref or an editor selection has to be preserved.
 function Get-RerunCommand {
     # $RAW_BASE, not $RawBase - the normalised copy has any trailing slash
     # stripped, so the URL cannot come out with a doubled separator.
@@ -604,9 +604,15 @@ function Get-RerunCommand {
         if ($ref -ne "main") { $extra += "-Ref $ref" }
     }
 
-    # Only an explicit editor choice is worth carrying over; auto and ask are
-    # what a re-run does anyway.
-    if ($Target -in @("claude", "cursor", "both")) { $extra += "-Target $Target" }
+    # Carry over the editors actually being installed into - NOT the -Target
+    # that was typed. The Step 1 menu records its answer in $wantClaude /
+    # $wantCursor and never writes back to $Target, so keying off $Target hands
+    # someone who picked "2. Cursor" from the menu a re-run command with no
+    # -Target at all, which prompts them all over again. Naming it explicitly
+    # also means the re-run skips the menu entirely.
+    if     ($wantClaude -and $wantCursor) { $extra += "-Target both" }
+    elseif ($wantCursor)                  { $extra += "-Target cursor" }
+    elseif ($wantClaude)                  { $extra += "-Target claude" }
 
     # A plain `irm | iex` cannot take arguments at all - the scriptblock form is
     # the only way to pass any, so it appears exactly when there are some.

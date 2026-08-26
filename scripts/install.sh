@@ -772,7 +772,7 @@ is_auth_error() {
 # Rebuild the command that started this run, so the "re-run" step is something
 # the user can paste rather than something they have to remember. RAW_BASE
 # already carries the ref this install came from, so a re-run stays on the same
-# branch, and an explicit --target has to survive into the new command line.
+# branch, and the editor selection has to survive into the new command line.
 rerun_command() {
     local boot="$RAW_BASE/bootstrap.sh" extra="" ref=""
 
@@ -784,11 +784,16 @@ rerun_command() {
     ref="$(printf '%s' "$RAW_BASE" | sed -n 's#^.*githubusercontent[.]com/[^/][^/]*/[^/][^/]*/\(.*\)/scripts$#\1#p')"
     [ -n "$ref" ] && [ "$ref" != "main" ] && extra=" --ref $ref"
 
-    # Only an explicit editor choice is worth carrying over; auto and ask are
-    # what a re-run does anyway.
-    case "$TARGET" in
-        claude|cursor|both) extra="$extra --target $TARGET" ;;
-    esac
+    # Carry over the editors actually being installed into - NOT the --target
+    # that was typed. The Step 1 menu records its answer in want_claude /
+    # want_cursor and never writes back to TARGET, so keying off TARGET hands
+    # someone who picked "2. Cursor" from the menu a re-run command with no
+    # --target at all, which prompts them all over again. Naming it explicitly
+    # also means the re-run skips the menu entirely.
+    if   [ "${want_claude:-0}" -eq 1 ] && [ "${want_cursor:-0}" -eq 1 ]; then extra="$extra --target both"
+    elif [ "${want_cursor:-0}" -eq 1 ];                                  then extra="$extra --target cursor"
+    elif [ "${want_claude:-0}" -eq 1 ];                                  then extra="$extra --target claude"
+    fi
 
     if [ -n "$extra" ]; then
         printf 'curl -fsSL %s | bash -s --%s\n' "$boot" "$extra"
