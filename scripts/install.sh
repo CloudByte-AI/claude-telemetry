@@ -115,6 +115,13 @@
 #                           this automatically.
 #   --plugin-ref <ref>      Plugin reference in <plugin>@<marketplace> form.
 #   --dashboard-url <url>   Dashboard URL printed in the summary.
+#   --plugin-guide-url <url>
+#                           Visual (screenshot) walkthrough of Cursor's plugin
+#                           install, linked from Step 5. Only mentioned when it
+#                           is a real http(s) URL, so blanking it falls back to
+#                           the text steps alone. PLUGIN_GUIDE_PAGE (default 6)
+#                           and PLUGIN_GUIDE_SECTION set which part of that
+#                           guide Step 5 sends the reader to.
 #   --help, -h              Print this option list.
 #
 #   Every option also accepts the --name=value form.
@@ -145,12 +152,17 @@ OPT_OPEN_DASHBOARD=0
 
 TARGET="auto"
 
-# TODO: put the published visual guide URL here.
-#
-# Left empty on purpose until then. Step 5 only offers the guide when this
-# looks like an http(s) URL, so an unfinished placeholder can never ship as a
-# broken link in front of a user - the text steps simply stand alone.
-PLUGIN_GUIDE_URL="${PLUGIN_GUIDE_URL:-}"
+# The screenshot walkthrough of Cursor's plugin install, offered ahead of the
+# text steps in Step 5. Step 5 only mentions it when this looks like an http(s)
+# URL, so blanking it falls back cleanly to the text steps alone.
+PLUGIN_GUIDE_URL="${PLUGIN_GUIDE_URL:-https://drive.google.com/file/d/11rjIUmtutXRHzGgtogwSPUPEKwrkQ5Td}"
+
+# Where in that guide the manual plugin step begins. Step 5 points readers
+# straight there instead of at page 1, since the sign-in pages ahead of it are
+# already behind them by then. Keep both in step with the guide's own contents
+# page if it is ever re-cut.
+PLUGIN_GUIDE_PAGE="${PLUGIN_GUIDE_PAGE:-6}"
+PLUGIN_GUIDE_SECTION="${PLUGIN_GUIDE_SECTION:-Add the Plugin in Cursor}"
 TARGET_GIVEN=0
 CURSOR_GRACE_SECONDS=20
 CURSOR_DIR_OPT=""
@@ -188,6 +200,8 @@ CloudByte telemetry plugin installer for macOS and Linux.
   --dashboard-url URL           dashboard URL shown in the summary
   --raw-base URL                where validate.sh is fetched from
   --plugin-guide-url URL        visual guide linked from Cursor's manual step
+                                (PLUGIN_GUIDE_PAGE / PLUGIN_GUIDE_SECTION set
+                                 which part of it Step 5 points at)
 
 Full documentation is in the comment header of scripts/install.sh.
 EOF
@@ -1485,6 +1499,13 @@ for k in $EDITORS; do
         printf '%s\n' "  Easiest way - the visual guide, with a screenshot per step:"
         printf '\n'
         printf '%s\n' "    $PLUGIN_GUIDE_URL"
+        printf '\n'
+        # The guide covers the whole install, and by Step 5 the sign-in is
+        # already behind us - so send the reader straight to the part that
+        # matches where they are. Page number tracks the guide's own contents
+        # page; keep it in step if the guide is ever re-cut.
+        printf '%s\n' "    Already signed in? Start at page $PLUGIN_GUIDE_PAGE, $PLUGIN_GUIDE_SECTION -"
+        printf '%s\n' "    the pages before it only cover the sign-in step."
         printf '\n'
         printf '%s\n' "  Rather not open a browser? The same thing in text:"
         log "cursor: printed manual IDE steps (visual guide: $PLUGIN_GUIDE_URL)"
