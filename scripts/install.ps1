@@ -111,9 +111,18 @@
 
 .PARAMETER PluginGuideUrl
     Link to the visual (screenshot) walkthrough of Cursor's plugin install,
-    offered ahead of the text steps in Step 5. Empty by default; the guide is
-    only mentioned when this is a real http(s) URL, so the text steps are never
-    prefaced with a dead link.
+    offered ahead of the text steps in Step 5. The guide is only mentioned when
+    this is a real http(s) URL, so blanking it - or pointing it at an internal
+    mirror - degrades cleanly to the text steps on their own.
+
+.PARAMETER PluginGuidePage
+    Page in that guide where the manual plugin step starts (default 6). Step 5
+    sends readers there rather than to page 1, because the guide's sign-in
+    pages are already behind them by the time Step 5 prints.
+
+.PARAMETER PluginGuideSection
+    Name of that section, quoted alongside the page number so the pointer still
+    makes sense if the guide is re-paginated.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
@@ -159,12 +168,17 @@ param(
     [string] $DashboardUrl   = "http://localhost:4723",
     [string] $RawBase        = "https://raw.githubusercontent.com/CloudByte-AI/claude-telemetry/main/scripts",
 
-    # TODO: put the published visual guide URL here.
-    #
-    # Left empty on purpose until then. Step 5 only offers the guide when this
-    # looks like an http(s) URL, so an unfinished placeholder can never ship as
-    # a broken link in front of a user - the text steps simply stand alone.
-    [string] $PluginGuideUrl = ""
+    # The screenshot walkthrough of Cursor's plugin install, offered ahead of
+    # the text steps in Step 5. Step 5 only mentions it when this looks like an
+    # http(s) URL, so blanking it falls back cleanly to the text steps alone.
+    [string] $PluginGuideUrl = "https://drive.google.com/file/d/11rjIUmtutXRHzGgtogwSPUPEKwrkQ5Td",
+
+    # Where in that guide the manual plugin step begins. Step 5 points readers
+    # straight there instead of at page 1, since the sign-in pages ahead of it
+    # are already behind them by then. Keep both in step with the guide's own
+    # contents page if it is ever re-cut.
+    [int]    $PluginGuidePage    = 6,
+    [string] $PluginGuideSection = "Add the Plugin in Cursor"
 )
 
 $ErrorActionPreference = "Stop"
@@ -1226,6 +1240,13 @@ foreach ($e in $EDITORS) {
         Write-Host "  Easiest way - the visual guide, with a screenshot per step:"
         Write-Host ""
         Write-Host "    $PluginGuideUrl"
+        Write-Host ""
+        # The guide covers the whole install, and by Step 5 the sign-in is
+        # already behind us - so send the reader straight to the part that
+        # matches where they are. Page number tracks the guide's own contents
+        # page; see the note on -PluginGuideUrl if the guide is ever re-cut.
+        Write-Host "    Already signed in? Start at page $PluginGuidePage, $PluginGuideSection -"
+        Write-Host "    the pages before it only cover the sign-in step."
         Write-Host ""
         Write-Host "  Rather not open a browser? The same thing in text:"
     }
