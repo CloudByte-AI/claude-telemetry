@@ -22,6 +22,7 @@ from ftfy import fix_text as _fix_text
 
 from src.common.logging import get_logger
 from src.common.time_utils import to_ist
+from src.common.git_utils import resolve_git_branch
 from src.db.manager import get_db_connection
 from src.db.writers import DatabaseWriter
 from src.integrations.claude.prompt_response import (
@@ -289,7 +290,7 @@ def _find_or_create_db_prompt(
                     to_ist(prompt_event.get("timestamp")),
                     prompt_event.get("entrypoint"),
                     prompt_event.get("version"),
-                    prompt_event.get("gitBranch"),
+                    resolve_git_branch(prompt_event.get("cwd"), prompt_event.get("gitBranch")),
                     prompt_event.get("permissionMode"),
                     new_id,
                     status,
@@ -322,7 +323,7 @@ def _find_or_create_db_prompt(
                     prompt_event.get("parentUuid"),
                     prompt_event.get("entrypoint"),
                     prompt_event.get("version"),
-                    prompt_event.get("gitBranch"),
+                    resolve_git_branch(prompt_event.get("cwd"), prompt_event.get("gitBranch")),
                     prompt_event.get("permissionMode"),
                     db_prompt_id,
                 ),

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from src.common.logging import get_logger
+from src.common.git_utils import resolve_git_branch
 from src.common.time_utils import get_now_ist_iso, to_ist
 from src.integrations.claude.reader import (
     get_claude_dir,
@@ -160,6 +161,15 @@ class EventProcessor:
             "prompt": prompt,
             "cwd": cwd,  # Pass cwd for project/session creation if needed
             "timestamp": to_ist(event_timestamp),  # Use original if available, will fallback to IST now if None
+            # Stamped HERE, at prompt time, not later from the JSONL. The JSONL
+            # gitBranch field is unreliable (Claude Code writes the literal
+            # string "HEAD" even inside a healthy repo on a normal branch), and
+            # the sync/recovery passes that would otherwise supply it can run
+            # minutes to days after the fact - long enough for the working tree
+            # to have switched branches. Resolving against cwd now is the only
+            # moment the answer is guaranteed to match what the user was
+            # actually on. Mirrors what the Cursor beforeSubmitPrompt hook does.
+            "git_branch": resolve_git_branch(cwd),
         }
 
         success = self.db_writer.write_user_prompt(prompt_data)
