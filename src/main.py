@@ -12,6 +12,7 @@ Handles all Claude Code hooks:
 import os
 import sys
 from src.common.time_utils import get_now_ist_iso, to_ist
+from src.common.git_utils import resolve_git_branch
 from pathlib import Path
 
 # Add src directory to path for imports
@@ -381,7 +382,7 @@ def stop() -> None:
                             to_ist(prompt_rec.get("timestamp")),
                             prompt_rec.get("entrypoint"),
                             prompt_rec.get("version"),
-                            prompt_rec.get("gitBranch"),
+                            resolve_git_branch(prompt_rec.get("cwd"), prompt_rec.get("gitBranch")),
                             prompt_rec.get("permissionMode"),
                             new_prompt_id,
                         ))
@@ -412,7 +413,13 @@ def stop() -> None:
                                parent_uuid = COALESCE(parent_uuid, ?),
                                entrypoint = ?,
                                client_version = ?,
-                               git_branch = ?,
+                               -- COALESCE, not an overwrite: the UserPromptSubmit
+                               -- hook already stamped the branch at prompt time.
+                               -- This sync can run minutes later, by which point
+                               -- the working tree may sit on a different branch,
+                               -- so the prompt-time value always wins and this
+                               -- only fills a genuine gap.
+                               git_branch = COALESCE(git_branch, ?),
                                mode = ?
                            WHERE prompt_id = ?""",
                         (
@@ -421,7 +428,7 @@ def stop() -> None:
                             prompt_rec.get("parentUuid"),
                             prompt_rec.get("entrypoint"),
                             prompt_rec.get("version"),
-                            prompt_rec.get("gitBranch"),
+                            resolve_git_branch(prompt_rec.get("cwd"), prompt_rec.get("gitBranch")),
                             prompt_rec.get("permissionMode"),
                             db_prompt_id,
                         ),

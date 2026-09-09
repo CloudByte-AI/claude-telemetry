@@ -47,4 +47,5 @@ context/
 tests/
 
 .claude/
+.cursor/
 .pytest_cache/
