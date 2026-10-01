@@ -47,5 +47,8 @@ context/
 tests/
 
 .claude/
-.cursor/
+.cursor/*
+!.cursor/hooks.json
+!.cursor/mcp.json
 .pytest_cache/
+docs/

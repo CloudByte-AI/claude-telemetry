@@ -61,6 +61,16 @@ def handle_stop() -> None:
         debug(f"ERROR - {e}")
         logger.error(f"Error in Cursor Stop handler: {e}", exc_info=True)
 
+    # ── Drain the guardrails audit spool ─────────────────────────────────────
+    # At the end of the turn, when this generation's TOOL rows exist, so the
+    # drain can link each event to its tool call. After the status write
+    # above, which resolves pending Claude Code asks drained here too.
+    try:
+        from src.cursor.handlers.guardrails import drain_audit
+        drain_audit()
+    except Exception as _gr_err:
+        logger.warning(f"Guardrails audit drain error (non-fatal): {_gr_err}")
+
     # Never set followup_message - see module docstring.
     print(json.dumps({}))
 

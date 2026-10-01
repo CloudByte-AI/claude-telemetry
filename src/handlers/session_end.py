@@ -93,6 +93,15 @@ def handle_session_end():
         except Exception as _re:
             logger.warning(f"SessionEnd missed-pair recovery failed: {_re}")
 
+        # ── Drain the guardrails audit spool ─────────────────────────────────
+        # A tool rejected on the session's last turn has no later Stop or
+        # prompt to drain it. Recovery above has just written its TOOL row.
+        try:
+            from src.guardrails.db_writer import drain as _drain_guardrails
+            _drain_guardrails()
+        except Exception as _gr_err:
+            logger.warning(f"Guardrails audit drain error (non-fatal): {_gr_err}")
+
         # Kill worker process - but only if no other session (this or another
         # Claude Code window, or a Cursor session) is still relying on the
         # shared worker/dashboard at localhost:4723. See

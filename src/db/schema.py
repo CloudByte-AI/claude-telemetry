@@ -265,8 +265,52 @@ def create_tables(conn: sqlite3.Connection) -> None:
     );
     """)
 
+    # ---------------- TOOL_GUARDRAIL_EVENT ----------------
+    cursor.execute(TOOL_GUARDRAIL_EVENT_DDL)
+
     conn.commit()
     logger.info("Database tables created successfully")
+
+# ── TOOL_GUARDRAIL_EVENT ──────────────────────────────────────────────────────
+#
+# One row per guardrail decision that earned an audit entry. Fall-throughs are
+# not logged (TOOL already records every call); join to TOOL for denominators.
+#
+# Stores no raw tool_input (only its hash), file contents, command output or
+# environment variables. `evidence` is masked and capped at 256 characters.
+#
+# session_id, prompt_id and tool_use_id have no foreign keys: an audit event is
+# kept even when the row it points at is missing or late (a Cursor subagent has
+# no SESSION row). Use LEFT JOIN.
+#
+# One constant, so create_tables() and migrate_schema() cannot drift apart.
+TOOL_GUARDRAIL_EVENT_DDL = """
+CREATE TABLE IF NOT EXISTS TOOL_GUARDRAIL_EVENT (
+    event_id        TEXT PRIMARY KEY,
+    session_id      TEXT,
+    prompt_id       TEXT,          -- platform prompt id: Claude = USER_PROMPT.jsonl_prompt_id, Cursor generation_id = USER_PROMPT.prompt_id
+    tool_use_id     TEXT,          -- correlates to TOOL.tool_id for user_decision
+    tool_name       TEXT,
+    platform        TEXT,          -- claude_code | cursor
+    operation       TEXT,          -- taxonomy name, e.g. fs.delete.recursive
+    rule_id         TEXT,          -- which rule fired: its `id`, or table#rank when it has none
+    rule_rank       INTEGER,       -- its position in evaluation order
+    reason          TEXT,          -- the rule's reason as shown (or the default for its action)
+    profile_hash    TEXT,          -- which profile decided: 16 hex of SHA256 of its policy settings
+    matcher_id      TEXT,          -- which library matcher detected it
+    target          TEXT,          -- resolved path / host / mcp tool
+    evidence        TEXT,          -- masked, capped at 256 chars
+    command_name    TEXT,          -- tool family: aws | kubectl | git | rm
+    tool_input_hash TEXT,          -- SHA256 of what the call acts on (ToolCall.subject); the input itself is never stored
+    action          TEXT NOT NULL, -- allow | ask | deny, as the policy decided
+    alert_level     TEXT,          -- critical | warn | info
+    decision_source TEXT,          -- matcher | policy | fallthrough | disabled | error
+    user_decision   TEXT,          -- approved | rejected | auto_denied | not_prompted (Cursor ask) | NULL
+    eval_ms         REAL,
+    timestamp       DATETIME
+);
+"""
+
 
 # Schema version tracked via SQLite's built-in PRAGMA user_version (an
 # integer stored in the DB file header - no extra table needed). Bump this
@@ -275,7 +319,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
 # DatabaseManager.ensure_schema_initialized() is the single choke point
 # that compares this against the stored value on every process's first
 # connection and re-runs migrate_schema() only when behind.
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
 
 def get_schema_version(conn: sqlite3.Connection) -> int:
@@ -487,6 +531,14 @@ def migrate_schema(conn: sqlite3.Connection) -> list:
             {"table": _legacy, "action": "drop_table"},
         )
 
+    # ── v3: tool guardrails audit table ──────────────────────────────────────
+    # Purely additive: a new table and its indexes, safe on any database.
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='TOOL_GUARDRAIL_EVENT'")
+    if not cursor.fetchone():
+        cursor.execute(TOOL_GUARDRAIL_EVENT_DDL)
+        logger.info("Migration: created TOOL_GUARDRAIL_EVENT table")
+        changes.append({"table": "TOOL_GUARDRAIL_EVENT", "action": "create_table", "status": "applied"})
+
     conn.commit()
     return changes
 
@@ -510,6 +562,14 @@ def create_indexes(conn: sqlite3.Connection) -> None:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_hook_obs_prompt ON HOOK_OBSERVATION(prompt_id);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_security_session ON SECURITY_SCAN_EVENT(session_id);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_security_target ON SECURITY_SCAN_EVENT(scan_target);")
+
+    # Indexes for TOOL_GUARDRAIL_EVENT - session for the per-session view,
+    # operation for "which operations fire most", tool_use_id and prompt_id for
+    # the TOOL and USER_PROMPT lookups the drain makes.
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_guardrail_session ON TOOL_GUARDRAIL_EVENT(session_id);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_guardrail_operation ON TOOL_GUARDRAIL_EVENT(operation);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_guardrail_tool_use ON TOOL_GUARDRAIL_EVENT(tool_use_id);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_guardrail_prompt ON TOOL_GUARDRAIL_EVENT(prompt_id);")
 
     # Indexes for UUID lookups
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_uuid_raw ON RAW_LOG(uuid);")
@@ -581,6 +641,7 @@ class DatabaseSchema:
     TABLE_TOOL_TOKENS = "TOOL_TOKENS"
     TABLE_HOOK_OBSERVATION = "HOOK_OBSERVATION"
     TABLE_SECURITY_SCAN_EVENT = "SECURITY_SCAN_EVENT"
+    TABLE_TOOL_GUARDRAIL_EVENT = "TOOL_GUARDRAIL_EVENT"
 
     # All tables. MUST stay in sync with create_tables() - verify_schema() below
     # returns False if any entry is missing, and ensure_schema_initialized()
@@ -602,6 +663,7 @@ class DatabaseSchema:
         TABLE_TOOL_TOKENS,
         TABLE_HOOK_OBSERVATION,
         TABLE_SECURITY_SCAN_EVENT,
+        TABLE_TOOL_GUARDRAIL_EVENT,
     ]
 
     @classmethod

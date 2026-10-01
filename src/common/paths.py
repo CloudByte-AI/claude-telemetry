@@ -17,6 +17,8 @@ CLOUDBYTE_DIR = ".cloudbyte"
 DATA_SUBDIR = "data"
 LOGS_SUBDIR = "logs"
 SECURITY_SUBDIR = "security"
+GUARDRAILS_SUBDIR = "guardrails"
+ASSETS_SUBDIR = "assets"
 DB_FILENAME = "cloudbyte.db"
 
 
@@ -79,6 +81,38 @@ def get_security_dir() -> Path:
         callers that write into it should mkdir(parents=True, exist_ok=True)).
     """
     return get_cloudbyte_dir() / SECURITY_SUBDIR
+
+
+def get_guardrails_dir() -> Path:
+    """
+    Get the directory for tool guardrails config, shared by both plugins.
+    Typically: C:\\Users\\<username>\\.cloudbyte\\guardrails
+
+    Separate from security/: guardrails govern actions rather than text, and the
+    two features ship and version independently. Like the security profile, it
+    is NOT split per client.
+
+    Returns:
+        Path: The guardrails config directory (not guaranteed to exist yet -
+        callers that write into it should mkdir(parents=True, exist_ok=True)).
+    """
+    return get_cloudbyte_dir() / GUARDRAILS_SUBDIR
+
+
+def get_assets_dir() -> Path:
+    """
+    Get the directory for files the operating system reads by path.
+    Typically: C:\\Users\\<username>\\.cloudbyte\\assets
+
+    For example the Windows notification icon. The OS keeps that path after the
+    call that set it, so it cannot point into the plugin folder, whose path
+    changes with every plugin version and with each client's install.
+
+    Returns:
+        Path: The assets directory (not guaranteed to exist yet - callers that
+        write into it should mkdir(parents=True, exist_ok=True)).
+    """
+    return get_cloudbyte_dir() / ASSETS_SUBDIR
 
 
 def get_claude_logs_dir() -> Path:

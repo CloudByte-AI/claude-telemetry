@@ -12,9 +12,8 @@ store it verbatim. When the session cwd is NOT a git repository, Claude Code
 emits the literal string "HEAD" - not null, not an empty string - so the
 dashboard shows a branch named "HEAD" that does not exist anywhere. In this
 machine's local DB that accounted for the single largest git_branch bucket,
-and every one of those rows came from a non-repo cwd
-(e.g. C:/Users/rajpa/PMS/claude-mem-central, whose actual git repo lives one
-level down in claude-mem-central/claude-mem-central).
+and every one of those rows came from a non-repo cwd: a wrapper folder whose
+actual git repo lives one level down.
 
 The same literal "HEAD" is also what `git rev-parse --abbrev-ref HEAD` prints
 in a genuine detached-HEAD checkout, so the Cursor path - which derives the
@@ -134,7 +133,7 @@ def _branch_in_single_child_repo(cwd: str) -> Optional[str]:
     """
     cwd is not a repo. If exactly one immediate child directory is a git repo,
     return its branch - this is the common "wrapper folder around the checkout"
-    layout (PMS/claude-mem-central/claude-mem-central). Ambiguity returns None.
+    layout. Ambiguity returns None.
     """
     try:
         entries = sorted(os.scandir(cwd), key=lambda e: e.name)
