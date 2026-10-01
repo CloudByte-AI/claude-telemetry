@@ -25,6 +25,23 @@
         ]
       }
     ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell|Write|Edit|NotebookEdit|Read|WebFetch|WebSearch|mcp__.*",
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://127.0.0.1:4723/guardrails/claude/pre_tool_use",
+            "timeout": 10,
+            "headers": {
+              "X-CloudByte-Guardrails-Disabled": "$CLOUDBYTE_GUARDRAILS_DISABLED"
+            },
+            "allowedEnvVars": ["CLOUDBYTE_GUARDRAILS_DISABLED"],
+            "statusMessage": "CloudByte: checking guardrails..."
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [

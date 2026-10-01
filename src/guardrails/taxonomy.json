@@ -1,0 +1,984 @@
+{
+  "taxonomy_version": 1,
+  "generated_from": "src/guardrails/registry.py - DO NOT HAND-EDIT",
+  "operation_count": 74,
+  "implemented_count": 24,
+  "reserved_count": 50,
+  "operations": [
+    {
+      "operation": "db.bulk_delete",
+      "domain": "db",
+      "description": "Deletes many rows in one statement",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "warn",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "db.drop",
+      "domain": "db",
+      "description": "Drops a database, schema, table or collection",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "critical",
+      "implemented": true,
+      "facts": [
+        "client",
+        "object_type"
+      ]
+    },
+    {
+      "operation": "db.dump",
+      "domain": "db",
+      "description": "Exports database contents to a file or stream",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "allow",
+      "default_alert": "warn",
+      "implemented": true,
+      "facts": [
+        "destination",
+        "tool"
+      ]
+    },
+    {
+      "operation": "db.grant",
+      "domain": "db",
+      "description": "Grants or revokes database privileges",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "warn",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "db.migration",
+      "domain": "db",
+      "description": "Runs a schema migration",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "allow",
+      "default_alert": "warn",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "db.truncate",
+      "domain": "db",
+      "description": "Empties a table",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "critical",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "devflow.ci.trigger",
+      "domain": "devflow",
+      "description": "Triggers a CI or deployment pipeline",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "allow",
+      "default_alert": "warn",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "devflow.dependency.unpinned",
+      "domain": "devflow",
+      "description": "Adds a dependency without a pinned version",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "allow",
+      "default_alert": "info",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "devflow.lockfile.bypass",
+      "domain": "devflow",
+      "description": "Bypasses or discards a dependency lockfile",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "allow",
+      "default_alert": "warn",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "devflow.publish",
+      "domain": "devflow",
+      "description": "Publishes an artifact to a package registry",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "critical",
+      "implemented": true,
+      "facts": [
+        "artifact",
+        "publisher"
+      ]
+    },
+    {
+      "operation": "devflow.test.skip",
+      "domain": "devflow",
+      "description": "Skips or disables tests",
+      "applies_to": [
+        "shell",
+        "write",
+        "edit"
+      ],
+      "default_action": "allow",
+      "default_alert": "warn",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "exec.background",
+      "domain": "exec",
+      "description": "Detaches a process to run in the background",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "allow",
+      "default_alert": "info",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "exec.encoded",
+      "domain": "exec",
+      "description": "Executes encoded or obfuscated content, defeating inspection",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "critical",
+      "implemented": true,
+      "facts": [
+        "decoder",
+        "technique"
+      ]
+    },
+    {
+      "operation": "exec.interpreter",
+      "domain": "exec",
+      "description": "Executes inline code through a language interpreter",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "allow",
+      "default_alert": "warn",
+      "implemented": true,
+      "facts": [
+        "interpreter"
+      ]
+    },
+    {
+      "operation": "exec.privilege",
+      "domain": "exec",
+      "description": "Runs a command with elevated privileges",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "allow",
+      "default_alert": "warn",
+      "implemented": true,
+      "facts": [
+        "escalator",
+        "wrapped_command"
+      ]
+    },
+    {
+      "operation": "exec.process.kill",
+      "domain": "exec",
+      "description": "Terminates a running process",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "allow",
+      "default_alert": "info",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "exec.remote",
+      "domain": "exec",
+      "description": "Executes a command on a remote host",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "warn",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "exec.scheduled",
+      "domain": "exec",
+      "description": "Schedules future execution (cron, at, systemd timer)",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "warn",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "exec.shell.eval",
+      "domain": "exec",
+      "description": "Evaluates a dynamically constructed shell string",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "warn",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "fs.copy",
+      "domain": "fs",
+      "description": "Copies a filesystem path",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "allow",
+      "default_alert": "info",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "fs.create",
+      "domain": "fs",
+      "description": "Creates a new file or directory",
+      "applies_to": [
+        "shell",
+        "read",
+        "write",
+        "edit",
+        "delete"
+      ],
+      "default_action": "allow",
+      "default_alert": "info",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "fs.delete",
+      "domain": "fs",
+      "description": "Deletes a filesystem path",
+      "applies_to": [
+        "shell",
+        "delete"
+      ],
+      "default_action": "allow",
+      "default_alert": "info",
+      "implemented": true,
+      "facts": []
+    },
+    {
+      "operation": "fs.delete.recursive",
+      "domain": "fs",
+      "description": "Recursive or forced delete of a filesystem path",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "warn",
+      "implemented": true,
+      "facts": [
+        "forced",
+        "recursive",
+        "target_count"
+      ]
+    },
+    {
+      "operation": "fs.move",
+      "domain": "fs",
+      "description": "Moves or renames a filesystem path",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "allow",
+      "default_alert": "info",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "fs.permission",
+      "domain": "fs",
+      "description": "Changes file permissions or ownership",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "allow",
+      "default_alert": "info",
+      "implemented": true,
+      "facts": [
+        "recursive",
+        "world_writable"
+      ]
+    },
+    {
+      "operation": "fs.read",
+      "domain": "fs",
+      "description": "Reads a file",
+      "applies_to": [
+        "shell",
+        "read",
+        "write",
+        "edit",
+        "delete"
+      ],
+      "default_action": "allow",
+      "default_alert": "info",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "fs.sensitive",
+      "domain": "fs",
+      "description": "Touches a credential, key or other sensitive file",
+      "applies_to": [
+        "shell",
+        "read",
+        "write",
+        "edit",
+        "delete"
+      ],
+      "default_action": "ask",
+      "default_alert": "warn",
+      "implemented": true,
+      "facts": [
+        "sensitive_path"
+      ]
+    },
+    {
+      "operation": "fs.symlink",
+      "domain": "fs",
+      "description": "Creates a symbolic or hard link",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "allow",
+      "default_alert": "warn",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "fs.write",
+      "domain": "fs",
+      "description": "Writes or overwrites a file",
+      "applies_to": [
+        "shell",
+        "read",
+        "write",
+        "edit",
+        "delete"
+      ],
+      "default_action": "allow",
+      "default_alert": "info",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "infra.cloud.delete",
+      "domain": "infra",
+      "description": "Deletes a cloud resource",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "critical",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "infra.dns.change",
+      "domain": "infra",
+      "description": "Changes DNS records",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "warn",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "infra.docker.privileged",
+      "domain": "infra",
+      "description": "Runs a container with privileged access to the host",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "warn",
+      "implemented": true,
+      "facts": [
+        "flags",
+        "technique"
+      ]
+    },
+    {
+      "operation": "infra.docker.prune",
+      "domain": "infra",
+      "description": "Prunes container images, volumes or networks",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "allow",
+      "default_alert": "warn",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "infra.iam.change",
+      "domain": "infra",
+      "description": "Changes identity or access policy",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "critical",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "infra.k8s.delete",
+      "domain": "infra",
+      "description": "Deletes Kubernetes resources",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "critical",
+      "implemented": true,
+      "facts": [
+        "all_resources",
+        "namespace",
+        "resource"
+      ]
+    },
+    {
+      "operation": "infra.secrets.access",
+      "domain": "infra",
+      "description": "Reads infrastructure secrets",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "warn",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "infra.terraform.destroy",
+      "domain": "infra",
+      "description": "Tears down provisioned infrastructure",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "critical",
+      "implemented": true,
+      "facts": [
+        "auto_approved",
+        "tool"
+      ]
+    },
+    {
+      "operation": "mcp.bulk",
+      "domain": "mcp",
+      "description": "MCP tool operating on many records at once",
+      "applies_to": [
+        "mcp"
+      ],
+      "default_action": "allow",
+      "default_alert": "warn",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "mcp.credential_access",
+      "domain": "mcp",
+      "description": "MCP tool that reads credentials",
+      "applies_to": [
+        "mcp"
+      ],
+      "default_action": "ask",
+      "default_alert": "critical",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "mcp.delete",
+      "domain": "mcp",
+      "description": "MCP tool whose name indicates it deletes data",
+      "applies_to": [
+        "mcp"
+      ],
+      "default_action": "ask",
+      "default_alert": "warn",
+      "implemented": true,
+      "facts": [
+        "mcp_server",
+        "verb"
+      ]
+    },
+    {
+      "operation": "mcp.elevated",
+      "domain": "mcp",
+      "description": "MCP tool requesting elevated capability",
+      "applies_to": [
+        "mcp"
+      ],
+      "default_action": "ask",
+      "default_alert": "warn",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "mcp.external_send",
+      "domain": "mcp",
+      "description": "MCP tool that sends data to an external service",
+      "applies_to": [
+        "mcp"
+      ],
+      "default_action": "allow",
+      "default_alert": "warn",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "mcp.new_server",
+      "domain": "mcp",
+      "description": "First use of a previously unseen MCP server",
+      "applies_to": [
+        "mcp"
+      ],
+      "default_action": "allow",
+      "default_alert": "warn",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "mcp.ungoverned",
+      "domain": "mcp",
+      "description": "MCP tool outside the configured allowlist",
+      "applies_to": [
+        "mcp"
+      ],
+      "default_action": "allow",
+      "default_alert": "warn",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "mcp.write",
+      "domain": "mcp",
+      "description": "MCP tool whose name indicates it writes or sends data",
+      "applies_to": [
+        "mcp"
+      ],
+      "default_action": "allow",
+      "default_alert": "info",
+      "implemented": true,
+      "facts": [
+        "mcp_server",
+        "verb"
+      ]
+    },
+    {
+      "operation": "net.download",
+      "domain": "net",
+      "description": "Downloads content from a remote host",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "allow",
+      "default_alert": "info",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "net.download.exec",
+      "domain": "net",
+      "description": "Pipes downloaded content straight into an interpreter",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "critical",
+      "implemented": true,
+      "facts": [
+        "fetcher",
+        "host"
+      ]
+    },
+    {
+      "operation": "net.egress.unknown",
+      "domain": "net",
+      "description": "Connects to a host not seen before",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "allow",
+      "default_alert": "warn",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "net.scan",
+      "domain": "net",
+      "description": "Scans hosts or ports",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "warn",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "net.tunnel",
+      "domain": "net",
+      "description": "Opens a tunnel or port forward",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "warn",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "net.upload",
+      "domain": "net",
+      "description": "Sends local data to a remote host",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "allow",
+      "default_alert": "warn",
+      "implemented": true,
+      "facts": [
+        "host",
+        "method"
+      ]
+    },
+    {
+      "operation": "net.web.fetch",
+      "domain": "net",
+      "description": "Fetches a URL through the platform's own web tool",
+      "applies_to": [
+        "web"
+      ],
+      "default_action": "allow",
+      "default_alert": "info",
+      "implemented": true,
+      "facts": [
+        "host"
+      ]
+    },
+    {
+      "operation": "net.web.search",
+      "domain": "net",
+      "description": "Runs a web search, which can carry local context off-box",
+      "applies_to": [
+        "web"
+      ],
+      "default_action": "allow",
+      "default_alert": "info",
+      "implemented": true,
+      "facts": []
+    },
+    {
+      "operation": "sec.audit.disable",
+      "domain": "sec",
+      "description": "Disables logging, history or auditing",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "critical",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "sec.cert.modify",
+      "domain": "sec",
+      "description": "Installs or modifies a certificate or trust store",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "critical",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "sec.credential.read",
+      "domain": "sec",
+      "description": "Reads or prints a credential, token or secret value",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "warn",
+      "implemented": true,
+      "facts": [
+        "provider"
+      ]
+    },
+    {
+      "operation": "sec.credential.write",
+      "domain": "sec",
+      "description": "Writes a credential to disk or a store",
+      "applies_to": [
+        "shell",
+        "read",
+        "write",
+        "edit",
+        "delete"
+      ],
+      "default_action": "ask",
+      "default_alert": "critical",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "sec.firewall.change",
+      "domain": "sec",
+      "description": "Changes firewall or security-group rules",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "critical",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "sec.key.generate",
+      "domain": "sec",
+      "description": "Generates a cryptographic key",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "allow",
+      "default_alert": "info",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "sys.env.modify",
+      "domain": "sys",
+      "description": "Modifies persistent environment configuration",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "allow",
+      "default_alert": "warn",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "sys.kernel.module",
+      "domain": "sys",
+      "description": "Loads or unloads a kernel module",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "critical",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "sys.package.install",
+      "domain": "sys",
+      "description": "Installs a package or dependency",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "allow",
+      "default_alert": "info",
+      "implemented": true,
+      "facts": [
+        "is_global",
+        "manager",
+        "package_count"
+      ]
+    },
+    {
+      "operation": "sys.service.control",
+      "domain": "sys",
+      "description": "Starts, stops or restarts a system service",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "allow",
+      "default_alert": "warn",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "sys.shutdown",
+      "domain": "sys",
+      "description": "Shuts down or reboots the machine",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "warn",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "sys.user.modify",
+      "domain": "sys",
+      "description": "Creates, modifies or deletes a system user or group",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "critical",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "vcs.branch.delete",
+      "domain": "vcs",
+      "description": "Deletes a branch, locally or on a remote",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "allow",
+      "default_alert": "warn",
+      "implemented": true,
+      "facts": [
+        "branch",
+        "remote"
+      ]
+    },
+    {
+      "operation": "vcs.clean",
+      "domain": "vcs",
+      "description": "Discards untracked files from the working tree",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "warn",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "vcs.config.change",
+      "domain": "vcs",
+      "description": "Changes version-control configuration",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "allow",
+      "default_alert": "info",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "vcs.credential.store",
+      "domain": "vcs",
+      "description": "Stores version-control credentials on disk",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "critical",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "vcs.force_push",
+      "domain": "vcs",
+      "description": "Force-pushes, overwriting remote history",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "critical",
+      "implemented": true,
+      "facts": [
+        "remote",
+        "with_lease"
+      ]
+    },
+    {
+      "operation": "vcs.history.rewrite",
+      "domain": "vcs",
+      "description": "Rewrites version-control history, discarding commits",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "warn",
+      "implemented": true,
+      "facts": [
+        "operation_kind"
+      ]
+    },
+    {
+      "operation": "vcs.remote.add",
+      "domain": "vcs",
+      "description": "Adds or changes a version-control remote",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "ask",
+      "default_alert": "warn",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "vcs.submodule",
+      "domain": "vcs",
+      "description": "Adds, updates or removes a submodule",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "allow",
+      "default_alert": "info",
+      "implemented": false,
+      "facts": []
+    },
+    {
+      "operation": "vcs.tag.delete",
+      "domain": "vcs",
+      "description": "Deletes a tag locally or on a remote",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "allow",
+      "default_alert": "warn",
+      "implemented": false,
+      "facts": []
+    }
+  ]
+}

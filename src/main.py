@@ -133,6 +133,11 @@ def user_prompt() -> None:
     handle_user_prompt()
 
 
+# NOTE: the guardrails PreToolUse hook is not dispatched from here. It fires on
+# every governed tool call and this module's imports are heavy, so it runs from
+# src/hook_entry.py instead.
+
+
 def stop() -> None:
     """
     Stop hook - Called when Claude stops processing.
@@ -565,6 +570,18 @@ def stop() -> None:
                             }))
         except Exception as _sec_err:
             logger.warning(f"Response security scan error (non-fatal): {_sec_err}")
+
+        # ── Drain the guardrails audit spool ─────────────────────────────────
+        # After the tool writes above: the drain resolves user_decision from
+        # each asked-about call's TOOL row. Draining in hooks keeps SQLite off
+        # the guardrails hot path.
+        try:
+            from src.guardrails.db_writer import drain as _drain_guardrails
+            _drained = _drain_guardrails()
+            if _drained:
+                logger.info(f"Guardrails: {_drained} audit event(s) written")
+        except Exception as _gr_err:
+            logger.warning(f"Guardrails audit drain error (non-fatal): {_gr_err}")
 
         # Close database connection
         from src.db.manager import close_db

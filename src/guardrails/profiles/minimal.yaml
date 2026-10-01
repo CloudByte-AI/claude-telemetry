@@ -1,0 +1,57 @@
+# Guardrails - MINIMAL preset
+#
+# Denies nothing, and asks about exactly two operations: the ones where being
+# wrong costs most and the prompt is rare enough to still be read. Everything
+# else is detected and allowed. Start here if you want the audit trail without
+# any change to how the agent behaves day to day.
+#
+# On Cursor, `ask` does not stop anything: Cursor shows no approval prompt for
+# it, so the call runs and is recorded as not_prompted. Only `deny` blocks there.
+#
+# On Windows, macOS and Linux desktops, every `ask` and `deny` from a rule
+# whose `alert` is critical or warn also shows a desktop notification. Choose
+# which in ~/.cloudbyte/guardrails/guardrails_notifications.yaml:
+#   show: critical_and_warn     # off | critical | critical_and_warn
+#
+# Every rule here has a permanent id (prefix `cb.`), which names it in the
+# audit table. Give your own rules your own prefix, for example
+# `id: acme.prod-deploy`. A rule without an id is named by its position
+# (`bash#3`), which changes when a rule is added above it.
+
+schema_version: 1
+enabled: true
+plan: minimal
+
+tables:
+
+  bash:
+    # Irreversible, and usually not what anyone intended.
+    - { id: cb.infra.terraform-destroy,
+        operation: infra.terraform.destroy,
+        decision: ask, alert: critical,
+        reason: "This tears down provisioned infrastructure" }
+
+    # A published version number cannot be taken back, even after unpublishing.
+    - { id: cb.devflow.publish,
+        operation: devflow.publish,
+        decision: ask, alert: critical,
+        reason: "This publishes to a package registry and cannot be undone" }
+
+    - { id: cb.bash.default,
+        decision: allow, alert: info, reason: "Default allow" }
+
+  file:
+    - { id: cb.file.default,
+        decision: allow, alert: info, reason: "Default allow" }
+
+  mcp:
+    - { id: cb.mcp.default,
+        decision: allow, alert: info, reason: "Default allow" }
+
+  web:
+    - { id: cb.web.default,
+        decision: allow, alert: info, reason: "Default allow" }
+
+allowlist: []
+mcp_allowlist: []
+known_hosts: []

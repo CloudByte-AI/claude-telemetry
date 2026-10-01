@@ -771,6 +771,24 @@ if ($cliCapable -gt 0 -and $cliSucceeded -eq 0) {
     Fail-Exit "Plugin uninstall failed in every editor that supports CLI removal." 6
 }
 
+# The notification identity: the per-user registry key that makes Windows show
+# "CloudByte-AI" as the sender of guardrail notifications (windows_toast.py, APP_ID).
+# Safe to remove even if another editor keeps the plugin: it is written again
+# the next time a notification is shown.
+$NotificationKey = "HKCU:\Software\Classes\AppUserModelId\CloudByte.AI"
+if (Test-Path -LiteralPath $NotificationKey) {
+    try {
+        Remove-Item -LiteralPath $NotificationKey -Recurse -Force -ErrorAction Stop
+        SayOk "Notification identity removed (CloudByte-AI)"
+    }
+    catch {
+        SayWarn "Could not remove the notification identity: $($_.Exception.Message)"
+        Write-Host "       Remove it yourself with:"
+        Write-Host "         Remove-Item -LiteralPath `"$NotificationKey`" -Recurse -Force"
+    }
+    Write-Host ""
+}
+
 # ── Step 3: Marketplace ────────────────────────────────────────────────────────
 
 Header "Step 3: Marketplace Entry"
