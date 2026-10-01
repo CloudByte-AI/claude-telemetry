@@ -1,0 +1,164 @@
+# Guardrails - STRICT preset
+#
+# Everything standard enforces, plus a DENY tier.
+#
+# A `deny` is not a prompt. The tool does not run, nobody is asked, and the
+# reason goes to the AGENT rather than to you - so write deny reasons as
+# instructions the agent can act on ("use the staging database instead"), not
+# as explanations for a human.
+#
+# The deny tier is deliberately short: each row is almost never intended and
+# is expensive or impossible to undo.
+#
+# On Cursor, only the deny tier blocks. Cursor shows no approval prompt for
+# `ask`, so the ask tier's calls run there, the agent is warned and the event
+# is recorded as not_prompted. Move a rule to deny if it must hold on Cursor.
+#
+# On Windows, macOS and Linux desktops, every `ask` and `deny` from a rule
+# whose `alert` is critical or warn also shows a desktop notification. Choose
+# which in ~/.cloudbyte/guardrails/guardrails_notifications.yaml:
+#   show: critical_and_warn     # off | critical | critical_and_warn
+#
+# Every rule here has a permanent id (prefix `cb.`), which names it in the
+# audit table. Give your own rules your own prefix, for example
+# `id: acme.prod-deploy`. A rule without an id is named by its position
+# (`bash#3`), which changes when a rule is added above it.
+
+schema_version: 1
+enabled: true
+plan: strict
+
+tables:
+
+  bash:
+    # ── deny tier ────────────────────────────────────────────────────────
+    # Root or drive-root deletion. There is no legitimate version of this.
+    - { id: cb.fs.delete-root,
+        operation: fs.delete.recursive, target_path: {equals: "/"},
+        decision: deny, alert: critical,
+        reason: "Root deletion is blocked. Delete a specific subdirectory instead." }
+    - { id: cb.fs.delete-drive-root,
+        operation: fs.delete.recursive, target_path: {regex: "^[A-Za-z]:/$"},
+        decision: deny, alert: critical,
+        reason: "Drive-root deletion is blocked. Delete a specific subdirectory instead." }
+
+    # Piping a download straight into a shell: the remote host chooses what runs.
+    - { id: cb.net.download-exec,
+        operation: net.download.exec,
+        decision: deny, alert: critical,
+        reason: "Downloading and executing in one step is blocked. Download the script, then run it after review." }
+
+    # Encoded execution exists to defeat inspection, which is what this layer is.
+    - { id: cb.exec.encoded,
+        operation: exec.encoded,
+        decision: deny, alert: critical,
+        reason: "Encoded or obfuscated execution is blocked. Run the command in plain form." }
+
+    # ── ask tier ─────────────────────────────────────────────────────────
+    - { id: cb.fs.cleanup-node-modules,
+        operation: fs.delete.recursive, target_path: {contains: "node_modules"},
+        decision: allow, alert: info, reason: "Dependency directory cleanup" }
+    - { id: cb.fs.recursive-delete,
+        operation: fs.delete.recursive,
+        decision: ask, alert: warn,
+        reason: "Recursive delete - review the target before approving" }
+
+    # --force-with-lease refuses when the remote moved, so it is the safe form
+    # and is allowed above the broader force-push ask.
+    - { id: cb.vcs.force-push-with-lease,
+        operation: vcs.force_push, with_lease: true,
+        decision: allow, alert: info, reason: "Force-push with lease is safe" }
+    - { id: cb.vcs.force-push,
+        operation: vcs.force_push,
+        decision: ask, alert: critical,
+        reason: "Force-push overwrites remote history - confirm the branch" }
+
+    - { id: cb.vcs.history-rewrite,
+        operation: vcs.history.rewrite,
+        decision: ask, alert: warn,
+        reason: "This rewrites git history - confirm the target branch" }
+    - { id: cb.vcs.branch-delete,
+        operation: vcs.branch.delete,
+        decision: ask, alert: warn, reason: "Branch deletion" }
+
+    - { id: cb.infra.terraform-destroy,
+        operation: infra.terraform.destroy,
+        decision: ask, alert: critical, reason: "This tears down provisioned infrastructure" }
+    - { id: cb.infra.k8s-delete,
+        operation: infra.k8s.delete,
+        decision: ask, alert: critical, reason: "This deletes Kubernetes resources" }
+    - { id: cb.infra.docker-privileged,
+        operation: infra.docker.privileged,
+        decision: ask, alert: warn, reason: "This container gets access to the host" }
+
+    - { id: cb.db.drop,
+        operation: db.drop,
+        decision: ask, alert: critical, reason: "This drops a database object" }
+    - { id: cb.db.dump,
+        operation: db.dump,
+        decision: ask, alert: warn, reason: "This exports database contents" }
+
+    - { id: cb.sec.credential-print,
+        operation: sec.credential.read,
+        decision: ask, alert: warn, reason: "This prints a credential" }
+    - { id: cb.devflow.publish,
+        operation: devflow.publish,
+        decision: ask, alert: critical,
+        reason: "This publishes to a package registry and cannot be undone" }
+
+    - { id: cb.exec.privileged,
+        operation: exec.privilege,
+        decision: ask, alert: warn, reason: "This runs with elevated privileges" }
+    - { id: cb.net.upload,
+        operation: net.upload,
+        decision: ask, alert: warn, reason: "This sends local data to a remote host" }
+
+    - { id: cb.fs.credential-shell,
+        operation: fs.sensitive, kind: shell,
+        decision: ask, alert: warn, reason: "This touches a credential or key file" }
+
+    - { id: cb.bash.default,
+        decision: allow, alert: info, reason: "Default allow" }
+
+  file:
+    - { id: cb.fs.credential-write,
+        operation: fs.sensitive, kind: write,
+        decision: deny, alert: critical,
+        reason: "Writing credential files is blocked. Put secrets in the environment or a secret store." }
+    - { id: cb.fs.credential-edit,
+        operation: fs.sensitive, kind: edit,
+        decision: ask, alert: warn, reason: "Editing a credential or key file" }
+    - { id: cb.fs.credential-read,
+        operation: fs.sensitive, kind: read,
+        decision: ask, alert: warn, reason: "Reading a credential or key file" }
+    - { id: cb.fs.file-delete,
+        operation: fs.delete, kind: delete,
+        decision: ask, alert: warn, reason: "File deletion" }
+    - { id: cb.file.default,
+        decision: allow, alert: info, reason: "Default allow" }
+
+  mcp:
+    - { id: cb.mcp.delete,
+        operation: mcp.delete,
+        decision: ask, alert: warn, reason: "This MCP tool deletes data" }
+    - { id: cb.mcp.write,
+        operation: mcp.write,
+        decision: ask, alert: info, reason: "This MCP tool writes data" }
+    - { id: cb.mcp.default,
+        decision: allow, alert: info, reason: "Default allow" }
+
+  web:
+    - { id: cb.net.web-fetch,
+        operation: net.web.fetch,
+        decision: ask, alert: warn, audit: true,
+        reason: "Fetching an external URL" }
+    - { id: cb.net.web-search,
+        operation: net.web.search,
+        decision: allow, alert: info, audit: true,
+        reason: "Web search - recorded" }
+    - { id: cb.web.default,
+        decision: allow, alert: info, reason: "Default allow" }
+
+allowlist: []
+mcp_allowlist: []
+known_hosts: []

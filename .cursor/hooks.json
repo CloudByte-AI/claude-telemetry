@@ -36,6 +36,35 @@
         "timeout": 30
       }
     ],
+    "beforeShellExecution": [
+      {
+        "command": "uv run --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.hook_entry cursor before_shell_execution",
+        "type": "command",
+        "timeout": 10
+      }
+    ],
+    "beforeMCPExecution": [
+      {
+        "command": "uv run --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.hook_entry cursor before_mcp_execution",
+        "type": "command",
+        "timeout": 10
+      }
+    ],
+    "beforeReadFile": [
+      {
+        "command": "uv run --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.hook_entry cursor before_read_file",
+        "type": "command",
+        "timeout": 10
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "uv run --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.hook_entry cursor pre_tool_use",
+        "type": "command",
+        "timeout": 10,
+        "matcher": "Write|StrReplace|EditNotebook|Delete"
+      }
+    ],
     "afterMCPExecution": [
       {
         "command": "uv run --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main after_mcp_execution",

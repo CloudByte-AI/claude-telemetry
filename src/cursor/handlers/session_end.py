@@ -61,6 +61,15 @@ def handle_session_end() -> None:
 
         obs_state.delete_session(session_id)
 
+        # ── Drain the guardrails audit spool ─────────────────────────────────
+        # Catches events a skipped or failed stop left in the spool, and links
+        # them to their tool calls.
+        try:
+            from src.cursor.handlers.guardrails import drain_audit
+            drain_audit()
+        except Exception as _gr_err:
+            logger.warning(f"Guardrails audit drain error (non-fatal): {_gr_err}")
+
         # Shut down the shared worker/dashboard at localhost:4723 - but only
         # if no other session (another Cursor session, or a Claude Code
         # session) is still relying on it. See

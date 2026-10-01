@@ -10,6 +10,7 @@ Invoked as: uv run --directory <plugin_root> -m src.cursor.main <command>
 See hooks/cursor/hooks.json for which commands are currently wired to a hook.
 """
 
+import json
 import sys
 from pathlib import Path
 
@@ -17,10 +18,15 @@ from pathlib import Path
 src_path = Path(__file__).parent.parent
 sys.path.insert(0, str(src_path))
 
+from src.common.install_owner import CURSOR, foreign_owner, stand_down_notice
 from src.common.logging import get_logger
 
 
 logger = get_logger(__name__)
+
+# What a hook prints when it has nothing to say (see stand_down).
+# beforeSubmitPrompt must say `continue`; every other hook takes `{}`.
+NEUTRAL_OUTPUT = {"before_submit_prompt": {"continue": True}}
 
 # Every command dispatched below reads the DB path via
 # src.common.paths.get_db_path(), so each handler just calls the plain
@@ -77,6 +83,30 @@ def after_mcp_execution() -> None:
     handle_after_mcp_execution()
 
 
+# NOTE: the four guardrails hooks are not dispatched from here. They fire on
+# every governed tool call, so they run from the lighter src/hook_entry.py.
+
+
+def stand_down(command: str) -> bool:
+    """
+    True when this copy is another client's install (Cursor also runs our
+    Cursor hooks from the Claude Code install), after answering neutrally.
+
+    Cursor's own install records the hook, so this copy only drains stdin,
+    prints the neutral answer and leaves a line in Cursor's hook log.
+    """
+    owner = foreign_owner(CURSOR)
+    if owner is None:
+        return False
+    try:
+        sys.stdin.buffer.read()     # a writer blocked on a full pipe must not wait on us
+    except Exception:
+        pass
+    print(stand_down_notice(owner, CURSOR), file=sys.stderr)
+    print(json.dumps(NEUTRAL_OUTPUT.get(command, {})))
+    return True
+
+
 def main() -> None:
     handlers = {
         "session_start": session_start,
@@ -101,6 +131,9 @@ def main() -> None:
         print(f"Unknown command: {command}")
         print(f"Available commands: {', '.join(handlers.keys())}")
         sys.exit(1)
+
+    if stand_down(command):
+        return
 
     try:
         handler()

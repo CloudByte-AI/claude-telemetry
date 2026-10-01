@@ -1,0 +1,135 @@
+# Guardrails - STANDARD preset
+#
+# Shipped template, read-only. Copy it to
+# ~/.cloudbyte/guardrails/guardrails_profile.yaml and edit there; this file is
+# replaced on plugin update.
+#
+# Posture: DETECT BROADLY, ENFORCE NARROWLY.
+# Every implemented matcher runs on every governed call, but only four
+# operations are enforced here, all as `ask`, never `deny`: a false `deny`
+# breaks someone's work, a false `ask` costs seconds. Deny rules live in
+# strict.yaml.
+#
+# Rules are evaluated TOP TO BOTTOM, first match wins, per table. Each table
+# MUST end with a row carrying no conditions - the explicit default.
+#
+# Every `ask` and `deny` is recorded in the audit table. An `allow` is
+# recorded only when its rule says `audit: true`.
+#
+# Five operators, positive only:
+#   equals  starts_with  ends_with  contains  regex
+# There is no negation, because ordering already is negation: put the
+# narrower `allow` above the broader `ask`.
+#
+# On Cursor, `ask` does not stop anything: Cursor shows no approval prompt for
+# it, so the call runs, the agent is warned and the event is recorded as
+# not_prompted. Only `deny` blocks there. If a rule must hold on Cursor, make
+# it `deny`.
+#
+# On Windows, macOS and Linux desktops, every `ask` and `deny` from a rule
+# whose `alert` is critical or warn also shows a desktop notification. Choose
+# which in ~/.cloudbyte/guardrails/guardrails_notifications.yaml:
+#   show: critical_and_warn     # off | critical | critical_and_warn
+#
+# Every rule here has a permanent id (prefix `cb.`), which names it in the
+# audit table. Give your own rules your own prefix, for example
+# `id: acme.prod-deploy`. A rule without an id is named by its position
+# (`bash#3`), which changes when a rule is added above it.
+
+schema_version: 1
+enabled: true
+plan: standard
+
+tables:
+
+  # ── shell commands ──────────────────────────────────────────────────────
+  bash:
+    # Cleaning build output is the most common recursive delete an agent does.
+    # Allowing it FIRST keeps the ask below rare enough to be read.
+    - { id: cb.fs.cleanup-node-modules,
+        operation: fs.delete.recursive, target_path: {contains: "node_modules"},
+        decision: allow, alert: info, reason: "Dependency directory cleanup" }
+    - { id: cb.fs.cleanup-dist,
+        operation: fs.delete.recursive, target_path: {contains: "/dist"},
+        decision: allow, alert: info, reason: "Build output cleanup" }
+    - { id: cb.fs.cleanup-build,
+        operation: fs.delete.recursive, target_path: {contains: "/build"},
+        decision: allow, alert: info, reason: "Build output cleanup" }
+    - { id: cb.fs.cleanup-next,
+        operation: fs.delete.recursive, target_path: {contains: "/.next"},
+        decision: allow, alert: info, reason: "Build output cleanup" }
+    - { id: cb.fs.cleanup-pycache,
+        operation: fs.delete.recursive, target_path: {contains: "__pycache__"},
+        decision: allow, alert: info, reason: "Build output cleanup" }
+
+    # 1. Recursive or forced delete of anything else.
+    - { id: cb.fs.recursive-delete,
+        operation: fs.delete.recursive,
+        decision: ask, alert: warn,
+        reason: "Recursive delete - review the target before approving" }
+
+    # 2. History rewrites discard work that is often not recoverable.
+    - { id: cb.vcs.history-rewrite,
+        operation: vcs.history.rewrite,
+        decision: ask, alert: warn,
+        reason: "This rewrites git history - confirm the target branch" }
+
+    # 3. Writing to a credential or key file.
+    - { id: cb.fs.credential-shell-destructive,
+        operation: fs.sensitive, kind: shell, is_destructive: true,
+        decision: ask, alert: warn,
+        reason: "This touches a credential or key file" }
+
+    - { id: cb.bash.default,
+        decision: allow, alert: info, reason: "Default allow" }
+
+  # ── file tools (Read / Write / Edit / Delete) ───────────────────────────
+  file:
+    # 3 (continued). The same operation on the structured file surface.
+    - { id: cb.fs.credential-write,
+        operation: fs.sensitive, kind: write,
+        decision: ask, alert: warn,
+        reason: "Writing to a credential or key file" }
+    - { id: cb.fs.credential-edit,
+        operation: fs.sensitive, kind: edit,
+        decision: ask, alert: warn,
+        reason: "Editing a credential or key file" }
+
+    # Reading one is worth an audit row, not a prompt: agents legitimately read
+    # .env files constantly. `audit: true` records it even though it is allowed.
+    - { id: cb.fs.credential-read,
+        operation: fs.sensitive, kind: read,
+        decision: allow, alert: info, audit: true,
+        reason: "Read of a sensitive file - recorded" }
+
+    - { id: cb.file.default,
+        decision: allow, alert: info, reason: "Default allow" }
+
+  # ── MCP tools ───────────────────────────────────────────────────────────
+  mcp:
+    # 4. An MCP tool whose name says it deletes something.
+    - { id: cb.mcp.delete,
+        operation: mcp.delete,
+        decision: ask, alert: warn,
+        reason: "This MCP tool deletes data" }
+
+    - { id: cb.mcp.default,
+        decision: allow, alert: info, reason: "Default allow" }
+
+  # ── platform web tools ──────────────────────────────────────────────────
+  web:
+    # Recorded but not enforced. Raise to `ask` if you want approval on egress.
+    - { id: cb.net.web-fetch,
+        operation: net.web.fetch, decision: allow, alert: info, audit: true,
+        reason: "Web fetch - recorded" }
+    - { id: cb.web.default,
+        decision: allow, alert: info, reason: "Default allow" }
+
+# Exact strings that never match anything. The escape hatch for a command you
+# got tired of approving. Mirrors the security scanner's allowlist.
+allowlist: []
+
+# Seeded at Setup from the configured MCP servers.
+mcp_allowlist: []
+
+known_hosts: []

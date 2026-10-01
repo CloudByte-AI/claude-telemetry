@@ -164,6 +164,23 @@ def handle_session_start():
         except Exception as e:
             logger.debug(f"Worker check failed: {e}")
 
+        # ── Guardrails transport health ──────────────────────────────────────
+        # The PreToolUse hook reaches the policy engine over HTTP, so a stopped
+        # dashboard fails open silently and a stale one enforces an old engine.
+        # Runs after the worker check above, so a daemon that was merely not
+        # started yet is already up. No network when guardrails are disabled.
+        guardrails_warning = None
+        try:
+            from src.guardrails.health import check_and_repair
+            _probe = check_and_repair()
+            if _probe.degraded:
+                guardrails_warning = _probe.message
+                logger.warning(f"Guardrails transport degraded: {_probe.status} - {_probe.message}")
+            elif _probe.status == "ok":
+                logger.info(f"Guardrails active (plugin {_probe.plugin_version})")
+        except Exception as e:
+            logger.debug(f"Guardrails health probe failed: {e}")
+
         # Store session_id to a temp file for Stop hook to read later
         if session_id:
             from src.common.paths import get_cloudbyte_dir
@@ -211,6 +228,10 @@ def handle_session_start():
                     "additionalContext": OBS_INSTRUCTION
                 }
             }
+            # Shown to the user, not Claude: additionalContext would only tell
+            # the model.
+            if guardrails_warning:
+                output_data["systemMessage"] = f"Guardrails: {guardrails_warning}"
             print(json.dumps(output_data))
             logger.info("✓ OBS instruction successfully output to Claude Code")
             logger.info("=" * 60)

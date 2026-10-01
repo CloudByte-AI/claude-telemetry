@@ -83,6 +83,8 @@ cursor-agent plugin marketplace add https://github.com/CloudByte-AI/claude-telem
 
 Then: **Settings → Plugins → cursor-telemetry → Install**, and restart the session.
 
+> **Using both Claude Code and Cursor?** Install the plugin in each one.
+
 ### 3. Via the CloudByte skill (`npx cloudbyte-skills`)
 
 Installs a Claude Code skill that drives the plugin installation from inside a session.
