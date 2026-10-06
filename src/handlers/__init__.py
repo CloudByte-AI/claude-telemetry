@@ -7,6 +7,14 @@ Imports are lazy (a module __getattr__), so touching src.handlers does not
 load every handler and its heavy dependencies on the guardrails hot path.
 """
 
+import os
+
+# This plugin's Claude Code hook registration.
+HOOKS_FILE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "hooks", "hooks.json",
+)
+
 __all__ = [
     "handle_session_start",
     "handle_user_prompt",

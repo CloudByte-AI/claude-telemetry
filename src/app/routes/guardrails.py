@@ -2,11 +2,12 @@
 Guardrails evaluation over HTTP, inside the running dashboard process, so no
 Python process is spawned per governed tool call.
 
-The adapters' pure `normalise()` and `render()` do the work, so nothing here
-reimplements a decision. Claude Code can use this directly (`"type": "http"`);
-Cursor hooks accept only "command" and "prompt", so Cursor needs a relay such
-as curl. Enforcement depends on this process running; `/guardrails/health`
-lets a deployment verify it.
+The adapters' `decide_payload()` does the work, so nothing here reimplements a
+decision. An opt-in transport: the shipped hooks run the check inside the hook
+process, because a client that cannot reach this process lets the call through
+unchecked. Claude Code can use it directly (`"type": "http"`); Cursor hooks
+accept only "command" and "prompt", so Cursor needs a relay such as curl.
+`/guardrails/health` lets a deployment verify this process is running.
 """
 
 import logging
@@ -110,9 +111,9 @@ async def claude_pre_tool_use(request: Request) -> JSONResponse:
         return JSONResponse({})
 
     try:
-        from src.handlers.pre_tool_use import evaluate_payload, normalise
+        from src.handlers.pre_tool_use import decide_payload, normalise
 
-        output, decision = evaluate_payload(payload if isinstance(payload, dict) else {})
+        output, decision = decide_payload(payload if isinstance(payload, dict) else {})
 
         if decision.should_audit:
             try:
@@ -135,7 +136,7 @@ async def cursor_hook(hook_name: str, request: Request) -> JSONResponse:
     Cursor blocks on a response that does not match the hook schema, so an
     unknown hook or a failed evaluation returns a plain `allow`, never an error.
     """
-    from src.cursor.handlers.guardrails import HOOKS, evaluate_payload, normalise
+    from src.cursor.handlers.guardrails import HOOKS, decide_payload, normalise
 
     if _kill_switch(request):
         return JSONResponse({"permission": "allow"})
@@ -152,7 +153,7 @@ async def cursor_hook(hook_name: str, request: Request) -> JSONResponse:
         return JSONResponse({"permission": "allow"})
 
     try:
-        output, decision = evaluate_payload(payload if isinstance(payload, dict) else {}, hook)
+        output, decision = decide_payload(payload if isinstance(payload, dict) else {}, hook)
 
         if decision.should_audit:
             try:

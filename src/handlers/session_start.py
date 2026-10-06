@@ -165,19 +165,22 @@ def handle_session_start():
             logger.debug(f"Worker check failed: {e}")
 
         # ── Guardrails transport health ──────────────────────────────────────
-        # The PreToolUse hook reaches the policy engine over HTTP, so a stopped
-        # dashboard fails open silently and a stale one enforces an old engine.
-        # Runs after the worker check above, so a daemon that was merely not
+        # Only for the opt-in HTTP transport, where a stopped dashboard fails
+        # open silently and a stale one enforces an old engine. The shipped
+        # command hook runs the check itself, so the dashboard does not affect
+        # it. Runs after the worker check above, so a daemon that was merely not
         # started yet is already up. No network when guardrails are disabled.
         guardrails_warning = None
         try:
-            from src.guardrails.health import check_and_repair
-            _probe = check_and_repair()
-            if _probe.degraded:
-                guardrails_warning = _probe.message
-                logger.warning(f"Guardrails transport degraded: {_probe.status} - {_probe.message}")
-            elif _probe.status == "ok":
-                logger.info(f"Guardrails active (plugin {_probe.plugin_version})")
+            from src.guardrails.health import check_and_repair, http_transport_configured
+            from src.handlers import HOOKS_FILE
+            if http_transport_configured(HOOKS_FILE):
+                _probe = check_and_repair()
+                if _probe.degraded:
+                    guardrails_warning = _probe.message
+                    logger.warning(f"Guardrails transport degraded: {_probe.status} - {_probe.message}")
+                elif _probe.status == "ok":
+                    logger.info(f"Guardrails active (plugin {_probe.plugin_version})")
         except Exception as e:
             logger.debug(f"Guardrails health probe failed: {e}")
 

@@ -16,9 +16,11 @@ from typing import Sequence
 
 from src.guardrails.config import GuardrailsProfile, load_profile
 from src.guardrails.decision import (
+    CRITICAL,
     DENY,
     Decision,
     SOURCE_DISABLED,
+    SOURCE_ERROR,
 )
 from src.guardrails.matchers.base import MatchResult
 from src.guardrails.registry import MatcherRegistry
@@ -93,10 +95,9 @@ def deny_tier_literals(profile: GuardrailsProfile) -> tuple[str, ...]:
     """
     Literal fragments drawn from the profile's `deny` rules.
 
-    Feeds the fail-closed quick check in the adapters' exception wrapper: if the
-    rule engine itself fails, `deny` rules are still enforced by a plain
-    substring test. Regex patterns are excluded so the check does nothing that
-    can fail.
+    Feeds fallback_decision(): if the rule engine itself fails, `deny` rules
+    are still enforced by a plain substring test. Regex patterns are excluded
+    so the check does nothing that can fail.
     """
     literals: list[str] = []
     for table in profile.tables.values():
@@ -125,3 +126,32 @@ def quick_deny_check(text: str, literals: Sequence[str]) -> str | None:
         if literal.lower() in lowered:
             return literal
     return None
+
+
+def fallback_decision(text: str) -> Decision:
+    """
+    The verdict when evaluate() itself failed. Never raises. Fails closed:
+
+        guardrails known to be off          no opinion
+        text holds a `deny` rule's literal  deny, by the plain substring check
+        anything else                       ask (Decision.evaluation_failed)
+
+    `text` is everything the call acts on, joined by the adapter. Not knowing
+    whether guardrails are on counts as on.
+    """
+    try:
+        profile = load_profile()
+        if not profile.enabled:
+            return Decision.no_opinion(source=SOURCE_ERROR)
+        hit = quick_deny_check(text, deny_tier_literals(profile))
+    except Exception:
+        return Decision.evaluation_failed()
+    if hit:
+        return Decision(
+            action=DENY,
+            alert_level=CRITICAL,
+            source=SOURCE_ERROR,
+            reason=(f"this matches a deny rule ({hit!r}) and the policy engine could not "
+                    f"evaluate it, so it is blocked"),
+        )
+    return Decision.evaluation_failed()

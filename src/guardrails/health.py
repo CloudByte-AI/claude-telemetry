@@ -1,8 +1,10 @@
 """
-Daemon health probe for the HTTP transport.
+Daemon health probe for the opt-in HTTP transport.
 
-With the HTTP transport, enforcement needs a process that is alive AND running
-current code, and both can fail silently:
+The shipped hooks run the check inside the hook process and need no daemon, so
+callers probe only when http_transport_configured() says a hook config routes
+guardrails over HTTP. With that transport, enforcement needs a process that is
+alive AND running current code, and both can fail silently:
 
     daemon stopped    every governed call fails open. Claude Code treats a
                       connection failure as a non-blocking error, so the tool
@@ -23,6 +25,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 HEALTH_URL = "http://127.0.0.1:4723/guardrails/health"
+
+# Every guardrails route lives under this path.
+ROUTE_PREFIX = "/guardrails/"
+
+PLUGIN_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # Every dashboard version, including pre-guardrails ones, serves /openapi.json.
 # Its title tells a 404 from an old CloudByte dashboard (safe to restart) apart
@@ -62,10 +69,30 @@ def plugin_version() -> str | None:
     ftfy and the database layer for a single string.
     """
     try:
-        manifest = Path(__file__).resolve().parent.parent.parent / ".claude-plugin" / "plugin.json"
+        manifest = PLUGIN_ROOT / ".claude-plugin" / "plugin.json"
         return json.loads(manifest.read_text(encoding="utf-8")).get("version")
     except Exception:
         return None
+
+
+def http_transport_configured(hooks_file: Path) -> bool:
+    """
+    True when a hook config sends guardrails checks to this plugin's HTTP
+    routes. Never raises; an unreadable file counts as not configured.
+
+    Probing a daemon the configured transport does not use would warn that
+    tool calls are not checked while they are, and would delay every prompt.
+    """
+    try:
+        config = json.loads(Path(hooks_file).read_text(encoding="utf-8"))
+        for groups in (config.get("hooks") or {}).values():
+            for group in groups or ():
+                for handler in group.get("hooks") or ():
+                    if handler.get("type") == "http" and ROUTE_PREFIX in str(handler.get("url", "")):
+                        return True
+    except Exception:
+        pass
+    return False
 
 
 def guardrails_enabled() -> bool:
