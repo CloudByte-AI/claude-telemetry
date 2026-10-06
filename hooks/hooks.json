@@ -1,18 +1,6 @@
 {
   "description": "CloudByte Unified Memory & Sync System",
   "hooks": {
-    "Setup": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/validate.sh\"",
-            "timeout": 600
-          }
-        ]
-      }
-    ],
     "SessionStart": [
       {
         "matcher": "*",
@@ -43,7 +31,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.main user_prompt",
+            "command": "uv run --no-sync --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.main user_prompt",
             "timeout": 300
           }
         ]
@@ -54,7 +42,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.main stop",
+            "command": "uv run --no-sync --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.main stop",
             "timeout": 120
           }
         ]

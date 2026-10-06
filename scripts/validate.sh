@@ -17,8 +17,8 @@
 # `uv sync --python 3.12`. The package-manager path survives here only as a
 # last resort for when uv cannot reach its download host.
 #
-# Run directly, via the installer's Step 3, or as the plugin's Setup hook - no
-# plugin context required. Never prompts: the Setup hook runs it unattended.
+# Run directly or via the installer's Step 3 - no plugin context required.
+# Never prompts, so it can run unattended.
 #
 # Exit codes:  0 ready   1 could not provide the prerequisites
 
@@ -68,9 +68,9 @@ case "$(uname -s 2>/dev/null || echo unknown)" in
     *)                      OS="unknown" ;;
 esac
 
-# Windows: defer to validate.ps1. The Setup hook runs this file through bash on
-# every platform, so a Git Bash session on Windows lands here - and the
-# PowerShell script is the one that knows about the registry, winget and MSI.
+# Windows: defer to validate.ps1. A Git Bash session on Windows can land here,
+# and the PowerShell script is the one that knows about the registry, winget
+# and MSI.
 if [ "$OS" = "windows" ]; then
     log "Windows detected - deferring to validate.ps1"
     exit 0
@@ -156,7 +156,7 @@ sudo_available() {
     # Passwordless sudo works unattended.
     if sudo -n true 2>/dev/null; then SUDO="sudo"; return 0; fi
     # Otherwise it needs a terminal to ask on. Without one, refuse rather than
-    # hang - the Setup hook has a timeout, not a user.
+    # hang - an unattended run has nobody to answer.
     if [ -n "$TTY_DEV" ]; then SUDO="sudo"; return 0; fi
     return 1
 }

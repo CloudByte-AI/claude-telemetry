@@ -10,14 +10,14 @@
     ],
     "beforeSubmitPrompt": [
       {
-        "command": "uv run --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main before_submit_prompt",
+        "command": "uv run --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main before_submit_prompt",
         "type": "command",
         "timeout": 30
       }
     ],
     "stop": [
       {
-        "command": "uv run --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main stop",
+        "command": "uv run --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main stop",
         "type": "command",
         "timeout": 30
       }
