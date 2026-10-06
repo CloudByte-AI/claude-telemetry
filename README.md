@@ -166,7 +166,7 @@ Nothing is removed without being asked for, and both destructive answers - remov
 
 ```
 Session starts  →  claude-telemetry initializes
-                 ├─ Prerequisites verified (Setup hook)
+                 ├─ Plugin packages installed or verified
                  ├─ MCP server starts (background)
                  ├─ Dashboard worker starts on localhost:4723
                  ├─ Database schema verified / migrated
@@ -192,8 +192,7 @@ No configuration required. No changes to your workflow.
 
 | Hook | Command | What it does |
 |---|---|---|
-| `Setup` | `scripts/validate.sh` | Installs `uv` and a managed Python 3.12 |
-| `SessionStart` | `src.main session_start` | Creates project/session records, starts worker + dashboard |
+| `SessionStart` | `src.main session_start` | Installs the plugin's packages if needed, creates project/session records, starts worker + dashboard |
 | `UserPromptSubmit` | `src.main user_prompt` | Records the prompt, runs the security scan, can block |
 | `Stop` | `src.main stop` | Ingests the transcript - responses, tools, thinking, tokens |
 | `SessionEnd` | `src.main session_end` | Finalizes the session, guarded teardown of the worker |
