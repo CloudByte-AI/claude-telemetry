@@ -65,6 +65,12 @@ def post_tool_use() -> None:
     handle_post_tool_use()
 
 
+def post_tool_use_failure() -> None:
+    """postToolUseFailure hook - writes TOOL for a failed, timed-out or denied call."""
+    from src.cursor.handlers.post_tool_use_failure import handle_post_tool_use_failure
+    handle_post_tool_use_failure()
+
+
 def after_agent_thought() -> None:
     """afterAgentThought hook - writes THINKING."""
     from src.cursor.handlers.after_agent_thought import handle_after_agent_thought
@@ -114,6 +120,7 @@ def main() -> None:
         "stop": stop,
         "after_agent_response": after_agent_response,
         "post_tool_use": post_tool_use,
+        "post_tool_use_failure": post_tool_use_failure,
         "after_agent_thought": after_agent_thought,
         "session_end": session_end,
         "after_mcp_execution": after_mcp_execution,

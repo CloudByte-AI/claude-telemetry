@@ -197,7 +197,7 @@ No configuration required. No changes to your workflow.
 | `Stop` | `src.main stop` | Ingests the transcript - responses, tools, thinking, tokens |
 | `SessionEnd` | `src.main session_end` | Finalizes the session, guarded teardown of the worker |
 
-**Cursor** (`.cursor/hooks.json`) adds `beforeSubmitPrompt`, `afterAgentResponse`, `postToolUse`, `afterMCPExecution` and `afterAgentThought`, handled by `src/cursor/main.py`. Both editors write to the same database; `SESSION.client` records which one a session came from.
+**Cursor** (`.cursor/hooks.json`) adds `beforeSubmitPrompt`, `afterAgentResponse`, `postToolUse`, `postToolUseFailure` (failed, timed-out and blocked tool calls), `afterMCPExecution` and `afterAgentThought`, handled by `src/cursor/main.py`. Both editors write to the same database; `SESSION.client` records which one a session came from.
 
 ---
 
