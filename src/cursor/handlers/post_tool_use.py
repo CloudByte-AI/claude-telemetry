@@ -47,7 +47,14 @@ OBS_REMINDER = CURSOR_OBS_REMINDER
 logger = get_logger(__name__)
 
 
-def _write_tool(hook_data: dict, output_json: str | None) -> bool:
+def write_tool_row(hook_data: dict, output_json: str | None, keep_existing: bool = False) -> bool:
+    """
+    Write the TOOL row for a Cursor tool payload. True when a row was written.
+
+    `keep_existing` leaves a row already stored under this tool_use_id alone:
+    Cursor can reuse one id for two calls, and a failure must not overwrite
+    the record of a call that ran.
+    """
     tool_id = hook_data.get("tool_use_id")
     prompt_id = hook_data.get("generation_id")
     tool_input = hook_data.get("tool_input")
@@ -60,7 +67,14 @@ def _write_tool(hook_data: dict, output_json: str | None) -> bool:
 
     from src.db.manager import get_db_connection
     from src.db.schema import migrate_schema
-    migrate_schema(get_db_connection())
+    connection = get_db_connection()
+    migrate_schema(connection)
+
+    if keep_existing and connection.execute(
+        "SELECT 1 FROM TOOL WHERE tool_id = ? LIMIT 1", (tool_id,)
+    ).fetchone():
+        logger.info(f"Cursor tool {tool_id!r} already recorded; kept that record")
+        return False
 
     return DatabaseWriter().write_tool({
         "tool_id": tool_id,
@@ -87,7 +101,7 @@ def handle_post_tool_use() -> None:
         logger.info(f"postToolUse full payload: {json.dumps(hook_data, default=str)}")
         debug(f"payload keys: {list(hook_data.keys())}")
 
-        written = _write_tool(hook_data, hook_data.get("tool_output"))
+        written = write_tool_row(hook_data, hook_data.get("tool_output"))
         tool_id = hook_data.get("tool_use_id")
         if written:
             debug(f"tool stored - tool_id={tool_id}")
