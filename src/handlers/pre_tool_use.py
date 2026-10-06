@@ -6,14 +6,11 @@ Claude Code PreToolUse adapter.
 `normalise()` and `render()` are pure, so the HTTP transport
 (src/app/routes/guardrails.py) and the tests reuse them unchanged.
 
-Claude Code's PreToolUse fails open:
-
-    exit 0 + JSON   the decision
-    exit 2          blocks the tool call, stderr goes to Claude
-    exit 1/other    non-blocking error, the tool proceeds
-
-So if the engine crashes, a plain substring check still blocks the profile's
-`deny` literals (see _fail).
+Claude Code lets the tool call proceed when its hook errors (exit 1, a crash,
+a timeout, an HTTP hook it cannot reach). So every answer, a failed check
+included, is an explicit decision on stdout with exit 0: when the engine fails,
+decide_payload() answers with engine.fallback_decision() - deny for the
+profile's `deny` literals, otherwise ask.
 """
 
 from __future__ import annotations
@@ -147,12 +144,50 @@ def render(decision: Decision) -> dict:
 
 
 def evaluate_payload(payload: dict) -> tuple[dict, Decision]:
-    """Full path from payload to rendered output. Used by both transports."""
+    """Full path from payload to rendered output. Raises if the engine does."""
     from src.guardrails.engine import evaluate
 
     call = normalise(payload)
     decision = evaluate(call)
     return render(decision), decision
+
+
+def decide_payload(payload: dict) -> tuple[dict, Decision]:
+    """
+    evaluate_payload(), failing closed. Never raises; used by both transports.
+
+    When the check raises, the answer is engine.fallback_decision(), or
+    Decision.evaluation_failed() if even the engine cannot be imported.
+    """
+    try:
+        return evaluate_payload(payload)
+    except Exception as exc:
+        _log_error(f"guardrails: evaluation failed, failing closed: {exc}")
+    try:
+        from src.guardrails.engine import fallback_decision
+        decision = fallback_decision(_failure_text(payload))
+    except Exception:
+        decision = Decision.evaluation_failed()
+    return render(decision), decision
+
+
+def _failure_text(payload: dict) -> str:
+    """What the call acts on, as one string, for the fallback deny check. Never raises."""
+    try:
+        tool_input = payload.get("tool_input") or {}
+        return " ".join(
+            str(value) for value in tool_input.values() if isinstance(value, (str, int))
+        )
+    except Exception:
+        return ""
+
+
+def _log_error(message: str) -> None:
+    try:
+        from src.common.logging import get_logger
+        get_logger(__name__).error(message, exc_info=True)
+    except Exception:
+        pass
 
 
 def handle_pre_tool_use() -> int:
@@ -170,66 +205,39 @@ def handle_pre_tool_use() -> int:
         print("{}")
         return 0
 
-    try:
-        output, decision = evaluate_payload(payload)
-    except Exception as exc:
-        return _fail(exc, payload, logger)
+    output, decision = decide_payload(payload)
 
     # stdout carries the decision and nothing else - a stray print anywhere in
     # the engine would be parsed as a hook decision.
     print(json.dumps(output))
+    _record(decision, payload, logger)
+    return 0
+
+
+def _record(decision: Decision, payload: dict, logger) -> None:
+    """
+    Audit and notify, once the answer is on stdout. Never raises; the
+    notification is never waited for.
+    """
+    if not (decision.should_audit or decision.is_opinion):
+        return
+    try:
+        call = normalise(payload)
+    except Exception as exc:
+        logger.debug(f"guardrails: could not rebuild the call to record it: {exc}")
+        return
 
     if decision.should_audit:
         try:
             from src.guardrails.spool import append_event
-            append_event(decision, normalise(payload))
+            append_event(decision, call)
         except Exception as exc:
             logger.debug(f"guardrails: audit spool write failed (non-fatal): {exc}")
 
-    # Last, once the answer is on stdout; never waited for.
     if decision.is_opinion:
         try:
             sys.stdout.flush()
             from src.guardrails.notify import notify_decision
-            notify_decision(decision, normalise(payload))
+            notify_decision(decision, call)
         except Exception as exc:
             logger.debug(f"guardrails: notification failed (non-fatal): {exc}")
-
-    return 0
-
-
-def _fail(exc: Exception, payload: dict, logger) -> int:
-    """
-    The engine failed. Decide between failing open and failing closed.
-
-    The quick check uses only literal substrings pulled from the profile's own
-    `deny` rules, so it still works when the rule engine, the parser or the
-    matcher library is the thing that broke.
-    """
-    logger.error(f"guardrails: evaluation failed: {exc}", exc_info=True)
-
-    try:
-        from src.guardrails.config import load_profile
-        from src.guardrails.engine import deny_tier_literals, quick_deny_check
-
-        profile = load_profile()
-        if profile.enabled:
-            tool_input = payload.get("tool_input") or {}
-            text = " ".join(
-                str(value) for value in tool_input.values() if isinstance(value, (str, int))
-            )
-            hit = quick_deny_check(text, deny_tier_literals(profile))
-            if hit:
-                print(
-                    f"{MESSAGE_PREFIX}: blocked because this matches a deny rule ({hit!r}), "
-                    f"and the policy engine failed to evaluate it. Not running it.",
-                    file=sys.stderr,
-                )
-                return 2
-    except Exception:
-        # Even the fallback failed. Fail open rather than block on a bug.
-        pass
-
-    # Exit 1 is a non-blocking error: Claude Code shows a hook-error notice and
-    # the tool proceeds. Visible, and it does not break the user's work.
-    return 1
