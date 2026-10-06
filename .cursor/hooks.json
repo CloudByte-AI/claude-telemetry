@@ -36,6 +36,13 @@
         "timeout": 30
       }
     ],
+    "postToolUseFailure": [
+      {
+        "command": "uv run --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main post_tool_use_failure",
+        "type": "command",
+        "timeout": 30
+      }
+    ],
     "beforeShellExecution": [
       {
         "command": "uv run --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.hook_entry cursor before_shell_execution",

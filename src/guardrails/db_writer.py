@@ -19,14 +19,20 @@ event_id) and deletes only the files it wrote, so concurrent drains are safe.
 
 Cursor's before* hooks carry no tool_use_id, so each such event is linked to the
 earliest TOOL row of the same prompt with the same tool_input_hash, recorded
-after the event and not claimed by another executed event, oldest event first.
-A deny never ran: it is never linked and never claims a TOOL row (Cursor may
-send one id for a call and a denied call after it). Known limit: two identical
-parallel calls that finish in the opposite order swap output and duration.
+after the event and not claimed by another event of its kind, oldest event
+first. Two kinds never mix, because Cursor may give a call and a denied call
+after it one id:
 
-The caller passes the TOOL-row hashing function (`tool_hashers`), because this
-package may not import a platform adapter. A Cursor event drained by a Claude
-Code hook is linked by the next Cursor drain.
+    deny                       only the record of a call that was blocked
+    anything else (it ran)     only the record of a call that ran
+
+A platform that cannot tell a blocked call's record apart (no `blocked_records`
+entry) never links its denies. Known limit: two identical parallel calls that
+finish in the opposite order swap output and duration.
+
+The caller passes the TOOL-row functions (`tool_hashers`, `blocked_records`),
+because this package may not import a platform adapter. A Cursor event drained
+by a Claude Code hook is linked by the next Cursor drain.
 """
 
 from __future__ import annotations
@@ -44,6 +50,10 @@ logger = get_logger(__name__)
 # (TOOL.tool_name, TOOL.input_json decoded once) -> the tool_input_hash that
 # call was spooled with, or None.
 ToolHasher = Callable[[str, Any], str | None]
+
+# TOOL.output_json as stored -> whether the row records a call that was blocked
+# before it ran.
+BlockedRecord = Callable[[str | None], bool]
 
 APPROVED = "approved"
 REJECTED = "rejected"
@@ -99,10 +109,12 @@ def _mask(text: str | None) -> str | None:
         return text
 
 
-def drain(conn=None, tool_hashers: Mapping[str, ToolHasher] | None = None) -> int:
+def drain(conn=None, tool_hashers: Mapping[str, ToolHasher] | None = None,
+          blocked_records: Mapping[str, BlockedRecord] | None = None) -> int:
     """
     Write every spooled event to TOOL_GUARDRAIL_EVENT, link events per
-    `tool_hashers` (platform -> TOOL-row hasher), then resolve pending asks.
+    `tool_hashers` (platform -> TOOL-row hasher) and `blocked_records`
+    (platform -> blocked-call test), then resolve pending asks.
 
     Returns the number of events newly written (duplicates not counted). Never
     raises: a failed drain leaves the spool for the next hook to retry. A spool
@@ -140,7 +152,7 @@ def drain(conn=None, tool_hashers: Mapping[str, ToolHasher] | None = None) -> in
                 )
 
         linked = sum(
-            link_tool_calls(cursor, platform, tool_hash)
+            link_tool_calls(cursor, platform, tool_hash, (blocked_records or {}).get(platform))
             for platform, tool_hash in (tool_hashers or {}).items()
         )
         resolved = resolve_pending(cursor)
@@ -265,17 +277,22 @@ def resolve_pending(cursor) -> int:
     return resolved
 
 
-def link_tool_calls(cursor, platform: str, tool_hash: ToolHasher) -> int:
+def link_tool_calls(cursor, platform: str, tool_hash: ToolHasher,
+                    is_blocked: BlockedRecord | None = None) -> int:
     """
     Fill tool_use_id on this platform's events from the TOOL row each matches:
-    the earliest unclaimed one after it, with the same prompt and subject.
-    Returns how many were linked. Never raises.
+    the earliest unclaimed one of its kind after it, with the same prompt and
+    subject. Denies are linked only when `is_blocked` can recognise a blocked
+    call's record. Returns how many were linked. Never raises.
     """
     try:
         cutoff = (datetime.now(timezone.utc) - _LINK_MAX_AGE).isoformat()
+        # Without a blocked-call test denies cannot be linked, so they are left
+        # out rather than taking places in the window.
+        only_ran = "" if is_blocked is not None else "AND action != 'deny' "
         cursor.execute(
-            "SELECT event_id, prompt_id, tool_input_hash, timestamp FROM TOOL_GUARDRAIL_EVENT "
-            "WHERE platform = ? AND tool_use_id IS NULL AND action != 'deny' "
+            "SELECT event_id, prompt_id, tool_input_hash, timestamp, action FROM TOOL_GUARDRAIL_EVENT "
+            "WHERE platform = ? AND tool_use_id IS NULL " + only_ran +
             "AND prompt_id IS NOT NULL AND tool_input_hash IS NOT NULL AND timestamp >= ? "
             "ORDER BY timestamp DESC LIMIT ?",
             (platform, cutoff, _LINK_LIMIT),
@@ -287,9 +304,11 @@ def link_tool_calls(cursor, platform: str, tool_hash: ToolHasher) -> int:
         return 0
 
     linked = 0
-    for event_id, prompt_id, subject_hash, event_time in unlinked:
+    for event_id, prompt_id, subject_hash, event_time, action in unlinked:
+        blocked = action == "deny"
         try:
-            match = _earliest_match(cursor, prompt_id, subject_hash, _when(event_time), tool_hash)
+            match = _earliest_match(cursor, prompt_id, subject_hash, _when(event_time), tool_hash,
+                                    blocked, is_blocked)
             if match is None:
                 continue
             cursor.execute(
@@ -307,20 +326,25 @@ _EPOCH = datetime.min.replace(tzinfo=timezone.utc)
 
 
 def _earliest_match(cursor, prompt_id: str, subject_hash: str, after: datetime | None,
-                    tool_hash: ToolHasher) -> str | None:
+                    tool_hash: ToolHasher, blocked: bool = False,
+                    is_blocked: BlockedRecord | None = None) -> str | None:
     """
     The earliest TOOL row of this prompt with this subject, recorded after the
-    event and not claimed by another executed event. A deny's id claims nothing:
-    the denied call never ran, so a TOOL row carrying its id is another call.
+    event, of the event's kind and not claimed by another event of that kind.
+    A deny matches only a blocked call's record and anything else only the
+    record of a call that ran, so neither kind's id claims the other's row.
     """
+    claimant = "g.action = 'deny'" if blocked else "g.action != 'deny'"
     cursor.execute(
-        "SELECT tool_id, tool_name, input_json, timestamp FROM TOOL t WHERE t.prompt_id = ? "
-        "AND NOT EXISTS (SELECT 1 FROM TOOL_GUARDRAIL_EVENT g "
-        "                WHERE g.tool_use_id = t.tool_id AND g.action != 'deny')",
+        "SELECT tool_id, tool_name, input_json, output_json, timestamp FROM TOOL t "
+        "WHERE t.prompt_id = ? AND NOT EXISTS (SELECT 1 FROM TOOL_GUARDRAIL_EVENT g "
+        "WHERE g.tool_use_id = t.tool_id AND " + claimant + ")",
         (prompt_id,),
     )
     candidates = []
-    for tool_id, tool_name, input_json, recorded in cursor.fetchall():
+    for tool_id, tool_name, input_json, output_json, recorded in cursor.fetchall():
+        if is_blocked is not None and is_blocked(output_json) != blocked:
+            continue
         if tool_hash(tool_name, _stored_input(input_json)) != subject_hash:
             continue
         when = _when(recorded)

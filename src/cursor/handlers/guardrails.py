@@ -30,7 +30,7 @@ import json
 import sys
 from dataclasses import dataclass, replace
 
-from src.guardrails.decision import ALLOW, ASK, DENY, MESSAGE_PREFIX, Decision
+from src.guardrails.decision import ALLOW, ASK, DENY, MESSAGE_PREFIX, SOURCE_ERROR, Decision
 from src.guardrails.hook_input import HookInputError, read_stdin_payload
 from src.guardrails.toolcall import (
     KIND_AGENT,
@@ -288,12 +288,57 @@ def tool_subject_hash(tool_name: str, tool_input) -> str | None:
 def drain_audit() -> int:
     """
     Drain the audit spool from a Cursor hook, linking Cursor events to their
-    TOOL rows on the way. The Cursor hooks call this rather than db_writer.drain
-    directly. Never raises (drain doesn't).
+    TOOL rows on the way: a deny to the record postToolUseFailure wrote for the
+    blocked call, anything else to the record of the call that ran. The Cursor
+    hooks call this rather than db_writer.drain directly. Never raises (drain
+    doesn't).
     """
+    from src.cursor.utils.tool_failures import is_blocked_output
     from src.guardrails.db_writer import drain
 
-    return drain(tool_hashers={PLATFORM: tool_subject_hash})
+    return drain(tool_hashers={PLATFORM: tool_subject_hash},
+                 blocked_records={PLATFORM: is_blocked_output})
+
+
+_log_ready = False
+
+
+def _cursor_log():
+    """
+    The plugin's Cursor log, set up on first use and only in the hook process.
+    Setting it up costs more than a decision, so the common allow path never
+    pays for it, and the HTTP route never calls this: it would take over the
+    dashboard's own logging.
+    """
+    global _log_ready
+    from src.common.logging import get_logger, setup_logging
+
+    if not _log_ready:
+        from src.cursor.utils.paths import get_cursor_logs_dir
+        setup_logging(log_to_file=True, log_to_console=False, log_dir=get_cursor_logs_dir())
+        _log_ready = True
+    return get_logger(__name__)
+
+
+def _log_decision(hook: HookSpec, decision: Decision, payload: dict) -> None:
+    """
+    One line in the plugin's Cursor log for an ask, a deny or a check that
+    failed. It names the rule and the call, never the command or file content,
+    which can hold secrets. Never raises.
+    """
+    try:
+        call = normalise(payload, hook)
+        ran = "" if decision.prompted else ", ran without review"
+        tool_use_id = str(call.tool_use_id or "-").replace("\n", " ")
+        _cursor_log().info(
+            f"guardrails: {hook.name} {call.tool_name or '-'} -> {decision.action}{ran} "
+            f"(rule {decision.rule_id or '-'}, operation {decision.operation or '-'}, "
+            f"alert {decision.alert_level}, source {decision.source}, {decision.eval_ms} ms) "
+            f"target={decision.target or '-'} generation={call.prompt_id or '-'} "
+            f"tool_use_id={tool_use_id}"
+        )
+    except Exception:
+        pass
 
 
 def dispatch(hook_name: str, record: bool = True) -> int:
@@ -343,6 +388,9 @@ def dispatch(hook_name: str, record: bool = True) -> int:
             notify_decision(decision, normalise(payload, hook))
         except Exception:
             pass
+
+    if record and (decision.is_opinion or decision.source == SOURCE_ERROR):
+        _log_decision(hook, decision, payload)
 
     return 0
 
