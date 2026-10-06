@@ -19,7 +19,9 @@ and recorded as `ask` with user_decision `not_prompted`.
   customer's own rule from ever firing.
 - Cursor hooks fail open by default, but invalid JSON or a response that does
   not match the hook's schema blocks the action regardless of `failClosed`.
-  On any unexpected exception this adapter prints nothing and exits 0.
+  So every answer is a complete object built before anything is printed, and
+  a failed check is answered like an ask (decide_payload): deny for the
+  profile's `deny` literals, otherwise allow with a warning, recorded.
 """
 
 from __future__ import annotations
@@ -224,12 +226,48 @@ def render(decision: Decision) -> tuple[dict, Decision]:
 
 
 def evaluate_payload(payload: dict, hook: HookSpec) -> tuple[dict, Decision]:
-    """Payload to rendered output. Shared by the command hook and the HTTP route."""
+    """Payload to rendered output. Raises if the engine does."""
     from src.guardrails.config import load_profile
     from src.guardrails.engine import evaluate
 
     call = normalise(payload, hook)
     return render(evaluate(call, load_profile()))
+
+
+def decide_payload(payload: dict, hook: HookSpec) -> tuple[dict, Decision]:
+    """
+    evaluate_payload(), failing closed as far as Cursor allows. Never raises;
+    shared by the command hook and the HTTP route.
+
+    When the check raises, the answer is engine.fallback_decision(), or
+    Decision.evaluation_failed() if even the engine cannot be imported. Cursor
+    cannot prompt, so that ask runs with a warning to the agent.
+    """
+    try:
+        return evaluate_payload(payload, hook)
+    except Exception as exc:
+        try:
+            from src.common.logging import get_logger
+            get_logger(__name__).error(
+                f"guardrails: cursor evaluation failed, failing closed: {exc}", exc_info=True)
+        except Exception:
+            pass
+    try:
+        from src.guardrails.engine import fallback_decision
+        decision = fallback_decision(_failure_text(payload))
+    except Exception:
+        decision = Decision.evaluation_failed()
+    return render(decision)
+
+
+def _failure_text(payload: dict) -> str:
+    """What the call acts on, as one string, for the fallback deny check. Never raises."""
+    try:
+        parts = [payload.get("command"), payload.get("file_path")]
+        parts.extend(_parse_tool_input(payload.get("tool_input")).values())
+        return " ".join(str(part) for part in parts if isinstance(part, (str, int)) and part != "")
+    except Exception:
+        return ""
 
 
 def tool_subject_hash(tool_name: str, tool_input) -> str | None:
@@ -286,19 +324,7 @@ def dispatch(hook_name: str, record: bool = True) -> int:
         print(json.dumps({"permission": ALLOW}))
         return 0
 
-    try:
-        output, decision = evaluate_payload(payload, hook)
-    except Exception as exc:
-        # The engine failed. Print NOTHING: with failClosed at its default
-        # this lets the action through, and unlike a partially-written object
-        # it can never be read as a malformed response that blocks the user.
-        try:
-            from src.common.logging import get_logger
-            get_logger(__name__).error(f"guardrails: cursor evaluation failed: {exc}", exc_info=True)
-        except Exception:
-            pass
-        return 0
-
+    output, decision = decide_payload(payload, hook)
     print(json.dumps(output))
 
     if record and decision.should_audit:

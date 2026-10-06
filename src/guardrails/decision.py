@@ -52,6 +52,12 @@ _DEFAULT_REASON = {
     DENY: "This action is blocked by policy",
 }
 
+# The reason given when the check itself could not run. The agent reads it on
+# Cursor, so it never says how to switch guardrails off.
+EVALUATION_FAILED_REASON = (
+    "the check could not run because of an internal error - details are in the CloudByte log"
+)
+
 
 @dataclass(frozen=True)
 class Decision:
@@ -145,6 +151,17 @@ class Decision:
     def no_opinion(cls, source: str = SOURCE_DISABLED, eval_ms: float = 0.0) -> "Decision":
         """Guardrails have nothing to say - the normal permission flow applies."""
         return cls(action=ALLOW, source=source, eval_ms=eval_ms)
+
+    @classmethod
+    def evaluation_failed(cls) -> "Decision":
+        """
+        The verdict when the check itself could not run: an ask, audited and
+        notified like any other. Failing closed to ask rather than deny keeps a
+        bug in this plugin from stopping the user's work, while never letting
+        an unchecked call through unseen.
+        """
+        return cls(action=ASK, reason=EVALUATION_FAILED_REASON, alert_level=WARN,
+                   source=SOURCE_ERROR)
 
 
 def strongest(decisions: list[Decision]) -> Decision | None:

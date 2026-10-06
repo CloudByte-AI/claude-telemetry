@@ -15,6 +15,23 @@ from src.common.logging import get_logger
 
 logger = get_logger(__name__)
 
+# The dashboard, started as `python -m uvicorn`. Never through the `uvicorn`
+# console script: uv generates that .exe per install, so it has no reputation,
+# and Windows Smart App Control blocks it, leaving the dashboard down.
+# python.exe is trusted. Access logging is off, so the log holds start-up
+# output only.
+DASHBOARD_ARGS = (
+    "python", "-m", "uvicorn", "src.app.app:app",
+    "--host", "127.0.0.1", "--port", "4723", "--no-access-log",
+)
+DASHBOARD_LOG = "dashboard.log"
+
+
+def dashboard_log_path() -> Path:
+    """Where the dashboard's start-up output goes. Each start overwrites it."""
+    from src.common.paths import get_logs_dir
+    return get_logs_dir() / DASHBOARD_LOG
+
 
 def is_port_open(host: str = "localhost", port: int = 4723, timeout: float = 0.5) -> bool:
     """
@@ -90,29 +107,52 @@ def ensure_worker_quick_sync() -> bool:
     logger.info("Worker not running, starting in background...")
     try:
         import subprocess
-        import os
         project_dir = Path(__file__).parent.parent.parent
-
-        if sys.platform == "win32":
-            # Windows: Use start /B to run in background without new window
-            cmd = f'start /B "" uv run --directory "{project_dir}" uvicorn src.app.app:app --host 127.0.0.1 --port 4723 >nul 2>&1'
-            subprocess.Popen(
-                cmd,
-                shell=True,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-        else:
-            subprocess.Popen(
-                ["uv", "run", "--directory", str(project_dir),
-                 "uvicorn", "src.app.app:app", "--host", "127.0.0.1", "--port", "4723"],
-                start_new_session=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+        log = _open_dashboard_log()
+        try:
+            if sys.platform == "win32":
+                # Windows: Use start /B to run in background without new window
+                cmd = f'start /B "" uv run --directory "{project_dir}" {" ".join(DASHBOARD_ARGS)}'
+                subprocess.Popen(
+                    cmd,
+                    shell=True,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+            else:
+                subprocess.Popen(
+                    ["uv", "run", "--directory", str(project_dir), *DASHBOARD_ARGS],
+                    start_new_session=True,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                )
+        finally:
+            if log is not subprocess.DEVNULL:
+                log.close()
         return False
     except Exception as e:
         logger.warning(f"Failed to start worker: {e}")
         return False
+
+
+def _open_dashboard_log():
+    """
+    The dashboard log, opened here rather than by a shell redirect: cmd's `>`
+    locks the file, so a process still holding it would stop every later start
+    from running at all. DEVNULL if it cannot be opened - a log must never stop
+    the dashboard from starting.
+    """
+    import subprocess
+    try:
+        path = dashboard_log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return open(path, "wb")
+    except OSError as e:
+        logger.debug(f"Dashboard log unavailable, discarding its output: {e}")
+        return subprocess.DEVNULL
 
 
 if __name__ == "__main__":

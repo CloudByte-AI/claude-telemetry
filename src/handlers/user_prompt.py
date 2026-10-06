@@ -301,16 +301,18 @@ def handle_user_prompt():
         logger.debug(f"Worker check failed: {e}")
 
     # ── Guardrails must be ready BEFORE this turn's tool calls ───────────────
-    # The PreToolUse hook reaches the policy engine over HTTP. The port check
-    # above spawns without waiting and cannot see a wedged or outdated process.
-    # No network when guardrails are disabled.
+    # Only for the opt-in HTTP transport, where the policy engine runs in the
+    # dashboard. The port check above spawns without waiting and cannot see a
+    # wedged or outdated process. No network when guardrails are disabled.
     _guardrails_warning = None
     try:
-        from src.guardrails.health import ensure_ready
-        _gr = ensure_ready()
-        if _gr.degraded:
-            _guardrails_warning = _gr.message
-            logger.warning(f"Guardrails not ready: {_gr.status} - {_gr.message}")
+        from src.guardrails.health import ensure_ready, http_transport_configured
+        from src.handlers import HOOKS_FILE
+        if http_transport_configured(HOOKS_FILE):
+            _gr = ensure_ready()
+            if _gr.degraded:
+                _guardrails_warning = _gr.message
+                logger.warning(f"Guardrails not ready: {_gr.status} - {_gr.message}")
     except Exception as e:
         logger.debug(f"Guardrails readiness check failed: {e}")
 

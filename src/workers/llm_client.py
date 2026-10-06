@@ -84,7 +84,7 @@ def ensure_worker_running() -> bool:
         bool: True if the dashboard is listening (already was, or came up
         within STARTUP_TIMEOUT_SECONDS). False if it never answered.
     """
-    from src.workers.worker_checker import ensure_worker_quick_sync, is_port_open
+    from src.workers.worker_checker import dashboard_log_path, ensure_worker_quick_sync, is_port_open
 
     if is_port_open():
         logger.debug("Dashboard already listening")
@@ -102,6 +102,6 @@ def ensure_worker_running() -> bool:
 
     logger.error(
         f"FastAPI dashboard did not answer on port {DEFAULT_WORKER_PORT} "
-        f"within {STARTUP_TIMEOUT_SECONDS}s"
+        f"within {STARTUP_TIMEOUT_SECONDS}s - its start-up output is in {dashboard_log_path()}"
     )
     return False
