@@ -124,6 +124,11 @@ class ToolCall:
     hook_event: str                     # the hook that produced this call
     raw_input: dict = field(default_factory=dict)
     cwd: str | None = None
+    # The folder the session was opened in - which workspace policy applies
+    # (src/guardrails/workspaces.py). Stays put while `cwd` follows the agent's
+    # `cd`. None when the platform did not say; the workspace lookup then
+    # starts from `cwd`.
+    workspace_root: str | None = None
     session_id: str | None = None
     prompt_id: str | None = None        # the user prompt this call belongs to
     tool_use_id: str | None = None
@@ -254,6 +259,7 @@ class ToolCall:
         hook_event: str,
         raw_input: dict[str, Any] | None = None,
         cwd: str | None = None,
+        workspace_root: str | None = None,
         session_id: str | None = None,
         prompt_id: str | None = None,
         tool_use_id: str | None = None,
@@ -298,6 +304,7 @@ class ToolCall:
             hook_event=hook_event,
             raw_input=raw_input or {},
             cwd=cwd,
+            workspace_root=workspace_root or None,
             session_id=session_id,
             prompt_id=prompt_id,
             tool_use_id=tool_use_id,

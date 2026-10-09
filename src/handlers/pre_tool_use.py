@@ -16,6 +16,7 @@ profile's `deny` literals, otherwise ask.
 from __future__ import annotations
 
 import json
+import os
 import sys
 
 from src.guardrails.decision import ASK, DENY, MESSAGE_PREFIX, Decision
@@ -36,6 +37,13 @@ from src.guardrails.toolcall import (
 
 HOOK_EVENT = "PreToolUse"
 PLATFORM = "claude_code"
+
+# The folder the session was opened in, which picks the workspace policy.
+# Claude Code sets it in every hook's environment; the payload's `cwd` follows
+# the agent's `cd`, so it is only the fallback. The HTTP route cannot read the
+# hook's environment, so the hook forwards it as PROJECT_DIR_HEADER.
+PROJECT_DIR_ENV = "CLAUDE_PROJECT_DIR"
+PROJECT_DIR_HEADER = "X-CloudByte-Project-Dir"
 
 # Claude Code tool name -> operation kind. The subagent tool is `Agent` (not
 # `Task`). `PowerShell` is the second shell tool (on by default on Windows) and
@@ -68,9 +76,12 @@ def kind_for(tool_name: str) -> str:
     return TOOL_KINDS.get(tool_name, KIND_OTHER)
 
 
-def normalise(payload: dict) -> ToolCall:
+def normalise(payload: dict, project_dir: str | None = None) -> ToolCall:
     """
     Claude Code's PreToolUse payload -> ToolCall. Pure; never raises.
+
+    `project_dir` is the session's folder (PROJECT_DIR_ENV), which the payload
+    does not carry; without it the workspace lookup starts from `cwd`.
 
     Bash runs a POSIX shell on every platform (Git Bash on Windows);
     `sniff_dialect` only upgrades to PowerShell for text that could not be
@@ -105,6 +116,7 @@ def normalise(payload: dict) -> ToolCall:
         hook_event=HOOK_EVENT,
         raw_input=tool_input,
         cwd=payload.get("cwd"),
+        workspace_root=project_dir or None,
         session_id=payload.get("session_id"),
         # Claude's own prompt id (Claude Code 2.1.196+), stored as
         # USER_PROMPT.jsonl_prompt_id.
@@ -143,16 +155,16 @@ def render(decision: Decision) -> dict:
     }
 
 
-def evaluate_payload(payload: dict) -> tuple[dict, Decision]:
+def evaluate_payload(payload: dict, project_dir: str | None = None) -> tuple[dict, Decision]:
     """Full path from payload to rendered output. Raises if the engine does."""
     from src.guardrails.engine import evaluate
 
-    call = normalise(payload)
+    call = normalise(payload, project_dir)
     decision = evaluate(call)
     return render(decision), decision
 
 
-def decide_payload(payload: dict) -> tuple[dict, Decision]:
+def decide_payload(payload: dict, project_dir: str | None = None) -> tuple[dict, Decision]:
     """
     evaluate_payload(), failing closed. Never raises; used by both transports.
 
@@ -160,7 +172,7 @@ def decide_payload(payload: dict) -> tuple[dict, Decision]:
     Decision.evaluation_failed() if even the engine cannot be imported.
     """
     try:
-        return evaluate_payload(payload)
+        return evaluate_payload(payload, project_dir)
     except Exception as exc:
         _log_error(f"guardrails: evaluation failed, failing closed: {exc}")
     try:
@@ -205,16 +217,17 @@ def handle_pre_tool_use() -> int:
         print("{}")
         return 0
 
-    output, decision = decide_payload(payload)
+    project_dir = os.environ.get(PROJECT_DIR_ENV) or None
+    output, decision = decide_payload(payload, project_dir)
 
     # stdout carries the decision and nothing else - a stray print anywhere in
     # the engine would be parsed as a hook decision.
     print(json.dumps(output))
-    _record(decision, payload, logger)
+    _record(decision, payload, logger, project_dir)
     return 0
 
 
-def _record(decision: Decision, payload: dict, logger) -> None:
+def _record(decision: Decision, payload: dict, logger, project_dir: str | None = None) -> None:
     """
     Audit and notify, once the answer is on stdout. Never raises; the
     notification is never waited for.
@@ -222,7 +235,7 @@ def _record(decision: Decision, payload: dict, logger) -> None:
     if not (decision.should_audit or decision.is_opinion):
         return
     try:
-        call = normalise(payload)
+        call = normalise(payload, project_dir)
     except Exception as exc:
         logger.debug(f"guardrails: could not rebuild the call to record it: {exc}")
         return

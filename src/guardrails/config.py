@@ -7,7 +7,10 @@ Same posture as the security scanner:
     never raises   -> a broken profile degrades, it does not break the agent
     read per call  -> a config change takes effect immediately
 
-Config lives at ~/.cloudbyte/guardrails/guardrails_profile.yaml:
+The global policy lives at ~/.cloudbyte/guardrails/global_profile.yaml (the
+pre-workspace name, guardrails_profile.yaml, is still read when the new one is
+absent). A workspace can add its own file under guardrails/workspaces/ - see
+src/guardrails/workspaces.py. Every file has the same format:
 
     schema_version: 1
     enabled: false
@@ -61,7 +64,14 @@ def _log():
 
 
 PROFILES_DIR = Path(__file__).parent / "profiles"
-PROFILE_FILENAME = "guardrails_profile.yaml"
+# The global policy - every session on this machine. When the organisation
+# manages guardrails centrally, the CloudByte sync agent writes it; otherwise
+# it is the user's own file.
+PROFILE_FILENAME = "global_profile.yaml"
+# Its name before workspace policies existed. Read when the new name is absent,
+# so a machine (or an older sync agent) that still has only the old file keeps
+# its policy. This plugin never renames it: the sync agent owns that move.
+LEGACY_PROFILE_FILENAME = "guardrails_profile.yaml"
 
 # Bumped whenever the profile format changes in a way an older plugin cannot
 # read correctly.
@@ -463,12 +473,21 @@ def parse_profile(raw: Any, source: str = "user") -> GuardrailsProfile:
 
 
 def user_profile_path() -> Path:
-    return get_guardrails_dir() / PROFILE_FILENAME
+    """
+    The global profile's path: the current name, or the legacy one when only
+    that exists. When neither exists, the current name (where one would go).
+    """
+    directory = get_guardrails_dir()
+    current = directory / PROFILE_FILENAME
+    if current.exists():
+        return current
+    legacy = directory / LEGACY_PROFILE_FILENAME
+    return legacy if legacy.exists() else current
 
 
 def load_profile(path: Path | None = None) -> GuardrailsProfile:
     """
-    Load the user's profile from disk. Never raises.
+    Load the global profile from disk. Never raises.
 
     Degradation ladder:
 
@@ -485,28 +504,42 @@ def load_profile(path: Path | None = None) -> GuardrailsProfile:
     target = path or user_profile_path()
     if not target.exists():
         return GuardrailsProfile(enabled=False, source="absent")
+    return load_profile_file(target, source="user")
 
-    raw = read_yaml_mapping(target)
+
+def load_profile_file(target: Path, source: str, raw: dict | None = None) -> GuardrailsProfile:
+    """
+    One existing profile file through the degradation ladder (everything in
+    load_profile() after the kill switch and the existence check). Shared by
+    the global profile and every workspace profile, so a workspace file can
+    never be read more loosely than the global one. Never raises.
+
+    `raw` is the already-read mapping when the caller has it, so the file is
+    not read twice.
+    """
+    if raw is None:
+        raw = read_yaml_mapping(target)
 
     if raw is None:
         fallback_name = "standard"
         _log().warning(
-            f"guardrails profile unusable - falling back to shipped '{fallback_name}' preset"
+            f"guardrails profile {target.name} unusable - falling back to shipped "
+            f"'{fallback_name}' preset"
         )
         return parse_profile(load_preset(fallback_name), source=f"preset:{fallback_name}")
 
-    profile = parse_profile(raw, source="user")
+    profile = parse_profile(raw, source=source)
 
     if profile.schema_version > CURRENT_SCHEMA_VERSION:
         _log().error(
-            f"guardrails profile schema_version {profile.schema_version} is newer than this "
-            f"plugin supports ({CURRENT_SCHEMA_VERSION}) - guardrails are inert until the "
+            f"guardrails profile {target.name} schema_version {profile.schema_version} is newer "
+            f"than this plugin supports ({CURRENT_SCHEMA_VERSION}) - it is inert until the "
             f"plugin is updated"
         )
         return GuardrailsProfile(enabled=False, source="schema_too_new")
 
     for problem in profile.errors:
-        _log().warning(f"guardrails profile: {problem}")
+        _log().warning(f"guardrails profile {target.name}: {problem}")
 
     return profile
 
