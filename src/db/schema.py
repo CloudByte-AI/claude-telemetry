@@ -307,9 +307,17 @@ CREATE TABLE IF NOT EXISTS TOOL_GUARDRAIL_EVENT (
     decision_source TEXT,          -- matcher | policy | fallthrough | disabled | error
     user_decision   TEXT,          -- approved | rejected | auto_denied | not_prompted (Cursor ask) | NULL
     eval_ms         REAL,
-    timestamp       DATETIME
+    timestamp       DATETIME,
+    policy_scope    TEXT,          -- which policy file decided: global | workspace | builtin
+    workspace_root  TEXT           -- for a workspace policy, its folder (normalised)
 );
 """
+
+# Columns added to TOOL_GUARDRAIL_EVENT while the guardrails release was in
+# development (workspace policies), as (name, type). Still schema v3 - the
+# whole feature is one bump - so a database that created the table before
+# these existed gets them from migrate_schema(), which also runs on every Stop.
+TOOL_GUARDRAIL_EVENT_ADDED_COLUMNS = (("policy_scope", "TEXT"), ("workspace_root", "TEXT"))
 
 
 # Schema version tracked via SQLite's built-in PRAGMA user_version (an
@@ -538,6 +546,20 @@ def migrate_schema(conn: sqlite3.Connection) -> list:
         cursor.execute(TOOL_GUARDRAIL_EVENT_DDL)
         logger.info("Migration: created TOOL_GUARDRAIL_EVENT table")
         changes.append({"table": "TOOL_GUARDRAIL_EVENT", "action": "create_table", "status": "applied"})
+
+    # ── v3, later in development: which policy file decided ──────────────────
+    # Additive, nullable columns, for a table created before they existed.
+    cursor.execute("PRAGMA table_info(TOOL_GUARDRAIL_EVENT)")
+    guardrail_columns = {row[1] for row in cursor.fetchall()}
+    for name, sql_type in TOOL_GUARDRAIL_EVENT_ADDED_COLUMNS:
+        if name not in guardrail_columns:
+            _safe_alter(
+                cursor,
+                f"ALTER TABLE TOOL_GUARDRAIL_EVENT ADD COLUMN {name} {sql_type}",
+                f"Migration: added TOOL_GUARDRAIL_EVENT.{name}",
+                changes,
+                {"table": "TOOL_GUARDRAIL_EVENT", "column": name, "action": "add_column"},
+            )
 
     conn.commit()
     return changes

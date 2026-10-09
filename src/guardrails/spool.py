@@ -62,6 +62,8 @@ def _row(decision, call) -> dict:
         "action": decision.action,
         "alert_level": decision.alert_level,
         "decision_source": decision.source,
+        "policy_scope": decision.policy_scope,
+        "workspace_root": decision.workspace_root,
         # Not a column: tells the drain an ask was never shown (see db_writer).
         "prompted": decision.prompted,
         "eval_ms": decision.eval_ms,
