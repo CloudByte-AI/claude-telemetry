@@ -609,10 +609,15 @@ def main():
     """
     if len(sys.argv) < 2:
         print("Usage: python -m src.main <command>")
-        print("Commands: setup, session_start, user_prompt, stop, session_end")
+        print("Commands: setup, session_start, user_prompt, stop, session_end, guardrails")
         sys.exit(1)
 
     command = sys.argv[1]
+
+    # A person's command, not a hook: its own arguments and exit code.
+    if command == "guardrails":
+        from src.guardrails.cli import main as guardrails_cli
+        sys.exit(guardrails_cli(sys.argv[2:]))
 
     handlers = {
         "setup": setup,

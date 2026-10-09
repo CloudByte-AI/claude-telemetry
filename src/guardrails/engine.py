@@ -6,21 +6,31 @@ The evaluator - normalised call in, platform-neutral verdict out.
 Nothing here knows which platform is calling, so the same operation produces
 the same Decision on Claude Code and Cursor. Adapters own the platform-specific
 edges on either side.
+
+Several policies can apply to one call: the global profile and the workspace
+profiles for the session's folder (src/guardrails/workspaces.py). Each is
+decided on its own - each table is its own first-match list - and the
+strictest decision wins (deny > ask > allow; on a tie, the global one). That
+is exact: combining the files into one first-match list could not be.
 """
 
 from __future__ import annotations
 
 import time
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Sequence
 
 from src.guardrails.config import GuardrailsProfile, load_profile
 from src.guardrails.decision import (
+    ALLOW,
     CRITICAL,
     DENY,
     Decision,
+    SCOPE_GLOBAL,
+    SCOPE_WORKSPACE,
     SOURCE_DISABLED,
     SOURCE_ERROR,
+    strongest,
 )
 from src.guardrails.matchers.base import MatchResult
 from src.guardrails.registry import MatcherRegistry
@@ -59,6 +69,35 @@ def run_matchers(call: ToolCall) -> list[MatchResult]:
     return results
 
 
+@dataclass(frozen=True)
+class Policy:
+    """One profile that applies to a call, and where it came from."""
+
+    profile: GuardrailsProfile
+    scope: str = SCOPE_GLOBAL           # SCOPE_GLOBAL | SCOPE_WORKSPACE
+    workspace_root: str | None = None   # the workspace's normalised folder
+
+
+def load_policies(call: ToolCall) -> list[Policy]:
+    """
+    Every policy that applies to this call: the global profile first, then the
+    workspace profiles for the session's folder, nearest first.
+
+    The kill switch turns everything off, workspace files included. Raises
+    only when the workspace files cannot be read at all (workspaces.py), so
+    the adapters fail closed instead of silently dropping a workspace policy.
+    """
+    from src.guardrails.workspaces import load_workspace_profiles
+
+    global_profile = load_profile()
+    if global_profile.source == "kill_switch":
+        return [Policy(global_profile)]
+    policies = [Policy(global_profile)]
+    for workspace in load_workspace_profiles(call.workspace_root, call.cwd):
+        policies.append(Policy(workspace.profile, SCOPE_WORKSPACE, workspace.root))
+    return policies
+
+
 def evaluate(
     call: ToolCall,
     profile: GuardrailsProfile | None = None,
@@ -66,29 +105,69 @@ def evaluate(
     """
     Decide what should happen to this tool call.
 
-    Never raises. Returns a no-opinion Decision when guardrails are off, when
-    no table governs this kind of call, or when the call is allowlisted.
+    With `profile`, only that profile is checked. Without it, every policy that
+    applies (load_policies) is checked and the strictest decision wins.
+
+    Returns a no-opinion Decision when guardrails are off, when no table
+    governs this kind of call, or when the call is allowlisted. Raises only
+    when the policies cannot be read (see load_policies); the adapters turn
+    that into their fail-closed answer.
     """
     started = time.perf_counter()
-    profile = profile if profile is not None else load_profile()
+    policies = [Policy(profile)] if profile is not None else load_policies(call)
 
     def elapsed() -> float:
         return round((time.perf_counter() - started) * 1000, 3)
 
-    if not profile.enabled:
+    active = [policy for policy in policies if policy.profile.enabled]
+    if not active:
         return Decision.no_opinion(source=SOURCE_DISABLED, eval_ms=elapsed())
 
-    # Exact-match allowlist, checked before any work (mirrors the scanner's).
-    if profile.is_allowlisted(call.command, call.target_path, call.tool_name):
-        return Decision.no_opinion(source=SOURCE_DISABLED, eval_ms=elapsed())
+    # Before any profile, and not something a profile can allow.
+    from src.guardrails.selfguard import check as self_protection
+    guarded = self_protection(call)
+    if guarded is not None:
+        return replace(guarded, eval_ms=elapsed())
 
-    table = profile.table_for(call.kind)
-    if table is None:
-        return Decision.no_opinion(source=SOURCE_DISABLED, eval_ms=elapsed())
+    matches: list[MatchResult] | None = None
+    decisions: list[Decision] = []
+    for policy in active:
+        current = policy.profile
+        # Exact-match allowlist, checked before any work (mirrors the scanner's).
+        # It skips this profile's rules only, never another file's.
+        if current.is_allowlisted(call.command, call.target_path, call.tool_name):
+            continue
+        table = current.table_for(call.kind)
+        if table is None:
+            continue
+        if matches is None:
+            matches = run_matchers(call)    # the same for every profile, so once
+        decisions.append(replace(
+            decide(table, call, matches),
+            profile_hash=current.fingerprint,
+            policy_scope=policy.scope,
+            workspace_root=policy.workspace_root,
+        ))
 
-    matches = run_matchers(call)
-    decision = decide(table, call, matches)
-    return replace(decision, profile_hash=profile.fingerprint, eval_ms=elapsed())
+    if not decisions:
+        return Decision.no_opinion(source=SOURCE_DISABLED, eval_ms=elapsed())
+    return replace(combine(decisions), eval_ms=elapsed())
+
+
+def combine(decisions: list[Decision]) -> Decision:
+    """
+    The decision that applies when several policies decided one call.
+
+    The strictest action wins; on a tie the first (the global policy) is
+    reported. An allow that a rule marked `audit: true` is kept over a plain
+    allow, so combining never loses an audit row a policy asked for.
+    """
+    best = strongest(decisions)
+    if best.action == ALLOW and not best.requires_audit:
+        audited = next((d for d in decisions if d.requires_audit), None)
+        if audited is not None:
+            return audited
+    return best
 
 
 def deny_tier_literals(profile: GuardrailsProfile) -> tuple[str, ...]:
@@ -140,10 +219,16 @@ def fallback_decision(text: str) -> Decision:
     whether guardrails are on counts as on.
     """
     try:
+        from src.guardrails.workspaces import any_workspace_policies
+
         profile = load_profile()
-        if not profile.enabled:
+        if profile.source == "kill_switch":
             return Decision.no_opinion(source=SOURCE_ERROR)
-        hit = quick_deny_check(text, deny_tier_literals(profile))
+        # A workspace policy may be on even when the global one is off; the
+        # failed call's workspace is unknown here, so any file counts.
+        if not profile.enabled and not any_workspace_policies():
+            return Decision.no_opinion(source=SOURCE_ERROR)
+        hit = quick_deny_check(text, deny_tier_literals(profile)) if profile.enabled else None
     except Exception:
         return Decision.evaluation_failed()
     if hit:
