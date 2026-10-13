@@ -41,6 +41,23 @@ def spool_dir() -> Path:
     return get_guardrails_dir() / SPOOL_DIRNAME
 
 
+def _session_root(call) -> str | None:
+    """
+    The folder the session runs in, normalised as workspace files name it,
+    whichever policy file decided. Lets a decision made by the global profile
+    still be placed in the workspace it happened in. None when the platform
+    gave neither a session folder nor a working directory.
+    """
+    raw = getattr(call, "workspace_root", None) or getattr(call, "cwd", None)
+    if not raw:
+        return None
+    try:
+        from src.guardrails.workspaces import normalise_root
+        return normalise_root(raw)
+    except Exception:
+        return None
+
+
 def _row(decision, call) -> dict:
     return {
         "event_id": str(uuid.uuid4()),
@@ -64,6 +81,7 @@ def _row(decision, call) -> dict:
         "decision_source": decision.source,
         "policy_scope": decision.policy_scope,
         "workspace_root": decision.workspace_root,
+        "session_root": _session_root(call),
         # Not a column: tells the drain an ask was never shown (see db_writer).
         "prompted": decision.prompted,
         "eval_ms": decision.eval_ms,
@@ -101,6 +119,18 @@ def append_event(decision, call) -> bool:
                 os.remove(temporary)
             except Exception:
                 pass
+        return False
+
+
+def has_events() -> bool:
+    """
+    Whether anything is waiting to be drained. Cheap (one directory listing,
+    no imports), so a hook can skip the drain - and its database work -
+    when the spool is empty. Never raises.
+    """
+    try:
+        return any(spool_dir().glob(f"*{EVENT_SUFFIX}"))
+    except Exception:
         return False
 
 
