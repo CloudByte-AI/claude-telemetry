@@ -42,6 +42,12 @@
         $env:CLOUDBYTE_REF          = "development"   # branch/tag/sha to install from
         $env:CLOUDBYTE_SCRIPT       = "uninstall.ps1" # which script to run
         $env:CLOUDBYTE_INSTALL_URL  = "http://..."    # full override of the script URL
+        $env:CLOUDBYTE_FETCH_ATTEMPTS = "4"           # download attempts (also used by install.ps1/validate.ps1)
+        $env:CLOUDBYTE_FETCH_DELAY    = "2"           # seconds before the first retry, doubled each time
+
+    Downloads are retried: some networks reset connections to
+    raw.githubusercontent.com now and then, and one reset used to abort the
+    whole install before its first step.
 
     The installer's own exit code is left in $LASTEXITCODE and $CloudByteExitCode.
 #>
@@ -65,6 +71,48 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# Download $Url to $OutFile, retrying network failures with exponential backoff.
+# Kept identical in bootstrap.ps1, install.ps1 and validate.ps1: each is a
+# standalone downloaded file, so there is nothing to share it from.
+#
+# Throws the last error when every attempt failed. An HTTP 4xx other than 408
+# or 429 (a ref or path that does not exist) is thrown at once, since retrying
+# cannot fix it. -TimeoutSec 0 means no limit, for large files on slow links.
+function Save-Download {
+    param([string] $Url, [string] $OutFile, [int] $TimeoutSec = 120)
+
+    $attempts = 4
+    $delay    = 2
+    if ($env:CLOUDBYTE_FETCH_ATTEMPTS -match '^[1-9][0-9]*$') { $attempts = [int] $env:CLOUDBYTE_FETCH_ATTEMPTS }
+    if ($env:CLOUDBYTE_FETCH_DELAY -match '^[0-9]+$')         { $delay    = [int] $env:CLOUDBYTE_FETCH_DELAY }
+
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    # Windows PowerShell 5.1 redraws its progress bar per chunk, which makes
+    # Invoke-WebRequest many times slower. Scoped to this function only.
+    $ProgressPreference = "SilentlyContinue"
+
+    for ($attempt = 1; ; $attempt++) {
+        try {
+            Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing -TimeoutSec $TimeoutSec -ErrorAction Stop
+            return
+        }
+        catch {
+            # 5.1 raises WebException and 7.x HttpResponseException; both carry
+            # .Response.StatusCode when the server answered, and no Response
+            # when the connection itself failed.
+            $status = 0
+            if ($_.Exception.Response) { $status = [int] $_.Exception.Response.StatusCode }
+            if ($status -ge 400 -and $status -lt 500 -and $status -ne 408 -and $status -ne 429) { throw }
+            if ($attempt -ge $attempts) { throw }
+
+            Write-Host "  Download failed ($($_.Exception.Message))" -ForegroundColor Yellow
+            Write-Host "  Retrying in ${delay}s (attempt $($attempt + 1) of $attempts)..." -ForegroundColor Yellow
+            Start-Sleep -Seconds $delay
+            $delay *= 2
+        }
+    }
+}
 
 $repo = "CloudByte-AI/claude-telemetry"
 if     ($Ref)                 { $ref = $Ref }
@@ -92,14 +140,25 @@ Write-Host "Fetching CloudByte $what..."
 Write-Host "  $installUrl"
 
 try {
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    Invoke-WebRequest -Uri $installUrl -OutFile $dest -UseBasicParsing
+    Save-Download -Url $installUrl -OutFile $dest
 }
 catch {
+    $status = 0
+    if ($_.Exception.Response) { $status = [int] $_.Exception.Response.StatusCode }
     Write-Host ""
-    Write-Host "[FAIL] Could not download the $what : $_" -ForegroundColor Red
-    Write-Host "       Check your connection, or that the ref '$ref' exists."
+    if ($status -ge 400 -and $status -lt 500) {
+        Write-Host "[FAIL] The $what was not found at the address above (HTTP $status)." -ForegroundColor Red
+        Write-Host "       Check that the ref '$ref' exists and contains scripts/$scriptName."
+    }
+    else {
+        Write-Host "[FAIL] Could not download the $what - the connection to GitHub kept failing." -ForegroundColor Red
+        Write-Host "       Last error: $($_.Exception.Message)"
+        Write-Host "       This is usually a temporary network problem. Wait a minute and run"
+        Write-Host "       the same command again. If it keeps failing, check whether a VPN,"
+        Write-Host "       proxy or firewall is blocking raw.githubusercontent.com."
+    }
     Write-Host ""
+    Remove-Item $dest -Force -ErrorAction SilentlyContinue
     $global:CloudByteExitCode = 1
     return
 }
