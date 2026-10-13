@@ -88,8 +88,8 @@ INSERT OR IGNORE INTO TOOL_GUARDRAIL_EVENT (
     evidence, command_name, tool_input_hash, action,
     alert_level, decision_source,
     user_decision, eval_ms, timestamp,
-    policy_scope, workspace_root
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    policy_scope, workspace_root, session_root
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 
@@ -130,6 +130,12 @@ def drain(conn=None, tool_hashers: Mapping[str, ToolHasher] | None = None,
 
         connection = conn or get_db_connection()
         cursor = connection.cursor()
+
+        if batch:
+            # A database already on schema v3 may predate the newest columns
+            # (the version did not move), and an insert naming one would fail.
+            from src.db.schema import add_guardrail_event_columns
+            add_guardrail_event_columns(cursor)
 
         written = 0
         done: set = set()
@@ -205,9 +211,10 @@ def _values(row: dict, user_decision: str | None) -> tuple:
         user_decision,
         row.get("eval_ms"),
         row.get("timestamp"),
-        # Spool files written before v4 have neither key: NULL, as for old rows.
+        # Spool files written before workspace policies have none of these: NULL, as for old rows.
         row.get("policy_scope"),
         row.get("workspace_root"),
+        row.get("session_root"),
     )
 
 

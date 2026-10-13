@@ -52,7 +52,7 @@ def _plugin_version() -> str:
     Read the plugin version from .claude-plugin/plugin.json.
 
     Sourced from the manifest rather than hardcoded because the two drifted before:
-    the default config said 0.1.36 while plugin.json said 0.1.41. One source of
+    the default config said 0.1.36 while plugin.json said 0.1.42. One source of
     truth means a version bump only has to happen in one place.
     """
     try:
@@ -115,6 +115,29 @@ def setup() -> None:
         sys.exit(1)
 
 
+def _drain_guardrails_spool() -> None:
+    """
+    Write any spooled guardrail decisions to the database, for the hooks whose
+    handler does not already drain. Stop, UserPromptSubmit and SessionEnd drain
+    inside their handlers (after missed-pair recovery, see §3.23); this covers
+    SessionStart (events left by a session that crashed or closed with no
+    later hook) and SessionEnd's early return when the hook carries no
+    session id. A no-op when the spool is empty (one directory listing).
+    Never raises.
+    """
+    try:
+        from src.guardrails import spool as _spool
+        if not _spool.has_events():
+            return
+        from src.guardrails.db_writer import drain as _drain
+        _drain()
+    except Exception as _err:
+        try:
+            logger.warning(f"Guardrails audit drain error (non-fatal): {_err}")
+        except Exception:
+            pass
+
+
 def session_start() -> None:
     """
     SessionStart hook - Called when a new Claude session starts.
@@ -123,6 +146,8 @@ def session_start() -> None:
     setup_logging(log_to_file=True, log_to_console=False, log_dir=get_claude_logs_dir())
     _ensure_mcp_permission()
     handle_session_start()
+    # Leftovers from a session that ended without a Stop (crash, closed window).
+    _drain_guardrails_spool()
 
 
 def user_prompt() -> None:
@@ -130,6 +155,7 @@ def user_prompt() -> None:
     UserPromptSubmit hook - Called when user submits a prompt.
     Delegates to the user_prompt handler.
     """
+    # Drains the guardrails spool itself, after missed-pair recovery.
     handle_user_prompt()
 
 
@@ -599,6 +625,9 @@ def session_end() -> None:
     Delegates to the session_end handler.
     """
     handle_session_end()
+    # The handler drains too, but returns early when the hook has no session
+    # id; this catches that case. A no-op when it already drained.
+    _drain_guardrails_spool()
 
 
 def main():
