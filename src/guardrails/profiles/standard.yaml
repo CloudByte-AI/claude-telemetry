@@ -1,7 +1,8 @@
 # Guardrails - STANDARD preset
 #
 # Shipped template, read-only. Copy it to
-# ~/.cloudbyte/guardrails/guardrails_profile.yaml and edit there; this file is
+# ~/.cloudbyte/guardrails/global_profile.yaml (or, for one folder, run
+# `python -m src.main guardrails workspace init`) and edit there; this file is
 # replaced on plugin update.
 #
 # Posture: DETECT BROADLY, ENFORCE NARROWLY.

@@ -39,6 +39,12 @@ SOURCE_FALLTHROUGH = "fallthrough"  # the table's final catch-all row
 SOURCE_DISABLED = "disabled"        # guardrails off, or no profile on disk
 SOURCE_ERROR = "error"              # the evaluator failed
 
+# ── Which policy file decided ─────────────────────────────────────────────────
+
+SCOPE_GLOBAL = "global"             # global_profile.yaml - every session on the machine
+SCOPE_WORKSPACE = "workspace"       # a workspaces/ file - sessions in that workspace
+SCOPE_BUILTIN = "builtin"           # the plugin's own non-overridable checks
+
 # ── Messages ──────────────────────────────────────────────────────────────────
 
 # Every message a person or the agent reads starts with this. The platform's own
@@ -83,6 +89,10 @@ class Decision:
     # "bash#9" meant.
     profile_hash: str | None = None
     source: str = SOURCE_DISABLED
+    # Which policy file the deciding rule came from (SCOPE_*), and for a
+    # workspace policy, that workspace's root folder. None for no opinion.
+    policy_scope: str | None = None
+    workspace_root: str | None = None
 
     # evidence
     target: str | None = None           # resolved path / host / mcp tool

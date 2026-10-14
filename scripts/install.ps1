@@ -31,7 +31,7 @@
 
       Claude Code  CLI is `claude`. The plugin installs from the CLI, so
                    Step 5 is automatic. Cache directories are named by version
-                   (0.1.41), so the newest is chosen by version.
+                   (0.1.42), so the newest is chosen by version.
 
       Cursor       CLI is `cursor-agent`, a separate download from the IDE, so
                    Step 1 installs it when Cursor is present but its CLI is not.
@@ -390,6 +390,48 @@ function Find-ClaudeExe {
     return $null
 }
 
+# Download $Url to $OutFile, retrying network failures with exponential backoff.
+# Kept identical in bootstrap.ps1, install.ps1 and validate.ps1: each is a
+# standalone downloaded file, so there is nothing to share it from.
+#
+# Throws the last error when every attempt failed. An HTTP 4xx other than 408
+# or 429 (a ref or path that does not exist) is thrown at once, since retrying
+# cannot fix it. -TimeoutSec 0 means no limit, for large files on slow links.
+function Save-Download {
+    param([string] $Url, [string] $OutFile, [int] $TimeoutSec = 120)
+
+    $attempts = 4
+    $delay    = 2
+    if ($env:CLOUDBYTE_FETCH_ATTEMPTS -match '^[1-9][0-9]*$') { $attempts = [int] $env:CLOUDBYTE_FETCH_ATTEMPTS }
+    if ($env:CLOUDBYTE_FETCH_DELAY -match '^[0-9]+$')         { $delay    = [int] $env:CLOUDBYTE_FETCH_DELAY }
+
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    # Windows PowerShell 5.1 redraws its progress bar per chunk, which makes
+    # Invoke-WebRequest many times slower. Scoped to this function only.
+    $ProgressPreference = "SilentlyContinue"
+
+    for ($attempt = 1; ; $attempt++) {
+        try {
+            Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing -TimeoutSec $TimeoutSec -ErrorAction Stop
+            return
+        }
+        catch {
+            # 5.1 raises WebException and 7.x HttpResponseException; both carry
+            # .Response.StatusCode when the server answered, and no Response
+            # when the connection itself failed.
+            $status = 0
+            if ($_.Exception.Response) { $status = [int] $_.Exception.Response.StatusCode }
+            if ($status -ge 400 -and $status -lt 500 -and $status -ne 408 -and $status -ne 429) { throw }
+            if ($attempt -ge $attempts) { throw }
+
+            Write-Host "  Download failed ($($_.Exception.Message))" -ForegroundColor Yellow
+            Write-Host "  Retrying in ${delay}s (attempt $($attempt + 1) of $attempts)..." -ForegroundColor Yellow
+            Start-Sleep -Seconds $delay
+            $delay *= 2
+        }
+    }
+}
+
 # Fetch a vendor installer and run it in a child shell.
 #
 # Deliberately NOT `powershell -Command "irm <url> | iex"`. That form nests a
@@ -415,8 +457,7 @@ function Invoke-ChildInstaller {
     $tmp = Join-Path $env:TEMP ("cloudbyte-vendor-" + [guid]::NewGuid().ToString("N").Substring(0, 8) + ".ps1")
     log "Fetching vendor installer: $Url"
     try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        Invoke-WebRequest -Uri $Url -OutFile $tmp -UseBasicParsing
+        Save-Download -Url $Url -OutFile $tmp
     }
     catch {
         SayWarn "Could not download the installer from $Url : $($_.Exception.Message)"
@@ -765,7 +806,7 @@ function Invoke-CliStep {
 
 # Pick the current plugin checkout under a cache root.
 #
-# Claude Code names these directories by version ("0.1.41"); Cursor names them
+# Claude Code names these directories by version ("0.1.42"); Cursor names them
 # by commit sha ("7d91aa5f..."), which carries no ordering. So: order by version
 # when every name is a version, and fall back to modification time only when at
 # least one is not. The fallback is deliberately NOT the default - creating a
@@ -1129,8 +1170,7 @@ else {
         $validatePath = Join-Path $tempDir "validate.ps1"
         Say "Downloading validate.ps1..."
         try {
-            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-            Invoke-WebRequest -Uri "$RAW_BASE/validate.ps1" -OutFile $validatePath -UseBasicParsing
+            Save-Download -Url "$RAW_BASE/validate.ps1" -OutFile $validatePath
         }
         catch {
             log "Download failed: $_"

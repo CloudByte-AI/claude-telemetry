@@ -68,9 +68,10 @@ def guardrails_health() -> JSONResponse:
     process is not running, the hook fails open without logging anything.
     """
     try:
-        from src.guardrails.config import CURRENT_SCHEMA_VERSION, load_profile
+        from src.guardrails.config import CURRENT_SCHEMA_VERSION, load_profile, user_profile_path
         from src.guardrails.health import plugin_version
         from src.guardrails.registry import MatcherRegistry
+        from src.guardrails.workspaces import list_workspace_files
         import src.guardrails.matchers  # noqa: F401
 
         profile = load_profile()
@@ -84,6 +85,11 @@ def guardrails_health() -> JSONResponse:
             "source": profile.source,
             "schema_version": CURRENT_SCHEMA_VERSION,
             "profile_errors": list(profile.errors),
+            # Which file the global policy was read from (current or legacy name).
+            "profile_file": user_profile_path().name,
+            # Every workspace policy on this machine; which ones apply depends
+            # on the session's folder, so none is "active" here.
+            "workspaces": list_workspace_files(),
             "operations_implemented": len(MatcherRegistry.implemented_operations()),
             "operations_total": MatcherRegistry.count(),
         })
@@ -111,18 +117,22 @@ async def claude_pre_tool_use(request: Request) -> JSONResponse:
         return JSONResponse({})
 
     try:
-        from src.handlers.pre_tool_use import decide_payload, normalise
+        from src.handlers.pre_tool_use import PROJECT_DIR_HEADER, decide_payload, normalise
 
-        output, decision = decide_payload(payload if isinstance(payload, dict) else {})
+        # The hook's CLAUDE_PROJECT_DIR, forwarded like the kill switch; this
+        # process's own environment belongs to whichever session started it.
+        project_dir = request.headers.get(PROJECT_DIR_HEADER) or None
+        output, decision = decide_payload(payload if isinstance(payload, dict) else {}, project_dir)
 
         if decision.should_audit:
             try:
                 from src.guardrails.spool import append_event
-                append_event(decision, normalise(payload))
+                append_event(decision, normalise(payload, project_dir))
             except Exception as exc:
                 logger.debug(f"guardrails: audit spool write failed (non-fatal): {exc}")
 
-        return JSONResponse(output, background=_notification_task(decision, lambda: normalise(payload)))
+        call = lambda: normalise(payload, project_dir)  # noqa: E731 - built only if notified
+        return JSONResponse(output, background=_notification_task(decision, call))
     except Exception as exc:
         logger.error(f"guardrails: HTTP evaluation failed: {exc}", exc_info=True)
         return JSONResponse({})

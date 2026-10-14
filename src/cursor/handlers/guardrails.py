@@ -156,9 +156,9 @@ def normalise(payload: dict, hook: HookSpec) -> ToolCall:
         if value:
             urls.append(str(value))
 
-    cwd = payload.get("cwd") or tool_input.get("working_directory")
+    roots = [_normalise_cwd(root) for root in (payload.get("workspace_roots") or []) if root]
+    cwd = _normalise_cwd(payload.get("cwd") or tool_input.get("working_directory"))
     if not cwd:
-        roots = payload.get("workspace_roots") or []
         cwd = roots[0] if roots else None
 
     return ToolCall.build(
@@ -167,7 +167,8 @@ def normalise(payload: dict, hook: HookSpec) -> ToolCall:
         kind=kind,
         hook_event=hook.name,
         raw_input=tool_input,
-        cwd=_normalise_cwd(cwd),
+        cwd=cwd,
+        workspace_root=workspace_root_for(cwd, roots),
         session_id=payload.get("conversation_id"),
         # Cursor's generation_id changes with every user message and is what
         # this plugin stores as USER_PROMPT.prompt_id for Cursor.
@@ -182,6 +183,30 @@ def normalise(payload: dict, hook: HookSpec) -> ToolCall:
         mcp_tool=mcp_tool,
         urls=tuple(urls),
     )
+
+
+def workspace_root_for(cwd: str | None, roots: list) -> str | None:
+    """
+    Which of Cursor's workspace roots this call belongs to: the deepest root
+    that holds `cwd` (a multi-root workspace has several), else the first
+    root. Picks the workspace policy - the root, not the cwd, is the
+    workspace, as Claude Code's project directory is. Never raises.
+    """
+    try:
+        from src.guardrails.workspaces import normalise_root
+
+        here = normalise_root(cwd)
+        best, best_length = None, -1
+        for root in roots:
+            candidate = normalise_root(root)
+            if not candidate or not here:
+                continue
+            inside = here == candidate or here.startswith(candidate.rstrip("/") + "/")
+            if inside and len(candidate) > best_length:
+                best, best_length = root, len(candidate)
+        return best or (roots[0] if roots else None)
+    except Exception:
+        return roots[0] if roots else None
 
 
 def _normalise_cwd(cwd) -> str | None:
@@ -227,11 +252,10 @@ def render(decision: Decision) -> tuple[dict, Decision]:
 
 def evaluate_payload(payload: dict, hook: HookSpec) -> tuple[dict, Decision]:
     """Payload to rendered output. Raises if the engine does."""
-    from src.guardrails.config import load_profile
     from src.guardrails.engine import evaluate
 
     call = normalise(payload, hook)
-    return render(evaluate(call, load_profile()))
+    return render(evaluate(call))
 
 
 def decide_payload(payload: dict, hook: HookSpec) -> tuple[dict, Decision]:

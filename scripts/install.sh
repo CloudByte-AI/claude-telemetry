@@ -30,7 +30,7 @@
 #
 #     Claude Code  CLI is `claude`. The plugin installs from the CLI, so Step 5
 #                  is automatic. Cache directories are named by version
-#                  (0.1.41), so the newest is chosen by version.
+#                  (0.1.42), so the newest is chosen by version.
 #
 #     Cursor       CLI is `cursor-agent`, a separate download from the IDE, so
 #                  Step 1 installs it when Cursor is present but its CLI is not.
@@ -371,14 +371,54 @@ fail_exit() {
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# Download $1 to $2, retrying network failures with exponential backoff.
+# Kept identical in bootstrap.sh, install.sh and validate.sh: each is a
+# standalone downloaded file, so there is nothing to share it from.
+#
+# Returns 0 on success, 22 when the server answered "not found" (a ref or
+# path that does not exist - retrying cannot fix that), 1 otherwise.
+#
+# The loop is ours rather than curl's: `curl --retry` does not retry
+# "Connection reset by peer", and `--retry-all-errors`, which does, needs
+# curl 7.71+ - older curls (Ubuntu 20.04 ships 7.68) reject the whole command.
 fetch() {
-    if have curl; then
-        curl -fsSL "$1" -o "$2"
-    elif have wget; then
-        wget -q -O "$2" "$1"
-    else
-        return 1
-    fi
+    local url="$1" dest="$2" attempt=1 status code
+    local attempts="${CLOUDBYTE_FETCH_ATTEMPTS:-4}" delay="${CLOUDBYTE_FETCH_DELAY:-2}"
+    case "$attempts" in ''|*[!0-9]*|0) attempts=4 ;; esac
+    case "$delay" in ''|*[!0-9]*) delay=2 ;; esac
+
+    while :; do
+        if command -v curl >/dev/null 2>&1; then
+            # -f so an HTTP error is a failure rather than a file holding
+            # GitHub's error page. --connect-timeout fails a dead connection
+            # fast; --speed-limit/--speed-time abort a transfer that has
+            # stalled, without capping a download that is slow but moving.
+            status="$(curl -fsSL --connect-timeout 15 --speed-limit 1024 --speed-time 30 \
+                -w '%{http_code}' -o "$dest" "$url")"
+            code=$?
+            [ "$code" -eq 0 ] && return 0
+            # 4xx is final, except timeouts and rate limits, which are not.
+            case "$status" in
+                408|429) ;;
+                4[0-9][0-9]) return 22 ;;
+            esac
+        elif command -v wget >/dev/null 2>&1; then
+            # -T is the one timeout flag GNU and BusyBox wget share. wget does
+            # not report the HTTP status, so a 404 is retried like any failure.
+            wget -q -T 30 -O "$dest" "$url"
+            code=$?
+            [ "$code" -eq 0 ] && return 0
+        else
+            echo "${C_RED}[FAIL]${C_NC} Neither curl nor wget is available - cannot download $url" >&2
+            return 1
+        fi
+
+        [ "$attempt" -ge "$attempts" ] && return 1
+        attempt=$((attempt + 1))
+        echo "  Download failed - retrying in ${delay}s (attempt $attempt of $attempts)..." >&2
+        sleep "$delay"
+        delay=$((delay * 2))
+    done
 }
 
 # GNU stat and BSD stat disagree on every flag, and macOS ships the BSD one.
@@ -934,7 +974,7 @@ EOF
 
 # Pick the current plugin checkout under a cache root, into PLUGIN_DIR.
 #
-# Claude Code names these directories by version ("0.1.41"); Cursor names them
+# Claude Code names these directories by version ("0.1.42"); Cursor names them
 # by commit sha ("2026.07.23-e383d2b"), which carries no ordering. So: order by
 # version when every name is a version, and fall back to modification time only
 # when at least one is not. The fallback is deliberately NOT the default -

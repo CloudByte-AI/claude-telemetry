@@ -93,6 +93,48 @@ function Refresh-Path {
     $env:PATH = ($parts -join ";")
 }
 
+# Download $Url to $OutFile, retrying network failures with exponential backoff.
+# Kept identical in bootstrap.ps1, install.ps1 and validate.ps1: each is a
+# standalone downloaded file, so there is nothing to share it from.
+#
+# Throws the last error when every attempt failed. An HTTP 4xx other than 408
+# or 429 (a ref or path that does not exist) is thrown at once, since retrying
+# cannot fix it. -TimeoutSec 0 means no limit, for large files on slow links.
+function Save-Download {
+    param([string] $Url, [string] $OutFile, [int] $TimeoutSec = 120)
+
+    $attempts = 4
+    $delay    = 2
+    if ($env:CLOUDBYTE_FETCH_ATTEMPTS -match '^[1-9][0-9]*$') { $attempts = [int] $env:CLOUDBYTE_FETCH_ATTEMPTS }
+    if ($env:CLOUDBYTE_FETCH_DELAY -match '^[0-9]+$')         { $delay    = [int] $env:CLOUDBYTE_FETCH_DELAY }
+
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    # Windows PowerShell 5.1 redraws its progress bar per chunk, which makes
+    # Invoke-WebRequest many times slower. Scoped to this function only.
+    $ProgressPreference = "SilentlyContinue"
+
+    for ($attempt = 1; ; $attempt++) {
+        try {
+            Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing -TimeoutSec $TimeoutSec -ErrorAction Stop
+            return
+        }
+        catch {
+            # 5.1 raises WebException and 7.x HttpResponseException; both carry
+            # .Response.StatusCode when the server answered, and no Response
+            # when the connection itself failed.
+            $status = 0
+            if ($_.Exception.Response) { $status = [int] $_.Exception.Response.StatusCode }
+            if ($status -ge 400 -and $status -lt 500 -and $status -ne 408 -and $status -ne 429) { throw }
+            if ($attempt -ge $attempts) { throw }
+
+            Write-Host "  Download failed ($($_.Exception.Message))" -ForegroundColor Yellow
+            Write-Host "  Retrying in ${delay}s (attempt $($attempt + 1) of $attempts)..." -ForegroundColor Yellow
+            Start-Sleep -Seconds $delay
+            $delay *= 2
+        }
+    }
+}
+
 # ── uv ─────────────────────────────────────────────────────────────────────────
 # uv comes first: it is the hard requirement, and it is what provisions Python.
 
@@ -118,8 +160,7 @@ else {
         # with "Missing ')' in function parameter list".
         $uvInstaller = Join-Path $env:TEMP ("uv-install-" + [guid]::NewGuid().ToString("N").Substring(0, 8) + ".ps1")
         try {
-            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-            Invoke-WebRequest -Uri "https://astral.sh/uv/install.ps1" -OutFile $uvInstaller -UseBasicParsing
+            Save-Download -Url "https://astral.sh/uv/install.ps1" -OutFile $uvInstaller
             powershell -ExecutionPolicy Bypass -NoProfile -File $uvInstaller
         }
         finally {
@@ -280,9 +321,8 @@ function Install-Python-Via-Direct-Download {
     Write-Host "Downloading Python $pythonVersion (~25MB)..."
 
     try {
-        $wc = New-Object System.Net.WebClient
-        $wc.DownloadFile($pythonUrl, $installerPath)
-        $wc.Dispose()
+        # No time limit: ~25MB can legitimately take minutes on a slow link.
+        Save-Download -Url $pythonUrl -OutFile $installerPath -TimeoutSec 0
 
         if (-not (Test-Path $installerPath)) {
             log "Download failed - installer not found"

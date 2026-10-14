@@ -19,7 +19,10 @@ USAGE = "Usage: python -m src.hook_entry <claude|cursor> [hook_name]"
 # Duplicated from src.guardrails.config, which would pull in the engine;
 # test_contracts.py asserts the copies stay equal.
 _KILL_SWITCH_ENV = "CLOUDBYTE_GUARDRAILS_DISABLED"
-_PROFILE_RELATIVE_PATH = (".cloudbyte", "guardrails", "guardrails_profile.yaml")
+_GUARDRAILS_RELATIVE_DIR = (".cloudbyte", "guardrails")
+# The global profile (config.PROFILE_FILENAME), then its legacy name.
+_PROFILE_FILENAMES = ("global_profile.yaml", "guardrails_profile.yaml")
+_WORKSPACES_DIRNAME = "workspaces"
 _TRUTHY = ("1", "true", "yes", "on")
 
 # "No opinion" per platform. Claude Code takes `{}` and applies the user's
@@ -61,8 +64,11 @@ def _is_inactive() -> bool:
     """
     if os.environ.get(_KILL_SWITCH_ENV, "").strip().lower() in _TRUTHY:
         return True
-    home = os.path.expanduser("~")
-    return not os.path.exists(os.path.join(home, *_PROFILE_RELATIVE_PATH))
+    directory = os.path.join(os.path.expanduser("~"), *_GUARDRAILS_RELATIVE_DIR)
+    if any(os.path.exists(os.path.join(directory, name)) for name in _PROFILE_FILENAMES):
+        return False
+    # A workspace policy can be on with no global profile at all.
+    return not os.path.isdir(os.path.join(directory, _WORKSPACES_DIRNAME))
 
 
 def main(argv: list[str]) -> int:
