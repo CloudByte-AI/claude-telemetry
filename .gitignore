@@ -44,7 +44,9 @@ Thumbs.db
 DESIGN.md
 
 context/
-tests/
+tests/*
+!tests/test_scan_cli.py
+!tests/test_custom_pattern_re2.py
 
 .claude/
 .cursor/*
