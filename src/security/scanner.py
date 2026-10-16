@@ -91,22 +91,17 @@ def _normalize_label(raw: str) -> str:
 
 
 # ── Custom-pattern scanning (user-defined patterns from YAML config) ──────────
+#
+# User patterns run on RE2 (src/common/safe_regex.py), whose match time grows
+# only with the text, whatever the pattern - so one bad pattern cannot stall a
+# prompt. A pattern RE2 rejects never got this far (config._validate_patterns).
+# The text is capped and the patterns share a time budget per scan: past it,
+# the remaining patterns are skipped for this scan and logged, rather than
+# holding the prompt.
 
-_PATTERN_TIMEOUT_SECS = 3.0
-
-
-def _run_timed(pattern_str: str, text: str) -> list[re.Match]:
-    """Run re.finditer with a hard timeout to guard against catastrophic backtracking."""
-    with ThreadPoolExecutor(max_workers=1) as ex:
-        future = ex.submit(lambda: list(re.finditer(pattern_str, text)))
-        try:
-            return future.result(timeout=_PATTERN_TIMEOUT_SECS)
-        except TimeoutError:
-            logger.warning(
-                f"Custom pattern timed out after {_PATTERN_TIMEOUT_SECS}s - skipped. "
-                "Consider simplifying the regex."
-            )
-            return []
+MAX_CUSTOM_PATTERN_INPUT = 2_000_000   # characters
+CUSTOM_PATTERN_BUDGET_SECS = 0.25
+MAX_MATCHES_PER_PATTERN = 1000
 
 
 def _scan_custom_patterns(
@@ -115,43 +110,46 @@ def _scan_custom_patterns(
     """Scan user-defined custom patterns and keyword blocklist."""
     from src.security.detectors.base import char_to_line
 
-    findings: list[Finding] = []
+    from src.common import safe_regex
 
-    for p in cfg.custom_patterns:
+    findings: list[Finding] = []
+    subject = text[:MAX_CUSTOM_PATTERN_INPUT]
+    started = time.perf_counter()
+
+    for index, p in enumerate(cfg.custom_patterns):
         if not isinstance(p, dict) or "pattern" not in p or "name" not in p:
             continue
+        if time.perf_counter() - started > CUSTOM_PATTERN_BUDGET_SECS:
+            skipped = len(cfg.custom_patterns) - index
+            logger.warning(
+                f"Custom patterns over their {CUSTOM_PATTERN_BUDGET_SECS}s budget - "
+                f"{skipped} pattern(s) skipped for this scan"
+            )
+            break
         label    = _normalize_label(p["name"])
         severity = str(p.get("severity", "HIGH")).upper()
         try:
-            matches = _run_timed(p["pattern"], text)
-            for m in matches:
-                # Try group(1) first (context patterns), fall back to full match
-                try:
-                    secret_val = m.group(1) or m.group(0)
-                    char_start = m.start(1)
-                    char_end   = m.end(1)
-                except (IndexError, re.error):
-                    secret_val = m.group(0)
-                    char_start = m.start()
-                    char_end   = m.end()
-
-                if not secret_val or secret_val.startswith("[REDACTED:"):
-                    continue
-                if secret_val in allowlist:
-                    continue
-                findings.append(Finding(
-                    category="Custom",
-                    type=p["name"],
-                    label=label,
-                    severity=severity,
-                    secret_value=secret_val,
-                    masked_value=f"[REDACTED:{label}]",
-                    line_number=char_to_line(char_start, line_offsets),
-                    char_start=char_start,
-                    char_end=char_end,
-                ))
-        except re.error:
-            pass
+            compiled = safe_regex.compile_capturing(p["pattern"])
+        except safe_regex.RegexError as exc:
+            logger.warning(f"Custom pattern '{p['name']}' cannot be used - skipped: {exc}")
+            continue
+        for char_start, char_end, secret_val in compiled.spans(subject, MAX_MATCHES_PER_PATTERN):
+            if not secret_val or secret_val.startswith("[REDACTED:"):
+                continue
+            if secret_val in allowlist:
+                continue
+            findings.append(Finding(
+                category=p.get("category") or "Custom",
+                type=p["name"],
+                label=label,
+                severity=severity,
+                secret_value=secret_val,
+                masked_value=f"[REDACTED:{label}]",
+                line_number=char_to_line(char_start, line_offsets),
+                char_start=char_start,
+                char_end=char_end,
+                custom=True,
+            ))
 
     for keyword in cfg.keyword_blocklist:
         if not keyword:
@@ -170,6 +168,7 @@ def _scan_custom_patterns(
                 line_number=None,
                 char_start=None,
                 char_end=None,
+                custom=True,
             ))
 
     return findings
@@ -261,6 +260,40 @@ def _remap_line_numbers(findings: list[Finding], orig_linenos: list[int]) -> lis
     return findings
 
 
+# ── Which profile asked for a finding ────────────────────────────────────────
+
+def _asks_for(source, finding: Finding) -> bool:
+    """Whether one profile (config.ScanSource) asks for this finding."""
+    # A custom pattern's finding carries its own category (or "Custom").
+    if finding.custom or finding.category == "Custom":
+        if finding.type == "Keyword":
+            return str(finding.secret_value).lower() in source.keywords
+        return finding.type in source.pattern_names
+    return finding.category in source.categories
+
+
+def _attribute(findings: list[Finding], sources: tuple) -> list[Finding]:
+    """
+    Keep a finding only when at least one profile both asks for it and does
+    not allow its value; record those profiles on it. So a profile's allowlist
+    silences only what that profile asks for - a project's allowlist can never
+    silence what the organisation's profile asks for. With one profile this
+    changes nothing: the detectors already skipped its allowlist.
+    """
+    if not sources:
+        return findings
+    kept: list[Finding] = []
+    for finding in findings:
+        asking = tuple(
+            source.policy for source in sources
+            if _asks_for(source, finding) and finding.secret_value not in source.allowlist
+        )
+        if asking:
+            finding.sources = asking
+            kept.append(finding)
+    return kept
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def scan_text(text: str, cfg: ScanConfig) -> ScanResult:
@@ -306,12 +339,16 @@ def scan_text(text: str, cfg: ScanConfig) -> ScanResult:
         else:
             findings = []
 
+    # Per-profile allowlists before deduplication, so an allowed match never
+    # displaces an overlapping one that some profile still asks for.
+    findings = _attribute(findings, cfg.sources)
+
     # Cross-detector deduplication (keeps most-specific match at each position)
     findings = deduplicate_findings(findings)
 
     # User-defined custom patterns and keyword blocklist run on full text always.
     custom = _scan_custom_patterns(text, cfg, line_offsets, allowlist_set)
-    findings.extend(custom)
+    findings.extend(_attribute(custom, cfg.sources))
 
     elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
     logger.debug(

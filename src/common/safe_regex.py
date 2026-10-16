@@ -12,6 +12,9 @@ Rules for callers:
   * Import nothing but this module, so replacing the engine touches this file alone.
   * Ask only "does it match?": `Pattern.search` returns a bool, never a match
     object, so no caller depends on engine-specific capture behaviour.
+    The one exception is a scanner that must say WHERE a secret is, to mask
+    it: `compile_capturing` returns a CapturingPattern whose `spans` gives
+    plain (start, end, text) tuples - still no engine match object.
   * Bound the input yourself: RE2's cost is linear in the text, so a cap on the
     text is a hard cap on the time.
   * Never fall back to `re`: if the engine cannot be loaded, patterns fail to
@@ -57,6 +60,45 @@ class Pattern:
         return f"Pattern({self.source!r})"
 
 
+class CapturingPattern:
+    """
+    A compiled user pattern that can also say where it matched - for scanners
+    that mask what they find. Matching is still RE2: linear in the text.
+    """
+
+    __slots__ = ("source", "_compiled", "_group")
+
+    def __init__(self, source: str, compiled: Any) -> None:
+        self.source = source
+        self._compiled = compiled
+        # Report the first group when the pattern has one (a pattern that
+        # matches context around the secret captures the secret itself).
+        self._group = 1 if getattr(compiled, "groups", 0) >= 1 else 0
+
+    def search(self, text: str) -> bool:
+        """True when the pattern occurs anywhere in `text`."""
+        return self._compiled.search(text) is not None
+
+    def spans(self, text: str, limit: int = 1000) -> list[tuple[int, int, str]]:
+        """
+        Every non-overlapping match as (start, end, matched text) of the first
+        group, or of the whole match when the pattern has no group. A group
+        that did not take part in a match is skipped. At most `limit` results.
+        """
+        found: list[tuple[int, int, str]] = []
+        for match in self._compiled.finditer(text):
+            start, end = match.start(self._group), match.end(self._group)
+            if start < 0 or end < 0:
+                continue
+            found.append((start, end, text[start:end]))
+            if len(found) >= limit:
+                break
+        return found
+
+    def __repr__(self) -> str:
+        return f"CapturingPattern({self.source!r})"
+
+
 @functools.cache
 def _engine() -> tuple[Any, Any]:
     """
@@ -81,6 +123,25 @@ def _engine() -> tuple[Any, Any]:
             f"run `uv sync` in the plugin directory."
         ) from exc
     return re2, options
+
+
+@functools.cache
+def _capturing_options() -> Any:
+    """Like _engine()'s options, but with capturing on (for CapturingPattern)."""
+    engine, _ = _engine()
+    options = engine.Options()
+    options.log_errors = False
+    return options
+
+
+@functools.lru_cache(maxsize=_CACHE_SIZE)
+def compile_capturing(pattern: str) -> CapturingPattern:
+    """Compile a user pattern for a scanner that needs match positions, or raise RegexError."""
+    engine, _ = _engine()
+    try:
+        return CapturingPattern(pattern, engine.compile(pattern, _capturing_options()))
+    except engine.error as exc:
+        raise RegexError(explain(_engine_message(exc), pattern)) from None
 
 
 @functools.lru_cache(maxsize=_CACHE_SIZE)

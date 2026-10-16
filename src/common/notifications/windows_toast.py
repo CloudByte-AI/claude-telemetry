@@ -49,6 +49,9 @@ _UNSAFE_ID_CHARS = re.compile(r"[^A-Za-z0-9._-]")
 _CREATE_NO_WINDOW = 0x08000000
 _CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 
+# GetCurrentPackageFullName's answer, when asked for the length, inside a package.
+_ERROR_INSUFFICIENT_BUFFER = 122
+
 _ENTITIES = {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}
 
 
@@ -60,13 +63,48 @@ def available() -> bool:
 def show(notice: Notice) -> bool:
     """Build the toast, make sure the app identity exists, and launch it. Never raises."""
     try:
+        package = package_name()
+        if package:
+            _log().warning(
+                f"windows notification: this process runs inside the app package {package} "
+                f"(an MSIX app such as Claude Desktop). Windows keeps a packaged app's registry "
+                f"writes inside the package and may drop this notification without an error"
+            )
         script = build_script(notice)
-        if script is None or not ensure_identity():
+        if script is None:
+            _log().warning(f"windows notification not shown: the toast script does not fit "
+                           f"{PIPE_BUDGET} bytes even with the shortest text")
+            return False
+        if not ensure_identity():
             return False
         return launch(script)
     except Exception as exc:
-        _log().debug(f"windows notification not shown: {exc}")
+        _log().warning(f"windows notification not shown: PowerShell could not be started or "
+                       f"given the script: {type(exc).__name__}: {exc}")
         return False
+
+
+def package_name() -> str | None:
+    """
+    The full name of the app package this process runs inside, or None when it
+    runs outside any package (the usual case). Read only. Never raises.
+
+    A process started by an MSIX app inherits its package, so every hook
+    started by such an app reports that app's package here.
+    """
+    try:
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32")
+        length = ctypes.c_uint32(0)
+        if kernel32.GetCurrentPackageFullName(ctypes.byref(length), None) != _ERROR_INSUFFICIENT_BUFFER:
+            return None             # APPMODEL_ERROR_NO_PACKAGE, or no such API
+        name = ctypes.create_unicode_buffer(length.value)
+        if kernel32.GetCurrentPackageFullName(ctypes.byref(length), name) == 0:
+            return name.value or None
+    except Exception:
+        pass
+    return None
 
 
 # ── Identity ──────────────────────────────────────────────────────────────────
@@ -96,7 +134,8 @@ def ensure_identity(registry=None) -> bool:
                     registry.SetValueEx(key, name, 0, registry.REG_SZ, value)
         return True
     except Exception as exc:
-        _log().debug(f"notification identity not registered: {exc}")
+        _log().warning(f"windows notification not shown: the app identity (HKCU\\{REGISTRY_KEY}) "
+                       f"could not be registered: {type(exc).__name__}: {exc}")
         return False
 
 
@@ -271,9 +310,12 @@ def launch(script: bytes) -> bool:
     try:
         process = subprocess.Popen(argv, creationflags=_CREATE_NO_WINDOW | _CREATE_BREAKAWAY_FROM_JOB,
                                    **options)
-    except OSError:
+    except OSError as exc:
         # A job that forbids breakaway makes CreateProcess fail outright; run
         # inside it rather than not at all.
+        _log().warning(f"windows notification: PowerShell could not leave the caller's job "
+                       f"({type(exc).__name__}: {exc}), so it runs inside it and may be stopped "
+                       f"when the hook process ends")
         process = subprocess.Popen(argv, creationflags=_CREATE_NO_WINDOW, **options)
     try:
         process.stdin.write(script)

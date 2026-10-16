@@ -63,6 +63,13 @@ class Finding:
     line_number: int | None # 1-based line number in source text
     char_start: int | None  # Character offset of secret_value in full text
     char_end: int | None    # Character offset end
+    # The profiles that asked for this finding (config.PolicySource), set by
+    # the scanner when the config came from profile files.
+    sources: tuple = ()
+    # From a profile's own custom pattern or keyword blocklist, not a built-in
+    # detector. Its `category` is then the pattern's custom category, or
+    # "Custom" when it has none.
+    custom: bool = False
 
 
 @dataclass

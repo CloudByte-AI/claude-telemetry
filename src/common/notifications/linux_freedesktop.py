@@ -50,7 +50,7 @@ def show(notice: Notice) -> bool:
         launch(build(notice, program))
         return True
     except Exception as exc:
-        _log().debug(f"Linux notification not shown: {exc}")
+        _log().warning(f"Linux notification not shown: {type(exc).__name__}: {exc}")
         return False
 
 

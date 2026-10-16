@@ -416,7 +416,9 @@ def handle_user_prompt():
             from src.security.masker import mask_text
             from src.security.db_writer import write_finding
 
-            _sec_cfg = load_security_config(cwd=cwd)
+            # The session's folder picks the workspace security profiles; the
+            # payload cwd follows `cd`, CLAUDE_PROJECT_DIR does not.
+            _sec_cfg = load_security_config(cwd=cwd, workspace_root=os.environ.get("CLAUDE_PROJECT_DIR"))
             if _sec_cfg.enabled and prompt_text:
                 _sec_result = scan_text(prompt_text, _sec_cfg.prompt_config)
                 if _sec_result.findings:
@@ -428,6 +430,9 @@ def handle_user_prompt():
                         result=_sec_result,
                         blocked=True,
                         masked_text=_masked,
+                        platform="claude_code",
+                        config=_sec_cfg,
+                        session_root=os.environ.get("CLAUDE_PROJECT_DIR") or cwd,
                     )
                     _ms = _sec_result.scan_ms
                     _ms_str = f"{_ms:.2f}" if _ms < 1 else f"{int(_ms)}"

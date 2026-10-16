@@ -27,18 +27,67 @@ def load_security_yaml() -> dict:
         return {}
 
 
+# Kept from the existing file when the form writes a new mapping: editor data
+# (`ui_*` keys) and the per-scan-point sections, which the form does not model
+# and must not silently drop.
+_CARRIED_SECTIONS = ("prompt", "response")
+
+
+def _carry_over(existing: dict, data: dict) -> dict:
+    merged = dict(data)
+    for key, value in existing.items():
+        if key in merged:
+            continue
+        if str(key).startswith("ui_") or key in _CARRIED_SECTIONS:
+            merged[key] = value
+    return merged
+
+
 def save_security_yaml(data: dict) -> tuple[bool, str]:
-    """Write config dict to YAML. Returns (success, message)."""
+    """
+    Write config dict to YAML, atomically. Returns (success, message).
+    Keeps the editor data and sections the form does not model.
+    """
     try:
         import yaml
-        SECURITY_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        SECURITY_CONFIG_PATH.write_text(
-            yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False),
-            encoding="utf-8",
+        from src.common.atomic_files import write_atomically
+
+        existing = load_security_yaml()
+        write_atomically(
+            SECURITY_CONFIG_PATH,
+            yaml.dump(_carry_over(existing, data), default_flow_style=False,
+                      allow_unicode=True, sort_keys=False),
         )
         return True, "Security settings saved."
     except Exception as e:
         return False, f"Failed to save: {e}"
+
+
+def _pattern_problem(pattern: str) -> str | None:
+    """Why a regex cannot be used (RE2, as the scanner runs it), or None."""
+    from src.common.safe_regex import check
+
+    return check(pattern) if pattern else None
+
+
+def _skipped_patterns(patterns: list) -> list[dict]:
+    """Saved regex patterns the scanner will skip, with the reason - shown on the page."""
+    skipped = []
+    for p in patterns or []:
+        if isinstance(p, dict) and p.get("pattern"):
+            problem = _pattern_problem(str(p["pattern"]))
+            if problem:
+                skipped.append({"name": p.get("name", "?"), "problem": problem})
+    return skipped
+
+
+def _workspace_files() -> list[dict]:
+    """Per-folder security profiles on this machine (src/common/workspace_profiles.py)."""
+    from src.common import workspace_profiles as ws
+    from src.common.yaml_cache import read_yaml_mapping
+
+    return ws.list_workspace_files(ws.workspaces_dir(get_security_dir()), read_yaml_mapping,
+                                   what="workspace security profile")
 
 
 def load_preset(name: str) -> dict:
@@ -54,6 +103,15 @@ def load_preset(name: str) -> dict:
 
 
 # ── Context builders ──────────────────────────────────────────────────────────
+
+def _registered_categories() -> list[str]:
+    from src.security.config import _registered_defaults
+
+    return list(_registered_defaults())
+
+
+_ENTROPY_CATEGORY = "Entropy Secret"
+
 
 def get_security_context() -> dict:
     """Full context for the /security settings page."""
@@ -148,6 +206,8 @@ def get_security_context() -> dict:
         "pii_detectors":     pii_detectors,
         "entropy":           {"enabled": entropy_enabled},
         "custom_patterns":   custom_patterns,
+        # Built-in categories a pattern may join (every one but the entropy fallback).
+        "pattern_categories": sorted(c for c in _registered_categories() if c != _ENTROPY_CATEGORY),
         "keyword_blocklist": keyword_blocklist,
         "allowlist":         allowlist,
         "stats":             stats,
@@ -157,6 +217,8 @@ def get_security_context() -> dict:
         "config_path":       str(SECURITY_CONFIG_PATH),
         "save_success":      None,
         "save_message":      None,
+        "workspace_files":   _workspace_files(),
+        "skipped_patterns":  _skipped_patterns(custom_patterns),
     }
 
 
@@ -655,12 +717,36 @@ def apply_preset(preset_name: str) -> tuple[bool, str]:
     return save_security_yaml(preset)
 
 
+def _category_for(name: str, category: str) -> tuple[str | None, str | None]:
+    """(category to store, problem). A built-in category in its exact spelling ("aws" -> "AWS")."""
+    from src.security.config import CUSTOM_CATEGORY, CUSTOM_CATEGORY_MAX, ENTROPY_CATEGORY, _pattern_category
+
+    value = category.strip()
+    if not value:
+        return None, None
+    if value.lower() == CUSTOM_CATEGORY.lower():
+        return None, None
+    if len(value) > CUSTOM_CATEGORY_MAX:
+        return None, f"A category can be at most {CUSTOM_CATEGORY_MAX} characters."
+    if value.lower() == ENTROPY_CATEGORY.lower():
+        return None, f"'{ENTROPY_CATEGORY}' is the entropy fallback - choose a detector category or your own."
+    return _pattern_category({"name": name, "category": value}, "dashboard"), None
+
+
 def add_custom_pattern(name: str, pattern: str = "", examples: list[str] | None = None,
-                       severity: str = "HIGH") -> tuple[bool, str]:
+                       severity: str = "HIGH", category: str = "") -> tuple[bool, str]:
     """Append a new custom pattern to the existing config."""
+    problem = _pattern_problem(pattern)
+    if problem:
+        return False, f"That pattern can't be used: {problem}"
     cfg = load_security_yaml()
     patterns: list = cfg.get("custom_patterns", [])
     entry: dict = {"name": name, "severity": severity.upper()}
+    stored, problem = _category_for(name, category)
+    if problem:
+        return False, problem
+    if stored:
+        entry["category"] = stored
     if examples:
         entry["examples"] = [e.strip() for e in examples if e.strip()]
         if pattern:
@@ -676,14 +762,26 @@ def add_custom_pattern(name: str, pattern: str = "", examples: list[str] | None 
 
 def update_custom_pattern(old_name: str, name: str, pattern: str = "",
                           examples: list[str] | None = None,
-                          severity: str = "HIGH") -> tuple[bool, str]:
+                          severity: str = "HIGH", category: str | None = None) -> tuple[bool, str]:
     """Replace an existing custom pattern by old_name."""
+    problem = _pattern_problem(pattern)
+    if problem:
+        return False, f"That pattern can't be used: {problem}"
     cfg = load_security_yaml()
     patterns: list = cfg.get("custom_patterns", [])
     idx = next((i for i, p in enumerate(patterns) if p.get("name") == old_name), None)
     if idx is None:
         return False, f"Pattern '{old_name}' not found."
     entry: dict = {"name": name, "severity": severity.upper()}
+    # None keeps the pattern's category (an older page sends none).
+    if category is None:
+        kept = patterns[idx].get("category")
+    else:
+        kept, problem = _category_for(name, category)
+        if problem:
+            return False, problem
+    if kept:
+        entry["category"] = kept
     if examples:
         entry["examples"] = [e.strip() for e in examples if e.strip()]
         if pattern:

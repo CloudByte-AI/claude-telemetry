@@ -45,7 +45,11 @@ from src.db.writers import DatabaseWriter
 logger = get_logger(__name__)
 
 
-def _scan_response_for_secrets(response_text: str, session_id: str | None) -> None:
+def _scan_response_for_secrets(
+    response_text: str,
+    session_id: str | None,
+    workspace_roots: list | None = None,
+) -> None:
     """
     Scan the agent response text for secrets when scope == 'both'.
 
@@ -61,7 +65,12 @@ def _scan_response_for_secrets(response_text: str, session_id: str | None) -> No
         from src.security.masker import mask_text
         from src.security.db_writer import write_finding
 
-        sec_cfg = load_security_config(cwd=None)
+        from src.cursor.utils.hook_io import normalize_cwd
+
+        # The response belongs to the whole workspace: every root's security
+        # profiles apply, strictest wins.
+        roots = [normalize_cwd(root) for root in (workspace_roots or []) if root]
+        sec_cfg = load_security_config(cwd=None, workspace_roots=roots)
 
         if not sec_cfg.enabled:
             logger.debug("Security scanning disabled - skipping response scan")
@@ -108,6 +117,9 @@ def _scan_response_for_secrets(response_text: str, session_id: str | None) -> No
             result=scan_result,
             blocked=False,
             masked_text=masked_text,
+            platform="cursor",
+            config=sec_cfg,
+            session_root=(roots[0] if roots else None),
         )
         logger.warning(
             f"⚠️  Sensitive data found in agent response - "
@@ -209,7 +221,7 @@ def handle_after_agent_response() -> None:
         # are recorded in SECURITY_SCAN_EVENT for the dashboard. Failures
         # always fail open.
         if response_text:
-            _scan_response_for_secrets(response_text, session_id)
+            _scan_response_for_secrets(response_text, session_id, hook_data.get("workspace_roots"))
 
     except Exception as e:
         debug(f"ERROR - {e}")
