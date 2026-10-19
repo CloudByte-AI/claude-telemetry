@@ -46,7 +46,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from src.common import safe_regex
+
 # ── Constants ─────────────────────────────────────────────────────────────────
+
+# Generated patterns run on RE2 (src.common.safe_regex), which has no lookaround.
+# A token boundary is therefore matched as text, with the token itself in group 1,
+# which is what the scanner reports.
+_LEAD_BOUNDARY  = "(?:^|[^a-zA-Z0-9])"   # replaces (?<![a-zA-Z0-9])
+_TRAIL_BOUNDARY = "(?:$|[^a-zA-Z0-9])"   # replaces (?![a-zA-Z0-9])
 
 _SEPARATORS  = frozenset('_-.:/\\|@#')
 _HEX_CHARS   = frozenset('0123456789abcdefABCDEF')
@@ -509,10 +517,10 @@ def _check_clean_text_fps(pattern: str) -> int:
     Returns the false-positive hit count.
     """
     try:
-        compiled = re.compile(pattern)
-        return len(compiled.findall(_CLEAN_TEXT_CORPUS))
-    except re.error:
+        finder = safe_regex.compile_finder(pattern)
+    except safe_regex.RegexError:
         return 0
+    return sum(1 for _ in finder.finditer(_CLEAN_TEXT_CORPUS))
 
 
 # ── Codebase FP scan helpers ──────────────────────────────────────────────────
@@ -571,8 +579,8 @@ def _scan_codebase_files(pattern: str, cwd: str) -> tuple[int, int, int]:
     Bails out early if the file count or time budget is exceeded.
     """
     try:
-        compiled = re.compile(pattern)
-    except re.error:
+        compiled = safe_regex.compile_finder(pattern)
+    except safe_regex.RegexError:
         return 0, 0, 0
 
     fp_count = 0
@@ -606,7 +614,7 @@ def _scan_codebase_files(pattern: str, cwd: str) -> tuple[int, int, int]:
                     continue
                 with open(fpath, encoding="utf-8", errors="ignore") as f:
                     content = f.read(_CODEBASE_MAX_FILE_BYTES)
-                fp_count += len(compiled.findall(content))
+                fp_count += sum(1 for _ in compiled.finditer(content))
                 files_checked += 1
             except Exception:
                 continue
@@ -627,7 +635,7 @@ def _alternatives(
 
     # Strict: exact length
     q_strict = f"{{{min_len}}}" if min_len == max_len else f"{{{min_len},{max_len}}}"
-    strict = f"(?<![a-zA-Z0-9]){ep}{char_class}{q_strict}{es}(?![a-zA-Z0-9])"
+    strict = f"{_LEAD_BOUNDARY}({ep}{char_class}{q_strict}{es}){_TRAIL_BOUNDARY}"
 
     # Loose: ±4 length tolerance, no boundary
     q_loose = f"{{{max(1, min_len - 4)},{max_len + 4}}}"
@@ -646,10 +654,10 @@ def _alternatives(
     return alts
 
 
-def _safe_compile(pattern: str) -> Optional[re.Pattern]:
+def _safe_compile(pattern: str) -> Optional[safe_regex.Pattern]:
     try:
-        return re.compile(pattern)
-    except re.error:
+        return safe_regex.compile(pattern)
+    except safe_regex.RegexError:
         return None
 
 
@@ -750,14 +758,14 @@ def analyze_examples(
     else:
         core = f"{char_class}{length_spec}"
 
-    # Lookbehind prevents matching in the middle of longer tokens.
+    # The boundary prevents matching in the middle of longer tokens.
     # If variable-prefix group was detected, prepend it before the fixed prefix.
     if env_group:
-        primary = f"(?<![a-zA-Z0-9]){env_group}{ep}{core}{es}"
+        primary = f"{_LEAD_BOUNDARY}({env_group}{ep}{core}{es})"
     elif prefix:
-        primary = f"(?<![a-zA-Z0-9]){ep}{core}{es}"
+        primary = f"{_LEAD_BOUNDARY}({ep}{core}{es})"
     elif suffix:
-        primary = f"{core}{es}(?![a-zA-Z0-9])"
+        primary = f"({core}{es}){_TRAIL_BOUNDARY}"
     else:
         primary = f"\\b{core}\\b"
 
