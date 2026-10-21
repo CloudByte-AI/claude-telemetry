@@ -46,7 +46,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from src.common import safe_regex
+
 # ── Constants ─────────────────────────────────────────────────────────────────
+
+# Generated patterns run on RE2 (src.common.safe_regex), which has no lookaround.
+# A token boundary is therefore matched as text, with the token itself in group 1,
+# which is what the scanner reports.
+_LEAD_BOUNDARY  = "(?:^|[^a-zA-Z0-9])"   # replaces (?<![a-zA-Z0-9])
+_TRAIL_BOUNDARY = "(?:$|[^a-zA-Z0-9])"   # replaces (?![a-zA-Z0-9])
 
 _SEPARATORS  = frozenset('_-.:/\\|@#')
 _HEX_CHARS   = frozenset('0123456789abcdefABCDEF')
@@ -508,8 +516,11 @@ def _check_clean_text_fps(pattern: str) -> int:
     times it fires on clearly benign content.
     Returns the false-positive hit count.
     """
-    compiled = _safe_compile(pattern)
-    return len(compiled.spans(_CLEAN_TEXT_CORPUS)) if compiled else 0
+    try:
+        finder = safe_regex.compile_finder(pattern)
+    except safe_regex.RegexError:
+        return 0
+    return sum(1 for _ in finder.finditer(_CLEAN_TEXT_CORPUS))
 
 
 # ── Codebase FP scan helpers ──────────────────────────────────────────────────
@@ -567,8 +578,9 @@ def _scan_codebase_files(pattern: str, cwd: str) -> tuple[int, int, int]:
     Returns (fp_count, files_checked, elapsed_ms).
     Bails out early if the file count or time budget is exceeded.
     """
-    compiled = _safe_compile(pattern)
-    if compiled is None:
+    try:
+        compiled = safe_regex.compile_finder(pattern)
+    except safe_regex.RegexError:
         return 0, 0, 0
 
     fp_count = 0
@@ -602,7 +614,7 @@ def _scan_codebase_files(pattern: str, cwd: str) -> tuple[int, int, int]:
                     continue
                 with open(fpath, encoding="utf-8", errors="ignore") as f:
                     content = f.read(_CODEBASE_MAX_FILE_BYTES)
-                fp_count += len(compiled.spans(content))
+                fp_count += sum(1 for _ in compiled.finditer(content))
                 files_checked += 1
             except Exception:
                 continue
@@ -623,7 +635,7 @@ def _alternatives(
 
     # Strict: exact length
     q_strict = f"{{{min_len}}}" if min_len == max_len else f"{{{min_len},{max_len}}}"
-    strict = f"{_BOUNDARY_BEFORE}({ep}{char_class}{q_strict}{es}){_BOUNDARY_AFTER}"
+    strict = f"{_LEAD_BOUNDARY}({ep}{char_class}{q_strict}{es}){_TRAIL_BOUNDARY}"
 
     # Loose: ±4 length tolerance, no boundary
     q_loose = f"{{{max(1, min_len - 4)},{max_len + 4}}}"
@@ -642,19 +654,9 @@ def _alternatives(
     return alts
 
 
-# Token boundaries without lookaround, which RE2 (src/common/safe_regex.py)
-# does not support. The token is group 1, which is what the scanner reports
-# and masks; the boundary characters around it are matched but not reported.
-_BOUNDARY_BEFORE = "(?:^|[^a-zA-Z0-9])"
-_BOUNDARY_AFTER = "(?:[^a-zA-Z0-9]|$)"
-
-
-def _safe_compile(pattern: str):
-    """The pattern compiled on RE2 (a CapturingPattern), or None when it cannot be used."""
-    from src.common import safe_regex
-
+def _safe_compile(pattern: str) -> Optional[safe_regex.Pattern]:
     try:
-        return safe_regex.compile_capturing(pattern)
+        return safe_regex.compile(pattern)
     except safe_regex.RegexError:
         return None
 
@@ -756,17 +758,14 @@ def analyze_examples(
     else:
         core = f"{char_class}{length_spec}"
 
-    # A boundary before the prefix stops a match in the middle of a longer
-    # token. It is matched, not looked behind (RE2), so the token itself is
-    # group 1. Only the side that needs a boundary gets one: a trailing
-    # boundary would consume the separator the next token's leading one needs.
-    # If a variable-prefix group was detected, it goes before the fixed prefix.
+    # The boundary prevents matching in the middle of longer tokens.
+    # If variable-prefix group was detected, prepend it before the fixed prefix.
     if env_group:
-        primary = f"{_BOUNDARY_BEFORE}({env_group}{ep}{core}{es})"
+        primary = f"{_LEAD_BOUNDARY}({env_group}{ep}{core}{es})"
     elif prefix:
-        primary = f"{_BOUNDARY_BEFORE}({ep}{core}{es})"
+        primary = f"{_LEAD_BOUNDARY}({ep}{core}{es})"
     elif suffix:
-        primary = f"({core}{es}){_BOUNDARY_AFTER}"
+        primary = f"({core}{es}){_TRAIL_BOUNDARY}"
     else:
         primary = f"\\b{core}\\b"
 

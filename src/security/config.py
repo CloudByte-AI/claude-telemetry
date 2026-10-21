@@ -14,6 +14,9 @@ global file alone.
 A missing global file means scanning is off (unless a workspace file turns it
 on). An unreadable file falls back to the last copy that parsed cleanly
 (src/common/atomic_files.py), and only without one to the standard preset.
+A strict load (load_security_config(strict=True)) raises SecurityConfigError
+instead of falling back or skipping, for callers that must not scan with less
+than the user configured.
 
 Config format:
   enabled: true
@@ -42,6 +45,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from src.common import safe_regex
 from src.common.logging import get_logger
 from src.common.paths import get_security_dir
 
@@ -51,6 +55,21 @@ PROFILES_DIR    = Path(__file__).parent / "profiles"
 USER_CONFIG_PATH = get_security_dir() / "security_profile.yaml"
 
 
+class SecurityConfigError(Exception):
+    """
+    Raised by a strict load when the profile cannot be used exactly as written.
+
+    `reason` is a short stable code for callers ('profile_unreadable',
+    'profile_not_mapping', 'pattern_invalid'). The message carries the detail
+    and is meant for logs only: a YAML error can quote a line of the profile,
+    and the profile's allowlist holds real secret values.
+    """
+
+    def __init__(self, reason: str, message: str):
+        super().__init__(message)
+        self.reason = reason
+
+
 @dataclass
 class ScanConfig:
     """
@@ -58,7 +77,9 @@ class ScanConfig:
 
     categories:       CATEGORY → enabled bool.
                       Missing keys fall back to the detector's ENABLED_BY_DEFAULT.
-    custom_patterns:  list of [{name, pattern, severity}] dicts (user-defined extra regex).
+    custom_patterns:  list of [{name, pattern, severity}] dicts (user-defined extra regex,
+                      RE2 syntax: no lookaround or backreferences). A finding is group 1
+                      when the pattern has one, else the whole match.
     keyword_blocklist: list of literal strings to flag.
     allowlist:        exact secret values that should NEVER be flagged or block a prompt.
                       Checked before any Finding is created - zero detector overhead.
@@ -169,20 +190,45 @@ def _pattern_category(p: dict, label: str) -> str | None:
     return built_in.get(name.lower(), name)
 
 
-def _validate_patterns(patterns: list, label: str, cwd: str | None = None) -> list:
+def _skip_pattern(strict: bool, message: str) -> None:
+    """Log a custom pattern being skipped, or refuse it under a strict load."""
+    if strict:
+        raise SecurityConfigError("pattern_invalid", message)
+    logger.warning(message)
+
+
+def _unusable_regex(label: str, name: str, reason: str) -> str:
+    """The warning for a custom pattern the scanner's regex engine cannot compile."""
+    return (
+        f"{label}: custom pattern '{name}' skipped - RE2 cannot compile it "
+        f"({reason.rstrip('.')}). Custom patterns run on RE2 so that no pattern can "
+        "take unbounded time in a hook."
+    )
+
+
+def _validate_patterns(patterns: list, label: str, cwd: str | None = None, strict: bool = False) -> list:
     """
     Validate and normalise custom patterns.
 
     Mode A - examples-based: system generates a regex automatically.
     Mode B - manual regex: compiled and used as-is.
     Either keeps the pattern's custom `category` (see _pattern_category).
+
+    Both modes are checked against RE2 (src.common.safe_regex), the engine the
+    scanner runs custom patterns on. A pattern that cannot be used is skipped
+    with a warning, or raises SecurityConfigError when strict.
     """
     valid = []
     for p in patterns:
         if not isinstance(p, dict):
+            if strict:
+                raise SecurityConfigError("pattern_invalid", f"{label}: custom pattern entry is not a mapping")
             continue
 
         name = p.get("name", "?")
+        if strict and "name" not in p:
+            # The scanner labels findings by name and skips nameless patterns.
+            raise SecurityConfigError("pattern_invalid", f"{label}: custom pattern has no name")
         category = _pattern_category(p, label)
 
         # ── Mode A: examples-based pattern generation ──────────────────────
@@ -190,7 +236,7 @@ def _validate_patterns(patterns: list, label: str, cwd: str | None = None) -> li
             _MAX_EXAMPLES = 5
             examples = p.get("examples") or []
             if not examples:
-                logger.warning(f"{label}: pattern '{name}' has empty examples list - skipped")
+                _skip_pattern(strict, f"{label}: pattern '{name}' has empty examples list - skipped")
                 continue
             if len(examples) > _MAX_EXAMPLES:
                 logger.warning(
@@ -198,6 +244,7 @@ def _validate_patterns(patterns: list, label: str, cwd: str | None = None) -> li
                     f"only the first {_MAX_EXAMPLES} are used"
                 )
                 examples = examples[:_MAX_EXAMPLES]
+            entry = None
             try:
                 from src.security.pattern_builder import analyze_examples
                 generated = analyze_examples(
@@ -226,32 +273,42 @@ def _validate_patterns(patterns: list, label: str, cwd: str | None = None) -> li
                 entry = generated.to_scan_config_entry()
                 if category:
                     entry["category"] = category
-                valid.append(entry)
             except Exception as e:
+                if strict:
+                    raise SecurityConfigError(
+                        "pattern_invalid", f"{label}: pattern builder failed for '{name}': {e}"
+                    ) from e
                 logger.warning(f"{label}: pattern builder failed for '{name}': {e} - skipped")
+            if entry is not None:
+                # What the builder generates must run on the scanner's engine too.
+                reason = safe_regex.check(entry["pattern"], finder=True)
+                if reason is None:
+                    valid.append(entry)
+                else:
+                    _skip_pattern(strict, _unusable_regex(label, name, reason))
             continue
 
         # ── Mode B: manual regex ───────────────────────────────────────────
         if "pattern" not in p:
-            logger.warning(f"{label}: pattern '{name}' has neither 'pattern' nor 'examples' - skipped")
+            _skip_pattern(strict, f"{label}: pattern '{name}' has neither 'pattern' nor 'examples' - skipped")
             continue
-        # RE2 (src/common/safe_regex.py): the same check the scanner compiles
-        # with, so a pattern that passes here can never fail or hang there.
-        from src.common.safe_regex import check
-
-        problem = check(str(p["pattern"]))
-        if problem is None:
+        # The same compile the scanner uses, so a pattern that passes here can
+        # never fail or hang there. A pattern that is not text is refused.
+        reason = safe_regex.check(p["pattern"], finder=True)
+        if reason is None:
             entry = {k: v for k, v in p.items() if k != "category"}
             if category:
                 entry["category"] = category
             valid.append(entry)
         else:
-            logger.warning(f"{label}: custom pattern '{name}' cannot be used - skipped: {problem}")
+            _skip_pattern(strict, _unusable_regex(label, name, reason))
 
     return valid
 
 
-def _parse_scan_section(raw: dict, defaults: ScanConfig, cwd: str | None = None) -> ScanConfig:
+def _parse_scan_section(
+    raw: dict, defaults: ScanConfig, cwd: str | None = None, strict: bool = False
+) -> ScanConfig:
     """
     Parse a scan-point section (prompt: or response:), falling back to
     the top-level defaults for any key not present in the section.
@@ -263,17 +320,17 @@ def _parse_scan_section(raw: dict, defaults: ScanConfig, cwd: str | None = None)
         merged_categories.update(raw["categories"])
     return ScanConfig(
         categories=merged_categories,
-        custom_patterns=_validate_patterns(patterns, "section", cwd=cwd),
+        custom_patterns=_validate_patterns(patterns, "section", cwd=cwd, strict=strict),
         keyword_blocklist=raw.get("keyword_blocklist") or defaults.keyword_blocklist,
         allowlist=defaults.allowlist,  # allowlist is global - always inherited, no per-section override
     )
 
 
-def _parse_config(raw: dict[str, Any], cwd: str | None = None) -> SecurityConfig:
+def _parse_config(raw: dict[str, Any], cwd: str | None = None, strict: bool = False) -> SecurityConfig:
     """Parse raw YAML dict into a SecurityConfig."""
     base = ScanConfig(
         categories=raw.get("categories") or {},
-        custom_patterns=_validate_patterns(raw.get("custom_patterns") or [], "top-level", cwd=cwd),
+        custom_patterns=_validate_patterns(raw.get("custom_patterns") or [], "top-level", cwd=cwd, strict=strict),
         keyword_blocklist=raw.get("keyword_blocklist") or [],
         allowlist=[str(v) for v in (raw.get("allowlist") or []) if v],
     )
@@ -281,8 +338,12 @@ def _parse_config(raw: dict[str, Any], cwd: str | None = None) -> SecurityConfig
     prompt_raw   = raw.get("prompt")
     response_raw = raw.get("response")
 
-    prompt_config   = _parse_scan_section(prompt_raw, base, cwd=cwd)   if isinstance(prompt_raw, dict)   else base
-    response_config = _parse_scan_section(response_raw, base, cwd=cwd) if isinstance(response_raw, dict) else base
+    prompt_config = (
+        _parse_scan_section(prompt_raw, base, cwd=cwd, strict=strict) if isinstance(prompt_raw, dict) else base
+    )
+    response_config = (
+        _parse_scan_section(response_raw, base, cwd=cwd, strict=strict) if isinstance(response_raw, dict) else base
+    )
 
     return SecurityConfig(
         enabled=bool(raw.get("enabled", False)),
@@ -295,15 +356,35 @@ def _parse_config(raw: dict[str, Any], cwd: str | None = None) -> SecurityConfig
 
 # ── Reading one file ──────────────────────────────────────────────────────────
 
-def _read_profile_file(path: Path, what: str) -> tuple[dict, str | None]:
+def _read_profile_strict(path: Path, what: str) -> dict:
+    """
+    One profile file parsed exactly as written, or SecurityConfigError. Reads
+    the file itself, not the parsed-mapping cache or the last good copy, and
+    writes nothing.
+    """
+    try:
+        import yaml
+        with open(path, encoding="utf-8") as f:
+            raw = yaml.safe_load(f)
+    except Exception as e:
+        raise SecurityConfigError("profile_unreadable", f"{what} {path.name} unreadable: {e}") from e
+    if not isinstance(raw, dict):
+        raise SecurityConfigError("profile_not_mapping", f"{what} {path.name} is not a mapping")
+    return raw
+
+
+def _read_profile_file(path: Path, what: str, strict: bool = False) -> tuple[dict, str | None]:
     """
     (raw mapping, restored-from) for one existing profile file.
 
     A clean read is remembered as the file's last good copy. An unreadable or
     non-mapping file falls back to that copy, and only without one to the
     standard preset - a half-written or mangled file must not change what is
-    enforced. Never raises.
+    enforced. Never raises, unless strict (see _read_profile_strict).
     """
+    if strict:
+        return _read_profile_strict(path, what), None
+
     from src.common.atomic_files import load_last_good, save_last_good
     from src.common.yaml_cache import read_yaml_mapping
 
@@ -441,8 +522,14 @@ def _merge(profiles: list[tuple[PolicySource, "SecurityConfig"]]) -> SecurityCon
 WORKSPACE_WHAT = "workspace security profile"
 
 
-def _workspace_profiles(workspace_roots: list, cwd: str | None) -> list[tuple[PolicySource, SecurityConfig]]:
-    """The workspace profiles that apply, nearest first, each read once. Never raises."""
+def _workspace_profiles(
+    workspace_roots: list, cwd: str | None, strict: bool = False
+) -> list[tuple[PolicySource, SecurityConfig]]:
+    """
+    The workspace profiles that apply, nearest first, each read once. Never
+    raises, unless strict: then a profile that cannot be found or used exactly
+    as written raises SecurityConfigError.
+    """
     from src.common import workspace_profiles as ws
     from src.common.yaml_cache import read_yaml_mapping
 
@@ -461,14 +548,18 @@ def _workspace_profiles(workspace_roots: list, cwd: str | None) -> list[tuple[Po
                     seen.add(entry[1])
                     found.append(entry)
     except Exception as exc:
+        if strict:
+            raise SecurityConfigError(
+                "profile_unreadable", f"workspace security profiles could not be read: {exc}"
+            ) from exc
         logger.warning(f"workspace security profiles could not be read: {exc}")
         return []
 
     profiles = []
     for root, path, _ in found:
-        raw, restored = _read_profile_file(path, WORKSPACE_WHAT)
+        raw, restored = _read_profile_file(path, WORKSPACE_WHAT, strict=strict)
         source = _source_for(SCOPE_WORKSPACE, path, raw, root, restored)
-        profiles.append((source, _parse_config(raw, cwd=cwd)))
+        profiles.append((source, _parse_config(raw, cwd=cwd, strict=strict)))
     return profiles
 
 
@@ -476,6 +567,7 @@ def load_security_config(
     cwd: str | None = None,
     workspace_root: str | None = None,
     workspace_roots: list | None = None,
+    strict: bool = False,
 ) -> SecurityConfig:
     """
     The security config for a scan: the global profile plus the workspace
@@ -487,18 +579,25 @@ def load_security_config(
     Without either, the folder is taken from `cwd`.
 
     Returns SecurityConfig(enabled=False) when nothing enables scanning.
-    Never raises.
+
+    Not strict (the default): never raises. An unreadable or malformed file
+    falls back to its last good copy or the standard preset, and unusable
+    custom patterns are skipped with a warning.
+
+    Strict: raises SecurityConfigError instead of either. Without PyYAML the
+    fallback preset is empty too, so a non-strict load can quietly lose the
+    user's custom patterns and keyword blocklist.
     """
     profiles: list[tuple[PolicySource, SecurityConfig]] = []
     global_cfg: SecurityConfig | None = None
 
     if USER_CONFIG_PATH.exists():
-        raw, restored = _read_profile_file(USER_CONFIG_PATH, "security_profile.yaml")
-        global_cfg = _parse_config(raw, cwd=cwd)
+        raw, restored = _read_profile_file(USER_CONFIG_PATH, "security_profile.yaml", strict=strict)
+        global_cfg = _parse_config(raw, cwd=cwd, strict=strict)
         profiles.append((_source_for(SCOPE_GLOBAL, USER_CONFIG_PATH, raw, None, restored), global_cfg))
 
     roots = list(workspace_roots or ([workspace_root] if workspace_root else []))
-    profiles.extend(_workspace_profiles(roots, cwd))
+    profiles.extend(_workspace_profiles(roots, cwd, strict=strict))
 
     enabled = [(source, cfg) for source, cfg in profiles if cfg.enabled]
     if not enabled:

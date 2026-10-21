@@ -10,13 +10,13 @@ profile author can act on.
 
 Rules for callers:
   * Import nothing but this module, so replacing the engine touches this file alone.
-  * Ask only "does it match?": `Pattern.search` returns a bool, never a match
-    object, so no caller depends on engine-specific capture behaviour.
-    The one exception is a scanner that must say WHERE a secret is, to mask
-    it: `compile_capturing` returns a CapturingPattern whose `spans` gives
-    plain (start, end, text) tuples - still no engine match object.
+  * Ask only "does it match?" (`Pattern.search`, a bool) unless the caller must
+    know where. Then use `Finder.finditer`, which yields plain `Hit` values with
+    character offsets. Neither returns a match object, so no caller depends on
+    engine-specific capture behaviour.
   * Bound the input yourself: RE2's cost is linear in the text, so a cap on the
-    text is a hard cap on the time.
+    text is a hard cap on the time. A caller that cannot cap its input checks a
+    clock between `Hit`s instead.
   * Never fall back to `re`: if the engine cannot be loaded, patterns fail to
     compile with an error saying why, so a profile is never safe on one machine
     and able to hang on another.
@@ -29,7 +29,8 @@ from __future__ import annotations
 
 import functools
 import re
-from typing import Any
+from collections.abc import Iterator
+from typing import Any, NamedTuple
 
 ENGINE = "RE2"
 PACKAGE = "google-re2"
@@ -60,43 +61,66 @@ class Pattern:
         return f"Pattern({self.source!r})"
 
 
-class CapturingPattern:
-    """
-    A compiled user pattern that can also say where it matched - for scanners
-    that mask what they find. Matching is still RE2: linear in the text.
-    """
+class Hit(NamedTuple):
+    """One occurrence of a pattern. `start` and `end` are character offsets into the text."""
 
-    __slots__ = ("source", "_compiled", "_group")
+    value: str
+    start: int
+    end: int
+
+
+class Finder:
+    """A compiled user pattern that reports where it occurs, not just whether."""
+
+    __slots__ = ("source", "_compiled")
 
     def __init__(self, source: str, compiled: Any) -> None:
         self.source = source
         self._compiled = compiled
-        # Report the first group when the pattern has one (a pattern that
-        # matches context around the secret captures the secret itself).
-        self._group = 1 if getattr(compiled, "groups", 0) >= 1 else 0
 
-    def search(self, text: str) -> bool:
-        """True when the pattern occurs anywhere in `text`."""
-        return self._compiled.search(text) is not None
+    def finditer(self, text: str) -> Iterator[Hit]:
+        """
+        Yield every occurrence of the pattern in `text`, lazily and in order.
 
-    def spans(self, text: str, limit: int = 1000) -> list[tuple[int, int, str]]:
+        A hit is group 1 when the pattern has one that matched some text, else
+        the whole match. Whatever the match holds around group 1 is context, so
+        the search resumes at the end of group 1: a boundary written as text,
+        `(tok)(?:$|[^A-Za-z0-9])`, then never hides the next token's own boundary
+        the way it would if the search resumed after the whole match, which is
+        where a lookahead would have left it.
         """
-        Every non-overlapping match as (start, end, matched text) of the first
-        group, or of the whole match when the pattern has no group. A group
-        that did not take part in a match is skipped. At most `limit` results.
-        """
-        found: list[tuple[int, int, str]] = []
-        for match in self._compiled.finditer(text):
-            start, end = match.start(self._group), match.end(self._group)
-            if start < 0 or end < 0:
-                continue
-            found.append((start, end, text[start:end]))
-            if len(found) >= limit:
-                break
-        return found
+        try:
+            text.encode("utf-8")
+        except UnicodeEncodeError:
+            # A lone surrogate cannot be encoded for the engine. Replacing it
+            # with "?" keeps one character per character, so offsets still hold.
+            text = text.encode("utf-8", "replace").decode("utf-8")
+
+        compiled = self._compiled
+        grouped = compiled.groups > 0
+        pos = 0
+        while True:
+            resume = None
+            # The engine's own iteration is one pass over the text. Only a
+            # match that leaves context after group 1 restarts it, which
+            # costs one more pass.
+            for m in compiled.finditer(text, pos):
+                start, end = m.span()
+                if grouped:
+                    group_start, group_end = m.span(1)
+                    if group_end > group_start >= 0:
+                        if group_end < end:
+                            resume = group_end
+                        start, end = group_start, group_end
+                yield Hit(text[start:end], start, end)
+                if resume is not None:
+                    break
+            if resume is None:
+                return
+            pos = resume
 
     def __repr__(self) -> str:
-        return f"CapturingPattern({self.source!r})"
+        return f"Finder({self.source!r})"
 
 
 @functools.cache
@@ -125,25 +149,6 @@ def _engine() -> tuple[Any, Any]:
     return re2, options
 
 
-@functools.cache
-def _capturing_options() -> Any:
-    """Like _engine()'s options, but with capturing on (for CapturingPattern)."""
-    engine, _ = _engine()
-    options = engine.Options()
-    options.log_errors = False
-    return options
-
-
-@functools.lru_cache(maxsize=_CACHE_SIZE)
-def compile_capturing(pattern: str) -> CapturingPattern:
-    """Compile a user pattern for a scanner that needs match positions, or raise RegexError."""
-    engine, _ = _engine()
-    try:
-        return CapturingPattern(pattern, engine.compile(pattern, _capturing_options()))
-    except engine.error as exc:
-        raise RegexError(explain(_engine_message(exc), pattern)) from None
-
-
 @functools.lru_cache(maxsize=_CACHE_SIZE)
 def compile(pattern: str) -> Pattern:  # noqa: A001 - mirrors re.compile on purpose
     """Compile a user pattern, or raise RegexError explaining why it cannot be used."""
@@ -154,14 +159,51 @@ def compile(pattern: str) -> Pattern:  # noqa: A001 - mirrors re.compile on purp
         raise RegexError(explain(_engine_message(exc), pattern)) from None
 
 
-def check(pattern: str) -> str | None:
+@functools.cache
+def _capture_options() -> Any:
+    """Options for a `Finder`: the same as `compile`'s, but groups are captured."""
+    engine, _ = _engine()
+    options = engine.Options()
+    options.log_errors = False
+    return options
+
+
+def compile_finder(pattern: str) -> Finder:
+    """
+    Compile a user pattern that must report where it matched, or raise RegexError.
+
+    For patterns whose author reads their own matches (a profile's secret
+    patterns); a pattern that only has to match or not goes through `compile`.
+    The error wording names the rewrite for a pattern's lookaround boundary.
+    """
+    # A profile is YAML, so a pattern can arrive as a number or a list.
+    if not isinstance(pattern, str):
+        raise RegexError(f"a pattern must be text, not {type(pattern).__name__}.")
+    return _compile_finder(pattern)
+
+
+@functools.lru_cache(maxsize=_CACHE_SIZE)
+def _compile_finder(pattern: str) -> Finder:
+    engine, _ = _engine()
+    try:
+        return Finder(pattern, engine.compile(pattern, _capture_options()))
+    except engine.error as exc:
+        raise RegexError(
+            explain(_engine_message(exc), pattern, lookaround_hint=_FINDER_LOOKAROUND_HINT)
+        ) from None
+
+
+def check(pattern: str, finder: bool = False) -> str | None:
     """
     Validate a pattern wherever one can enter (an editor, the profile loader).
     None means usable; otherwise the reason it is not. It is a compile, so a
     pattern that passes is guaranteed to compile at load.
+
+    `finder` checks it as `compile_finder` would compile it, for patterns whose
+    matches are read back.
     """
     try:
-        compile(pattern)
+        (compile_finder if finder else compile)(pattern)
     except RegexError as exc:
         return str(exc)
     return None
@@ -180,6 +222,13 @@ _UNSUPPORTED_GROUPS = (
     ("(?!", "negative lookahead `(?!...)`"),
 )
 _LOOKAROUND_HINT = "put that requirement in a second condition on the rule instead."
+# For a pattern that reports its own matches, where the context can be matched
+# as text and the value to report put in group 1.
+_FINDER_LOOKAROUND_HINT = (
+    "match that context as text instead and put the part to report in group 1 - "
+    "e.g. replace a lookbehind boundary with `(?:^|[^A-Za-z0-9])(...)`, "
+    "a lookahead with `(...)(?:$|[^A-Za-z0-9])`."
+)
 
 _BACKREFERENCE = re.compile(r"invalid escape sequence: \\[1-9]")
 # A quantifier followed by `+`: `a++`, `a*+`, `a?+`, `a{2}+`. Not `+*`, which is
@@ -193,12 +242,14 @@ def _engine_message(exc: BaseException) -> str:
     return raw.decode("utf-8", "replace") if isinstance(raw, bytes) else str(raw)
 
 
-def explain(message: str, pattern: str = "") -> str:
+def explain(message: str, pattern: str = "", lookaround_hint: str = _LOOKAROUND_HINT) -> str:
     """
     Turn an engine error into a sentence naming the feature and the fix.
 
     The pattern is consulted where the engine's message is too terse to tell
     features apart: RE2 reports a named backreference `(?P=name)` only as `(?P`.
+    `lookaround_hint` is the advice for lookaround, which depends on what the
+    caller's patterns are part of.
     """
     unsupported = f"is not supported by {ENGINE}"
 
@@ -206,7 +257,7 @@ def explain(message: str, pattern: str = "") -> str:
         token = message.split(": ", 1)[1]
         for prefix, feature in _UNSUPPORTED_GROUPS:
             if token.startswith(prefix):
-                return f"{feature} {unsupported} - {_LOOKAROUND_HINT}"
+                return f"{feature} {unsupported} - {lookaround_hint}"
         if token.startswith("(?>"):
             return (f"atomic group `(?>...)` {unsupported}, and is not needed: "
                     f"{ENGINE} never backtracks. Use a plain group `(?:...)`.")

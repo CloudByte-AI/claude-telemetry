@@ -11,6 +11,10 @@ Three scan strategies based on prompt size:
   filtered : quick-filter pre-pass, then parallel (> 5000 lines)
 
 The strategy label is stored in ScanResult.scan_strategy for telemetry.
+
+Anything skipped along the way (a detector that raised, a custom pattern that
+timed out or failed, the partial filtered strategy) is recorded in
+ScanResult.incomplete_reasons, and ScanResult.complete is then False.
 """
 
 import hashlib
@@ -25,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 # Trigger all @register_detector decorators
 import src.security.detectors  # noqa: F401
 
+from src.common import safe_regex
 from src.common.logging import get_logger
 from src.security.config import ScanConfig
 from src.security.detectors.base import (
@@ -95,45 +100,103 @@ def _normalize_label(raw: str) -> str:
 # User patterns run on RE2 (src/common/safe_regex.py), whose match time grows
 # only with the text, whatever the pattern - so one bad pattern cannot stall a
 # prompt. A pattern RE2 rejects never got this far (config._validate_patterns).
-# The text is capped and the patterns share a time budget per scan: past it,
-# the remaining patterns are skipped for this scan and logged, rather than
-# holding the prompt.
+# The text is capped, each pattern reports at most MAX_MATCHES_PER_PATTERN hits,
+# and all patterns share one time budget per scan, checked between hits. Past
+# it, the pattern in progress keeps the hits it found (they still block) and the
+# remaining patterns are skipped. Each of these is recorded in `issues`, so the
+# result says the scan was incomplete instead of holding the prompt.
 
 MAX_CUSTOM_PATTERN_INPUT = 2_000_000   # characters
-CUSTOM_PATTERN_BUDGET_SECS = 0.25
 MAX_MATCHES_PER_PATTERN = 1000
+# Time budget shared by all custom patterns in one scan.
+_PATTERN_TIMEOUT_SECS = 3.0
+
+
+def _run_timed(
+    pattern_str: str,
+    text: str,
+    hits: list[safe_regex.Hit] | None = None,
+    deadline: float | None = None,
+    limit: int | None = None,
+) -> list[safe_regex.Hit] | None:
+    """
+    Find every occurrence of a custom pattern in text, on RE2.
+
+    RE2 never backtracks, so one pattern cannot hang the scan however it is
+    written (Python's `re` holds the GIL while it matches, so no timeout around
+    it could fire). Each step is linear, which makes the clock reachable between
+    hits: a pattern still hitting at the deadline is a match flood on a huge
+    text, and is stopped.
+
+    `deadline` is a time.monotonic() value, by default _PATTERN_TIMEOUT_SECS from
+    now. Hits are appended to `hits` when given, so a caller keeps the ones found
+    before a timeout. At most `limit` hits are collected.
+
+    Returns None when the deadline passed, so the caller can tell a stopped
+    pattern from one that found nothing. Raises safe_regex.RegexError for a
+    pattern RE2 cannot compile.
+    """
+    finder = safe_regex.compile_finder(pattern_str)
+    if deadline is None:
+        deadline = time.monotonic() + _PATTERN_TIMEOUT_SECS
+    found: list[safe_regex.Hit] = [] if hits is None else hits
+    for hit in finder.finditer(text):
+        found.append(hit)
+        if limit is not None and len(found) >= limit:
+            break
+        if time.monotonic() >= deadline:
+            logger.warning(
+                f"Custom pattern still matching when the {_PATTERN_TIMEOUT_SECS}s budget ran out - "
+                "stopped. It matches too much of the text; narrow the regex."
+            )
+            return None
+    return found
 
 
 def _scan_custom_patterns(
-    text: str, cfg: ScanConfig, line_offsets: list[int], allowlist: frozenset
+    text: str, cfg: ScanConfig, line_offsets: list[int], allowlist: frozenset, issues: list[str]
 ) -> list[Finding]:
     """Scan user-defined custom patterns and keyword blocklist."""
     from src.security.detectors.base import char_to_line
 
-    from src.common import safe_regex
-
     findings: list[Finding] = []
     subject = text[:MAX_CUSTOM_PATTERN_INPUT]
-    started = time.perf_counter()
+    if len(text) > MAX_CUSTOM_PATTERN_INPUT:
+        issues.append("custom_input_truncated")
+    deadline = time.monotonic() + _PATTERN_TIMEOUT_SECS
+    over_budget = 0
 
-    for index, p in enumerate(cfg.custom_patterns):
+    for p in cfg.custom_patterns:
         if not isinstance(p, dict) or "pattern" not in p or "name" not in p:
+            name = p.get("name", "?") if isinstance(p, dict) else "?"
+            issues.append(f"pattern_skipped:{name}")
             continue
-        if time.perf_counter() - started > CUSTOM_PATTERN_BUDGET_SECS:
-            skipped = len(cfg.custom_patterns) - index
-            logger.warning(
-                f"Custom patterns over their {CUSTOM_PATTERN_BUDGET_SECS}s budget - "
-                f"{skipped} pattern(s) skipped for this scan"
-            )
-            break
+        if time.monotonic() >= deadline:
+            over_budget += 1
+            issues.append(f"pattern_timeout:{p['name']}")
+            continue
         label    = _normalize_label(p["name"])
         severity = str(p.get("severity", "HIGH")).upper()
+        hits: list[safe_regex.Hit] = []
         try:
-            compiled = safe_regex.compile_capturing(p["pattern"])
-        except safe_regex.RegexError as exc:
-            logger.warning(f"Custom pattern '{p['name']}' cannot be used - skipped: {exc}")
+            matches = _run_timed(
+                p["pattern"], subject, hits=hits, deadline=deadline, limit=MAX_MATCHES_PER_PATTERN
+            )
+        except safe_regex.RegexError:
+            issues.append(f"pattern_error:{p['name']}")
             continue
-        for char_start, char_end, secret_val in compiled.spans(subject, MAX_MATCHES_PER_PATTERN):
+        if matches is None:
+            issues.append(f"pattern_timeout:{p['name']}")
+        elif len(hits) >= MAX_MATCHES_PER_PATTERN:
+            issues.append(f"pattern_limit:{p['name']}")
+        # Hits found before a timeout are kept, so what was found still blocks.
+        for hit in hits:
+            # A hit is group(1) when the pattern has one (context patterns),
+            # else the full match; offsets are characters, not bytes.
+            secret_val = hit.value
+            char_start = hit.start
+            char_end   = hit.end
+
             if not secret_val or secret_val.startswith("[REDACTED:"):
                 continue
             if secret_val in allowlist:
@@ -150,6 +213,12 @@ def _scan_custom_patterns(
                 char_end=char_end,
                 custom=True,
             ))
+
+    if over_budget:
+        logger.warning(
+            f"Custom patterns over their {_PATTERN_TIMEOUT_SECS}s budget - "
+            f"{over_budget} pattern(s) skipped for this scan"
+        )
 
     for keyword in cfg.keyword_blocklist:
         if not keyword:
@@ -181,12 +250,14 @@ def _run_detector_safe(
     text: str,
     line_offsets: list[int],
     allowlist: frozenset,
+    issues: list[str],
 ) -> list[Finding]:
-    """Run one detector, swallowing any unexpected exceptions."""
+    """Run one detector, swallowing any unexpected exceptions (recorded in issues)."""
     try:
         return detector.scan(text, line_offsets, allowlist=allowlist)
     except Exception as exc:
         logger.warning(f"Detector {detector.CATEGORY} raised: {exc}")
+        issues.append(f"detector_error:{detector.CATEGORY}")
         return []
 
 
@@ -195,10 +266,11 @@ def _scan_sequential(
     detectors: list,
     line_offsets: list[int],
     allowlist: frozenset,
+    issues: list[str],
 ) -> list[Finding]:
     results: list[Finding] = []
     for det in detectors:
-        results.extend(_run_detector_safe(det, text, line_offsets, allowlist))
+        results.extend(_run_detector_safe(det, text, line_offsets, allowlist, issues))
     return results
 
 
@@ -207,11 +279,12 @@ def _scan_parallel(
     detectors: list,
     line_offsets: list[int],
     allowlist: frozenset,
+    issues: list[str],
 ) -> list[Finding]:
     results: list[Finding] = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
         futures = {
-            ex.submit(_run_detector_safe, det, text, line_offsets, allowlist): det.CATEGORY
+            ex.submit(_run_detector_safe, det, text, line_offsets, allowlist, issues): det.CATEGORY
             for det in detectors
         }
         for future in as_completed(futures):
@@ -220,6 +293,7 @@ def _scan_parallel(
             except Exception as exc:
                 cat = futures.get(future, "?")
                 logger.warning(f"Parallel scan thread [{cat}] failed: {exc}")
+                issues.append(f"detector_error:{cat}")
     return results
 
 
@@ -302,7 +376,8 @@ def scan_text(text: str, cfg: ScanConfig) -> ScanResult:
 
     Picks strategy based on line count, runs all enabled detectors, applies
     cross-detector deduplication, appends custom-pattern and keyword findings,
-    and returns a ScanResult.
+    and returns a ScanResult. ScanResult.complete is False when any of that
+    was skipped; ScanResult.incomplete_reasons says what.
     """
     if not text:
         return ScanResult(prompt_hash=_sha256(""), scan_strategy="full")
@@ -318,23 +393,27 @@ def scan_text(text: str, cfg: ScanConfig) -> ScanResult:
     # Pre-compute line offsets once for the full text - used by custom patterns
     # and by full/chunked strategies. Filtered strategy uses compact_offsets instead.
     line_offsets = compute_line_offsets(text)
+    # What was skipped. Appended from detector threads too; list.append is atomic.
+    issues: list[str] = []
 
     if count <= MAX_LINES_FULL:
         strategy = "full"
-        findings = _scan_sequential(text, detectors, line_offsets, allowlist_set)
+        findings = _scan_sequential(text, detectors, line_offsets, allowlist_set, issues)
 
     elif count <= MAX_LINES_CHUNK:
         strategy = "chunked"
-        findings = _scan_parallel(text, detectors, line_offsets, allowlist_set)
+        findings = _scan_parallel(text, detectors, line_offsets, allowlist_set, issues)
 
     else:
         strategy = "filtered"
+        # Detectors see only the high-risk lines, so the scan is partial by design.
+        issues.append("filtered_strategy")
         compact_text, orig_linenos, compact_offsets = _build_filtered_text(lines_raw)
         logger.debug(
             f"Filtered: {count} lines → {len(orig_linenos)} high-risk lines retained"
         )
         if compact_text:
-            raw = _scan_parallel(compact_text, detectors, compact_offsets, allowlist_set)
+            raw = _scan_parallel(compact_text, detectors, compact_offsets, allowlist_set, issues)
             findings = _remap_line_numbers(raw, orig_linenos)
         else:
             findings = []
@@ -347,8 +426,9 @@ def scan_text(text: str, cfg: ScanConfig) -> ScanResult:
     findings = deduplicate_findings(findings)
 
     # User-defined custom patterns and keyword blocklist run on full text always.
-    custom = _scan_custom_patterns(text, cfg, line_offsets, allowlist_set)
+    custom = _scan_custom_patterns(text, cfg, line_offsets, allowlist_set, issues)
     findings.extend(_attribute(custom, cfg.sources))
+    incomplete_reasons = list(dict.fromkeys(issues))
 
     elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
     logger.debug(
@@ -363,4 +443,6 @@ def scan_text(text: str, cfg: ScanConfig) -> ScanResult:
         scan_ms=elapsed_ms,
         scan_strategy=strategy,
         line_count=count,
+        complete=not incomplete_reasons,
+        incomplete_reasons=incomplete_reasons,
     )

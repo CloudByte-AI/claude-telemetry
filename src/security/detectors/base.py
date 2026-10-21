@@ -81,6 +81,11 @@ class ScanResult:
     scan_ms: float = 0.0
     scan_strategy: str = "full"
     line_count: int = 0
+    # False when part of the scan was skipped: a detector raised, a custom
+    # pattern timed out or failed, or a very long text was only partly
+    # scanned. incomplete_reasons says what, e.g. "detector_error:AWS".
+    complete: bool = True
+    incomplete_reasons: list[str] = field(default_factory=list)
 
 
 # ── Position helpers ──────────────────────────────────────────────────────────

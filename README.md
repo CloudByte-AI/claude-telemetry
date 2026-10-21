@@ -229,7 +229,35 @@ Prompts are scanned **before they are sent**. A finding can be recorded, masked,
 - **Three profiles** - `minimal`, `standard` (default, high-confidence detections only) and `strict`. Every detector category can be toggled individually.
 - **Scope** - `prompt_only` (default) or `both`, to scan responses as well.
 - **Custom patterns**, a **keyword blocklist** and an **allowlist** of values that must never be flagged - all editable from the dashboard, including a regex generator.
+- **Custom patterns use [RE2 syntax](https://github.com/google/re2/wiki/Syntax)**, so no pattern can stall a scan. Lookaround (`(?<=...)`, `(?=...)`) and backreferences (`\1`) are not supported: a pattern that uses them is skipped with a warning when the profile loads, and refused under `--strict`. Match the context as text and put the value to report in group 1, for example `(?<=key=)\w+` becomes `key=(\w+)`. `\d`, `\w`, `\s` and `\b` match ASCII only, and `$` matches only at the very end of the text.
 - Config lives in `~/.cloudbyte/security/security_profile.yaml` and is re-read on every scan. Findings land in `SECURITY_SCAN_EVENT` with the text masked.
+
+### Scanning text from the command line
+
+Other tools can ask the same scanner whether a piece of text is safe to send before they send it:
+
+```bash
+echo "text to check" | uv run --no-sync --directory <plugin root> -m src.security.scan_cli --strict
+```
+
+It reads text on stdin, uses your security profile, and prints one JSON object. Matched values are never printed.
+
+```json
+{"status": "ok", "complete": true, "incomplete_reasons": [], "blocked": false, "categories": [], "profile": "standard"}
+```
+
+| Field | Meaning |
+|---|---|
+| `status` | `ok`: your profile was used. `defaults`: there is no profile, so the detectors that are on by default were used. `fallback`: the profile can't be used as written, so the hooks' fallback was used (only without `--strict`). `error`: nothing was scanned |
+| `complete` | `false` when part of the scan was skipped, for example a detector failed, a custom pattern timed out, or a text over 5,000 lines was only partly scanned. `incomplete_reasons` says what |
+| `blocked` | `true` when anything was found, the same rule the prompt guardrail blocks on. `null` when nothing was scanned |
+| `categories` | The categories found, e.g. `GitHub` |
+| `profile` | The profile's plan (`standard`, …), `default` without a profile, `null` on error |
+
+- **`--strict`** refuses to scan when the profile can't be used exactly as written: an unreadable file, missing PyYAML, or an invalid custom pattern. Without it, those fall back the way the hooks do, and the result says `fallback`.
+- **The profile's `enabled` switch is ignored here.** It turns the prompt guardrail on and off; it doesn't change whether a given text is clean.
+- **Exit status:** `0` with a verdict, `1` if the scan itself failed, `2` for a usage error, `3` when `--strict` refused the profile.
+- **Treat it as safe only when** `status` is `ok` or `defaults`, `complete` is `true` and `blocked` is `false`.
 
 ---
 
