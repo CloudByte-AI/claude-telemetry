@@ -17,23 +17,40 @@ from src.security.detectors.base import ScanResult
 logger = get_logger(__name__)
 
 
+def _source_dicts(sources) -> list[dict]:
+    return [source.to_dict() for source in (sources or ())]
+
+
 def write_finding(
     session_id: str | None,
     scan_target: str,    # 'prompt' | 'response'
     result: ScanResult,
     blocked: bool,
     masked_text: str,
+    *,
+    platform: str | None = None,
+    prompt_id: str | None = None,
+    config=None,                     # the SecurityConfig the scan ran with
+    session_root: str | None = None, # the folder the session ran in
 ) -> str | None:
     """
     Insert one SECURITY_SCAN_EVENT row for a scan event.
     Returns the event_id on success, None on failure.
     Never raises - logging errors must not break the hook flow.
+
+    With `config`, the row records which profile decided (the global one when
+    it applied, else the nearest workspace profile), every profile that
+    applied, and for each finding the profiles that asked for it. Folder paths
+    are recorded as normalised paths in this local database only.
     """
     try:
+        from src.common.workspace_profiles import normalise_root
         from src.db.manager import get_db_connection
+        from src.db.schema import add_security_scan_event_columns
 
         conn = get_db_connection()
         cursor = conn.cursor()
+        add_security_scan_event_columns(cursor)
 
         event_id = str(uuid.uuid4())
         findings_list = [
@@ -44,17 +61,23 @@ def write_finding(
                 "severity":    f.severity,
                 "masked_value": f.masked_value,
                 "line_number": f.line_number,
+                **({"custom": True} if getattr(f, "custom", False) else {}),
+                **({"sources": _source_dicts(f.sources)} if getattr(f, "sources", ()) else {}),
             }
             for f in result.findings
         ]
+        sources = tuple(getattr(config, "sources", ()) or ())
+        primary = sources[0] if sources else None
 
         cursor.execute(
             """
             INSERT INTO SECURITY_SCAN_EVENT (
                 event_id, session_id, scan_target,
                 prompt_hash, masked_text, findings_json,
-                finding_count, blocked, scan_ms, scan_strategy, timestamp
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                finding_count, blocked, scan_ms, scan_strategy, timestamp,
+                platform, prompt_id, profile_hash, policy_scope,
+                workspace_root, session_root, policy_sources_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 event_id,
@@ -68,6 +91,13 @@ def write_finding(
                 result.scan_ms,
                 result.scan_strategy,
                 datetime.now(timezone.utc).isoformat(),
+                platform,
+                prompt_id,
+                primary.profile_hash if primary else None,
+                primary.scope if primary else None,
+                primary.root if primary else None,
+                normalise_root(session_root),
+                json.dumps(_source_dicts(sources)) if sources else None,
             ),
         )
         conn.commit()

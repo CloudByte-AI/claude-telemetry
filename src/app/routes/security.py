@@ -84,9 +84,10 @@ async def add_pattern(request: Request):
         pattern  = (body.get("pattern") or "").strip()
         examples = body.get("examples") or []
         severity = (body.get("severity") or "HIGH").upper()
+        category = (body.get("category") or "").strip()
         if not name:
             return JSONResponse({"ok": False, "error": "Name is required."}, status_code=400)
-        success, message = svc.add_custom_pattern(name, pattern, examples, severity)
+        success, message = svc.add_custom_pattern(name, pattern, examples, severity, category)
         return JSONResponse({"ok": success, "message": message})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
@@ -100,9 +101,11 @@ async def update_pattern(old_name: str, request: Request):
         pattern  = (body.get("pattern") or "").strip()
         examples = body.get("examples") or []
         severity = (body.get("severity") or "HIGH").upper()
+        category = body.get("category")
         if not name:
             return JSONResponse({"ok": False, "error": "Name is required."}, status_code=400)
-        success, message = svc.update_custom_pattern(old_name, name, pattern, examples, severity)
+        success, message = svc.update_custom_pattern(old_name, name, pattern, examples, severity,
+                                                     None if category is None else str(category))
         return JSONResponse({"ok": success, "message": message})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)

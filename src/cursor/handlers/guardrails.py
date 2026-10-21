@@ -191,22 +191,11 @@ def workspace_root_for(cwd: str | None, roots: list) -> str | None:
     that holds `cwd` (a multi-root workspace has several), else the first
     root. Picks the workspace policy - the root, not the cwd, is the
     workspace, as Claude Code's project directory is. Never raises.
+    Shared with security scanning (src/common/workspace_profiles.py).
     """
-    try:
-        from src.guardrails.workspaces import normalise_root
+    from src.common.workspace_profiles import workspace_root_for as _shared
 
-        here = normalise_root(cwd)
-        best, best_length = None, -1
-        for root in roots:
-            candidate = normalise_root(root)
-            if not candidate or not here:
-                continue
-            inside = here == candidate or here.startswith(candidate.rstrip("/") + "/")
-            if inside and len(candidate) > best_length:
-                best, best_length = root, len(candidate)
-        return best or (roots[0] if roots else None)
-    except Exception:
-        return roots[0] if roots else None
+    return _shared(cwd, roots)
 
 
 def _normalise_cwd(cwd) -> str | None:
@@ -406,6 +395,11 @@ def dispatch(hook_name: str, record: bool = True) -> int:
     # Last, once Cursor has its answer; never waited for. Like the audit event,
     # only Cursor's own install sends it.
     if record and decision.is_opinion:
+        try:
+            # First, so the notification outcome reaches the Cursor log.
+            _cursor_log()
+        except Exception:
+            pass
         try:
             sys.stdout.flush()
             from src.guardrails.notify import notify_decision

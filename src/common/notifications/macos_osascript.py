@@ -42,7 +42,7 @@ def show(notice: Notice) -> bool:
         launch(argv(notice))
         return True
     except Exception as exc:
-        _log().debug(f"macOS notification not shown: {exc}")
+        _log().warning(f"macOS notification not shown: osascript could not be started: {type(exc).__name__}: {exc}")
         return False
 
 

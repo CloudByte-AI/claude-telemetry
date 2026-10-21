@@ -40,42 +40,41 @@ Who writes the files:
 
 Whatever writes these files computes the names with the same algorithm;
 tests/guardrails/test_workspaces.py pins the vectors it must reproduce.
+
+The naming, folder walk and managed marker are shared with security scanning
+(src/common/workspace_profiles.py); this module adds the guardrails parts:
+where the files live and how a file is loaded as a GuardrailsProfile.
 """
 
 from __future__ import annotations
 
-import hashlib
-import os
-import posixpath
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.common import workspace_profiles as _shared
 from src.common.paths import get_guardrails_dir
+from src.common.workspace_profiles import (  # re-exported: guardrails code and tests import them from here
+    MANAGED_KEY,
+    PROFILE_SUFFIX,
+    WORKSPACE_KEY,
+    WORKSPACES_DIRNAME,
+    ancestors,
+    declared_root,
+    file_name_for,
+    is_managed,
+    normalise_root,
+    session_root,
+)
 from src.guardrails.config import (
-    EDITOR_KEY_PREFIX,
     GuardrailsProfile,
     load_profile_file,
     read_yaml_mapping,
 )
-from src.guardrails.toolcall import resolve_path
-
-WORKSPACES_DIRNAME = "workspaces"
-PROFILE_SUFFIX = ".yaml"
-
-# Editor data the plugin reads here (and only here): which folder a file is
-# for, and whether it is centrally managed. Both are `ui_` keys, so the policy
-# parser and the fingerprint ignore them.
-WORKSPACE_KEY = f"{EDITOR_KEY_PREFIX}workspace"
-MANAGED_KEY = f"{EDITOR_KEY_PREFIX}managed"
 
 SOURCE_WORKSPACE = "workspace"
 SOURCE_WORKSPACE_MANAGED = "workspace:managed"
 
-_HASH_LENGTH = 12
-_SLUG_LENGTH = 40
-_SLUG_INVALID = re.compile(r"[^a-z0-9._-]+")
-_DRIVE_ROOT = re.compile(r"^[a-z]:/$", re.IGNORECASE)
+_WHAT = "workspace guardrails profile"
 
 
 def _log():
@@ -95,110 +94,12 @@ class WorkspaceProfile:
 
 
 def workspaces_dir() -> Path:
-    return get_guardrails_dir() / WORKSPACES_DIRNAME
-
-
-def normalise_root(path: str | None) -> str | None:
-    """
-    A folder path in the one form used for matching and hashing, or None when
-    it is empty or not absolute. Purely lexical (no filesystem access):
-
-        C:\\Users\\Raj\\repo\\   ->  c:/users/raj/repo
-        /home/Raj/repo/        ->  /home/raj/repo
-        ~/repo                 ->  the home folder's path + /repo
-
-        /c:/Users/Raj/repo     ->  c:/users/raj/repo   (Cursor's form of a Windows path)
-
-    A drive or filesystem root keeps its slash (`c:/`, `/`).
-
-    Always lowercased, on every OS: Windows and macOS file systems ignore case
-    (`C:/Repo` and `c:/repo` must be one workspace), and one rule everywhere
-    keeps the file name identical for whatever writes the files and keeps the
-    engine free of host-platform checks (test_contracts.py). On a
-    case-sensitive Linux disk, two sibling folders differing only in case
-    share a policy - the stricter-decision rule makes that err on the safe side.
-    """
-    text = str(path).strip() if path else ""
-    if len(text) > 2 and text[0] == "/" and text[2] == ":" and text[1].isalpha():
-        text = text[1:]
-    resolved = resolve_path(text, None)
-    if not resolved:
-        return None
-    if not (resolved.startswith("/") or (len(resolved) > 2 and resolved[1] == ":" and resolved[2] == "/")):
-        return None
-    if len(resolved) > 1 and not _DRIVE_ROOT.match(resolved):
-        resolved = resolved.rstrip("/") or "/"
-    return resolved.lower()
-
-
-def file_name_for(root: str) -> str:
-    """
-    The workspace file name for a normalised root:
-    `<folder name, slugged>-<first 12 hex of sha256(root)>.yaml`.
-
-    The folder name keeps the file recognisable; the hash keeps two folders
-    with the same name apart. Changing this breaks every existing file, the
-    sync agent - see the pinned vectors in test_workspaces.py.
-    """
-    base = posixpath.basename(root.rstrip("/")) if not _DRIVE_ROOT.match(root) else ""
-    slug = _SLUG_INVALID.sub("-", base.lower()).strip("-.")[:_SLUG_LENGTH].strip("-.")
-    digest = hashlib.sha256(root.encode("utf-8")).hexdigest()[:_HASH_LENGTH]
-    return f"{slug or 'workspace'}-{digest}{PROFILE_SUFFIX}"
+    return _shared.workspaces_dir(get_guardrails_dir())
 
 
 def path_for(root: str) -> Path:
     """Where the workspace file for this normalised root lives."""
-    return workspaces_dir() / file_name_for(root)
-
-
-def _is_top(path: str) -> bool:
-    return path == "/" or bool(_DRIVE_ROOT.match(path))
-
-
-def ancestors(root: str) -> list[str]:
-    """
-    A normalised root and every parent folder up to the drive / filesystem
-    root, nearest first: `c:/a/b` -> [`c:/a/b`, `c:/a`, `c:/`].
-    """
-    chain = [root]
-    current = root
-    while not _is_top(current):
-        parent = posixpath.dirname(current)
-        if len(parent) == 2 and parent[1] == ":":
-            parent += "/"                   # posixpath leaves `c:` for `c:/a`
-        if not parent or parent == current:
-            break
-        chain.append(parent)
-        current = parent
-    return chain
-
-
-def session_root(workspace_root: str | None, cwd: str | None) -> str | None:
-    """The normalised folder a session's workspace lookup starts from."""
-    return normalise_root(workspace_root) or normalise_root(cwd)
-
-
-def is_managed(raw: dict | None) -> bool:
-    """
-    Whether a file is centrally managed: it carries a `ui_managed` block that
-    names who manages it (`by`). The value itself is not checked - marking
-    your own file as managed only makes it apply more widely, which can only
-    make things stricter.
-    """
-    if not isinstance(raw, dict):
-        return False
-    marker = raw.get(MANAGED_KEY)
-    return isinstance(marker, dict) and bool(str(marker.get("by") or "").strip())
-
-
-def declared_root(raw: dict | None) -> str | None:
-    """The folder a file says it is for (`ui_workspace.root`), normalised; None if it does not say."""
-    if not isinstance(raw, dict):
-        return None
-    block = raw.get(WORKSPACE_KEY)
-    if not isinstance(block, dict):
-        return None
-    return normalise_root(block.get("root")) if block.get("root") else None
+    return _shared.path_for(root, get_guardrails_dir())
 
 
 def any_workspace_policies() -> bool:
@@ -207,10 +108,7 @@ def any_workspace_policies() -> bool:
     folder counts as having some, so a failure path does not fail open).
     """
     try:
-        directory = workspaces_dir()
-        if not directory.is_dir():
-            return False
-        return any(entry.name.endswith(PROFILE_SUFFIX) for entry in os.scandir(directory))
+        return _shared.any_workspace_files(workspaces_dir())
     except Exception:
         return True
 
@@ -227,34 +125,10 @@ def load_workspace_profiles(workspace_root: str | None, cwd: str | None) -> list
     (engine.load_policies).
     """
     try:
-        start = session_root(workspace_root, cwd)
-        if start is None:
-            return []
-        directory = workspaces_dir()
-        if not directory.is_dir():
-            return []
-
-        found: list[tuple[str, Path, dict | None]] = []
-        for root in ancestors(start):
-            path = directory / file_name_for(root)
-            if not path.is_file():
-                continue
-            raw = read_yaml_mapping(path, what="workspace guardrails profile")
-            declared = declared_root(raw)
-            if declared is not None and declared != root:
-                _log().warning(
-                    f"workspace guardrails profile {path.name} is for {declared}, but its name "
-                    f"is for {root} (copied or renamed?) - ignored"
-                )
-                continue
-            found.append((root, path, raw))
-
-        if not found:
-            return []
-
-        nearest, *above = found
-        chosen = [nearest] + [entry for entry in above if is_managed(entry[2])]
-        return [_load(root, path, raw) for root, path, raw in chosen]
+        found = _shared.find_workspace_files(
+            workspace_root, cwd, workspaces_dir(), read_yaml_mapping, what=_WHAT,
+        )
+        return [_load(root, path, raw) for root, path, raw in found]
     except Exception as exc:
         _log().warning(f"workspace guardrails profiles could not be read: {exc}")
         raise
@@ -276,22 +150,4 @@ def list_workspace_files() -> list[dict]:
     Every workspace file with what it says about itself, for the status
     command and the health route. Not the hot path. Never raises.
     """
-    entries: list[dict] = []
-    try:
-        directory = workspaces_dir()
-        if not directory.is_dir():
-            return []
-        for path in sorted(directory.glob(f"*{PROFILE_SUFFIX}")):
-            raw = read_yaml_mapping(path, what="workspace guardrails profile")
-            root = declared_root(raw)
-            entries.append({
-                "file": path.name,
-                "root": root,
-                "managed": is_managed(raw),
-                "name_matches_root": root is not None and file_name_for(root) == path.name,
-                "readable": raw is not None,
-                "enabled": bool(isinstance(raw, dict) and raw.get("enabled") is True),
-            })
-    except Exception as exc:
-        _log().warning(f"workspace guardrails profiles could not be listed: {exc}")
-    return entries
+    return _shared.list_workspace_files(workspaces_dir(), read_yaml_mapping, what=_WHAT)
