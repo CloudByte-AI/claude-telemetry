@@ -67,7 +67,7 @@ def _pattern_problem(pattern: str) -> str | None:
     """Why a regex cannot be used (RE2, as the scanner runs it), or None."""
     from src.common.safe_regex import check
 
-    return check(pattern) if pattern else None
+    return check(pattern, finder=True) if pattern else None
 
 
 def _skipped_patterns(patterns: list) -> list[dict]:
