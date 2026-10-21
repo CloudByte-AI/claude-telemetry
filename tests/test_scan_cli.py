@@ -120,7 +120,7 @@ class TestCompleteScan:
         assert result.incomplete_reasons == ["detector_error:Broken"]
 
     def test_pattern_timeout_marks_incomplete(self, monkeypatch):
-        monkeypatch.setattr(scanner, "_run_timed", lambda pattern, text: None)
+        monkeypatch.setattr(scanner, "_run_timed", lambda pattern, text, **options: None)
         cfg = ScanConfig(custom_patterns=[{"name": "slow", "pattern": "a+"}])
         result = scan_text(CLEAN, cfg)
         assert result.complete is False

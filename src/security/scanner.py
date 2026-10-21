@@ -96,36 +96,61 @@ def _normalize_label(raw: str) -> str:
 
 
 # ── Custom-pattern scanning (user-defined patterns from YAML config) ──────────
+#
+# User patterns run on RE2 (src/common/safe_regex.py), whose match time grows
+# only with the text, whatever the pattern - so one bad pattern cannot stall a
+# prompt. A pattern RE2 rejects never got this far (config._validate_patterns).
+# The text is capped, each pattern reports at most MAX_MATCHES_PER_PATTERN hits,
+# and all patterns share one time budget per scan, checked between hits. Past
+# it, the pattern in progress keeps the hits it found (they still block) and the
+# remaining patterns are skipped. Each of these is recorded in `issues`, so the
+# result says the scan was incomplete instead of holding the prompt.
 
+MAX_CUSTOM_PATTERN_INPUT = 2_000_000   # characters
+MAX_MATCHES_PER_PATTERN = 1000
+# Time budget shared by all custom patterns in one scan.
 _PATTERN_TIMEOUT_SECS = 3.0
 
 
-def _run_timed(pattern_str: str, text: str) -> list[safe_regex.Hit] | None:
+def _run_timed(
+    pattern_str: str,
+    text: str,
+    hits: list[safe_regex.Hit] | None = None,
+    deadline: float | None = None,
+    limit: int | None = None,
+) -> list[safe_regex.Hit] | None:
     """
     Find every occurrence of a custom pattern in text, on RE2.
 
     RE2 never backtracks, so one pattern cannot hang the scan however it is
     written (Python's `re` holds the GIL while it matches, so no timeout around
     it could fire). Each step is linear, which makes the clock reachable between
-    hits: a pattern still hitting after _PATTERN_TIMEOUT_SECS is a match flood
-    on a huge text, and is skipped.
+    hits: a pattern still hitting at the deadline is a match flood on a huge
+    text, and is stopped.
 
-    Returns None when the deadline passed, so the caller can tell a skipped
+    `deadline` is a time.monotonic() value, by default _PATTERN_TIMEOUT_SECS from
+    now. Hits are appended to `hits` when given, so a caller keeps the ones found
+    before a timeout. At most `limit` hits are collected.
+
+    Returns None when the deadline passed, so the caller can tell a stopped
     pattern from one that found nothing. Raises safe_regex.RegexError for a
     pattern RE2 cannot compile.
     """
     finder = safe_regex.compile_finder(pattern_str)
-    deadline = time.monotonic() + _PATTERN_TIMEOUT_SECS
-    hits: list[safe_regex.Hit] = []
+    if deadline is None:
+        deadline = time.monotonic() + _PATTERN_TIMEOUT_SECS
+    found: list[safe_regex.Hit] = [] if hits is None else hits
     for hit in finder.finditer(text):
-        hits.append(hit)
+        found.append(hit)
+        if limit is not None and len(found) >= limit:
+            break
         if time.monotonic() >= deadline:
             logger.warning(
-                f"Custom pattern still matching after {_PATTERN_TIMEOUT_SECS}s - skipped. "
-                "It matches too much of the text; narrow the regex."
+                f"Custom pattern still matching when the {_PATTERN_TIMEOUT_SECS}s budget ran out - "
+                "stopped. It matches too much of the text; narrow the regex."
             )
             return None
-    return hits
+    return found
 
 
 def _scan_custom_patterns(
@@ -135,43 +160,65 @@ def _scan_custom_patterns(
     from src.security.detectors.base import char_to_line
 
     findings: list[Finding] = []
+    subject = text[:MAX_CUSTOM_PATTERN_INPUT]
+    if len(text) > MAX_CUSTOM_PATTERN_INPUT:
+        issues.append("custom_input_truncated")
+    deadline = time.monotonic() + _PATTERN_TIMEOUT_SECS
+    over_budget = 0
 
     for p in cfg.custom_patterns:
         if not isinstance(p, dict) or "pattern" not in p or "name" not in p:
             name = p.get("name", "?") if isinstance(p, dict) else "?"
             issues.append(f"pattern_skipped:{name}")
             continue
+        if time.monotonic() >= deadline:
+            over_budget += 1
+            issues.append(f"pattern_timeout:{p['name']}")
+            continue
         label    = _normalize_label(p["name"])
         severity = str(p.get("severity", "HIGH")).upper()
+        hits: list[safe_regex.Hit] = []
         try:
-            matches = _run_timed(p["pattern"], text)
-            if matches is None:
-                issues.append(f"pattern_timeout:{p['name']}")
-                continue
-            for hit in matches:
-                # A hit is group(1) when the pattern has one (context patterns),
-                # else the full match; offsets are characters, not bytes.
-                secret_val = hit.value
-                char_start = hit.start
-                char_end   = hit.end
-
-                if not secret_val or secret_val.startswith("[REDACTED:"):
-                    continue
-                if secret_val in allowlist:
-                    continue
-                findings.append(Finding(
-                    category="Custom",
-                    type=p["name"],
-                    label=label,
-                    severity=severity,
-                    secret_value=secret_val,
-                    masked_value=f"[REDACTED:{label}]",
-                    line_number=char_to_line(char_start, line_offsets),
-                    char_start=char_start,
-                    char_end=char_end,
-                ))
+            matches = _run_timed(
+                p["pattern"], subject, hits=hits, deadline=deadline, limit=MAX_MATCHES_PER_PATTERN
+            )
         except safe_regex.RegexError:
             issues.append(f"pattern_error:{p['name']}")
+            continue
+        if matches is None:
+            issues.append(f"pattern_timeout:{p['name']}")
+        elif len(hits) >= MAX_MATCHES_PER_PATTERN:
+            issues.append(f"pattern_limit:{p['name']}")
+        # Hits found before a timeout are kept, so what was found still blocks.
+        for hit in hits:
+            # A hit is group(1) when the pattern has one (context patterns),
+            # else the full match; offsets are characters, not bytes.
+            secret_val = hit.value
+            char_start = hit.start
+            char_end   = hit.end
+
+            if not secret_val or secret_val.startswith("[REDACTED:"):
+                continue
+            if secret_val in allowlist:
+                continue
+            findings.append(Finding(
+                category=p.get("category") or "Custom",
+                type=p["name"],
+                label=label,
+                severity=severity,
+                secret_value=secret_val,
+                masked_value=f"[REDACTED:{label}]",
+                line_number=char_to_line(char_start, line_offsets),
+                char_start=char_start,
+                char_end=char_end,
+                custom=True,
+            ))
+
+    if over_budget:
+        logger.warning(
+            f"Custom patterns over their {_PATTERN_TIMEOUT_SECS}s budget - "
+            f"{over_budget} pattern(s) skipped for this scan"
+        )
 
     for keyword in cfg.keyword_blocklist:
         if not keyword:
@@ -190,6 +237,7 @@ def _scan_custom_patterns(
                 line_number=None,
                 char_start=None,
                 char_end=None,
+                custom=True,
             ))
 
     return findings
@@ -286,6 +334,40 @@ def _remap_line_numbers(findings: list[Finding], orig_linenos: list[int]) -> lis
     return findings
 
 
+# ── Which profile asked for a finding ────────────────────────────────────────
+
+def _asks_for(source, finding: Finding) -> bool:
+    """Whether one profile (config.ScanSource) asks for this finding."""
+    # A custom pattern's finding carries its own category (or "Custom").
+    if finding.custom or finding.category == "Custom":
+        if finding.type == "Keyword":
+            return str(finding.secret_value).lower() in source.keywords
+        return finding.type in source.pattern_names
+    return finding.category in source.categories
+
+
+def _attribute(findings: list[Finding], sources: tuple) -> list[Finding]:
+    """
+    Keep a finding only when at least one profile both asks for it and does
+    not allow its value; record those profiles on it. So a profile's allowlist
+    silences only what that profile asks for - a project's allowlist can never
+    silence what the organisation's profile asks for. With one profile this
+    changes nothing: the detectors already skipped its allowlist.
+    """
+    if not sources:
+        return findings
+    kept: list[Finding] = []
+    for finding in findings:
+        asking = tuple(
+            source.policy for source in sources
+            if _asks_for(source, finding) and finding.secret_value not in source.allowlist
+        )
+        if asking:
+            finding.sources = asking
+            kept.append(finding)
+    return kept
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def scan_text(text: str, cfg: ScanConfig) -> ScanResult:
@@ -336,12 +418,16 @@ def scan_text(text: str, cfg: ScanConfig) -> ScanResult:
         else:
             findings = []
 
+    # Per-profile allowlists before deduplication, so an allowed match never
+    # displaces an overlapping one that some profile still asks for.
+    findings = _attribute(findings, cfg.sources)
+
     # Cross-detector deduplication (keeps most-specific match at each position)
     findings = deduplicate_findings(findings)
 
     # User-defined custom patterns and keyword blocklist run on full text always.
     custom = _scan_custom_patterns(text, cfg, line_offsets, allowlist_set, issues)
-    findings.extend(custom)
+    findings.extend(_attribute(custom, cfg.sources))
     incomplete_reasons = list(dict.fromkeys(issues))
 
     elapsed_ms = round((time.perf_counter() - start) * 1000, 2)

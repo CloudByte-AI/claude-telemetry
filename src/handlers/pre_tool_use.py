@@ -227,6 +227,29 @@ def handle_pre_tool_use() -> int:
     return 0
 
 
+_log_ready = False
+
+
+def _claude_log() -> None:
+    """
+    Send this process's log lines to the plugin's Claude log, once, so the
+    notification outcome is written down. Only an ask or a deny calls it:
+    setting it up costs more than a decision, so the common allow path never
+    pays for it. The HTTP route never calls it: it would take over the
+    dashboard's own logging. Never raises.
+    """
+    global _log_ready
+    if _log_ready:
+        return
+    try:
+        from src.common.logging import setup_logging
+        from src.common.paths import get_claude_logs_dir
+        setup_logging(log_to_file=True, log_to_console=False, log_dir=get_claude_logs_dir())
+    except Exception:
+        pass
+    _log_ready = True
+
+
 def _record(decision: Decision, payload: dict, logger, project_dir: str | None = None) -> None:
     """
     Audit and notify, once the answer is on stdout. Never raises; the
@@ -250,6 +273,7 @@ def _record(decision: Decision, payload: dict, logger, project_dir: str | None =
     if decision.is_opinion:
         try:
             sys.stdout.flush()
+            _claude_log()
             from src.guardrails.notify import notify_decision
             notify_decision(decision, call)
         except Exception as exc:

@@ -318,6 +318,19 @@ CREATE TABLE IF NOT EXISTS TOOL_GUARDRAIL_EVENT (
 # development (workspace policies), as (name, type). Still schema v3 - the
 # whole feature is one bump - so a database that created the table before
 # these existed gets them from migrate_schema(), which also runs on every Stop.
+# SECURITY_SCAN_EVENT columns that arrived after the table did (security v2):
+# which profile decided, where the session ran, which client. Additive and
+# nullable; added by add_security_scan_event_columns().
+SECURITY_SCAN_EVENT_ADDED_COLUMNS = (
+    ("platform", "TEXT"),
+    ("prompt_id", "TEXT"),
+    ("profile_hash", "TEXT"),           # the deciding profile's fingerprint
+    ("policy_scope", "TEXT"),           # global | workspace
+    ("workspace_root", "TEXT"),         # the deciding workspace profile's folder
+    ("session_root", "TEXT"),           # the folder the session ran in
+    ("policy_sources_json", "TEXT"),    # every profile that applied
+)
+
 TOOL_GUARDRAIL_EVENT_ADDED_COLUMNS = (("policy_scope", "TEXT"), ("workspace_root", "TEXT"),
                                      ("session_root", "TEXT"))
 
@@ -551,9 +564,42 @@ def migrate_schema(conn: sqlite3.Connection) -> list:
 
     # ── v3, later in development: which policy file decided ──────────────────
     add_guardrail_event_columns(cursor, changes)
+    add_security_scan_event_columns(cursor, changes)
 
     conn.commit()
     return changes
+
+
+def add_missing_columns(cursor: sqlite3.Cursor, table: str, columns, changes: list | None = None) -> None:
+    """
+    Add each (name, sql_type) in `columns` that `table` does not have yet:
+    additive, nullable columns that arrived after the table did. One PRAGMA
+    when nothing is missing; a concurrent process adding the same column first
+    is tolerated (_safe_alter). The caller commits.
+    """
+    cursor.execute(f"PRAGMA table_info({table})")
+    existing = {row[1] for row in cursor.fetchall()}
+    for name, sql_type in columns:
+        if name not in existing:
+            _safe_alter(
+                cursor,
+                f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}",
+                f"Migration: added {table}.{name}",
+                [] if changes is None else changes,
+                {"table": table, "column": name, "action": "add_column"},
+            )
+
+
+def add_security_scan_event_columns(cursor: sqlite3.Cursor, changes: list | None = None) -> None:
+    """
+    Add SECURITY_SCAN_EVENT_ADDED_COLUMNS to an existing SECURITY_SCAN_EVENT.
+    Part of migrate_schema(), and also called by the security writer before it
+    inserts (the schema version did not move). Nothing to do when the table
+    does not exist yet - its DDL creates it. The caller commits.
+    """
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='SECURITY_SCAN_EVENT'")
+    if cursor.fetchone():
+        add_missing_columns(cursor, "SECURITY_SCAN_EVENT", SECURITY_SCAN_EVENT_ADDED_COLUMNS, changes)
 
 
 def add_guardrail_event_columns(cursor: sqlite3.Cursor, changes: list | None = None) -> None:
@@ -565,17 +611,8 @@ def add_guardrail_event_columns(cursor: sqlite3.Cursor, changes: list | None = N
     otherwise only gain them on the next full migration. One PRAGMA when
     nothing is missing. The caller commits.
     """
-    cursor.execute("PRAGMA table_info(TOOL_GUARDRAIL_EVENT)")
-    guardrail_columns = {row[1] for row in cursor.fetchall()}
-    for name, sql_type in TOOL_GUARDRAIL_EVENT_ADDED_COLUMNS:
-        if name not in guardrail_columns:
-            _safe_alter(
-                cursor,
-                f"ALTER TABLE TOOL_GUARDRAIL_EVENT ADD COLUMN {name} {sql_type}",
-                f"Migration: added TOOL_GUARDRAIL_EVENT.{name}",
-                [] if changes is None else changes,
-                {"table": "TOOL_GUARDRAIL_EVENT", "column": name, "action": "add_column"},
-            )
+    add_missing_columns(cursor, "TOOL_GUARDRAIL_EVENT", TOOL_GUARDRAIL_EVENT_ADDED_COLUMNS, changes)
+
 
 def create_indexes(conn: sqlite3.Connection) -> None:
     """

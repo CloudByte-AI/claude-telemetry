@@ -1,11 +1,13 @@
 """
-Self-protection - the agent may not change its own guardrails.
+Self-protection - the agent may not change its own guardrails, nor the
+security scanning profiles (~/.cloudbyte/security/), which it could otherwise
+edit to stop its prompts being scanned.
 
 Checked before any profile, whenever a guardrails policy is active, and not
 something a profile can turn off: a rule that let the agent rewrite the policy
 files would let it lift every other rule. Reading them stays allowed.
 
-What counts as a change to ~/.cloudbyte/guardrails/:
+What counts as a change to ~/.cloudbyte/guardrails/ or ~/.cloudbyte/security/:
     - a Write / Edit / Delete (or Cursor's equivalents) on a path inside it
     - a shell command that redirects output into it (`> file`, `>> file`)
     - a shell command that changes files (rm, mv, cp, tee, sed, Set-Content,
@@ -13,25 +15,25 @@ What counts as a change to ~/.cloudbyte/guardrails/:
       path inside it - by any spelling, including `$HOME/.cloudbyte/...` or
       `%USERPROFILE%\\.cloudbyte\\...`, which a lexical resolver cannot expand
 
-Best effort by nature: a command can build the path at run time. The sync
-agent restores a centrally managed file it finds changed and reports the
-change (`local_modified`), so a managed policy cannot be lifted quietly either
-way.
+Best effort by nature: a command can build the path at run time. A file the
+organisation manages is put back when it is found changed, and the change is
+reported, so a managed policy cannot be lifted quietly either way.
 """
 
 from __future__ import annotations
 
 import re
 
-from src.common.paths import get_guardrails_dir
+from src.common.paths import get_guardrails_dir, get_security_dir
 from src.guardrails.decision import DENY, SCOPE_BUILTIN, SOURCE_POLICY, WARN, Decision
 from src.guardrails.toolcall import KIND_SHELL, WRITE_KINDS, ToolCall, resolve_path
 
 RULE_ID = "cb.self.guardrails-files"
 
 REASON = (
-    "Guardrails policy files can only be changed by you or your organisation, not by the "
-    "agent. Edit the file yourself, or ask your admin to change your organisation's policy."
+    "Guardrails and security scanning policy files can only be changed by you or your "
+    "organisation, not by the agent. Edit the file yourself, or ask your admin to change "
+    "your organisation's policy."
 )
 
 # Commands that change files, and interpreters that can (`python -c "open(...)"`).
@@ -49,13 +51,16 @@ _INTERPRETERS = frozenset({
     "bash", "sh", "zsh", "dash", "cmd", "powershell", "pwsh",
 })
 
-# `.cloudbyte/guardrails` or `.cloudbyte\guardrails`, however the home part is spelled.
-_GUARDRAILS_MENTION = re.compile(r"\.cloudbyte[\\/]+guardrails(?:[\\/]|$|[\s\"'])", re.IGNORECASE)
+# `.cloudbyte/guardrails` or `.cloudbyte\security` (and so on), however the
+# home part is spelled.
+_GUARDRAILS_MENTION = re.compile(
+    r"\.cloudbyte[\\/]+(?:guardrails|security)(?:[\\/]|$|[\s\"'])", re.IGNORECASE)
 
 
-def _guardrails_root() -> str | None:
+def _protected_roots() -> list[str]:
     from src.guardrails.workspaces import normalise_root
-    return normalise_root(str(get_guardrails_dir()))
+    roots = (normalise_root(str(get_guardrails_dir())), normalise_root(str(get_security_dir())))
+    return [root for root in roots if root]
 
 
 def _inside(path: str | None, root: str) -> bool:
@@ -77,15 +82,18 @@ def _deny(target: str | None) -> Decision:
 
 
 def check(call: ToolCall) -> Decision | None:
-    """A deny when this call would change the guardrails files, else None. Never raises."""
+    """A deny when this call would change the protected policy files, else None. Never raises."""
     try:
-        root = _guardrails_root()
-        if not root:
+        roots = _protected_roots()
+        if not roots:
             return None
+
+        def inside_any(path: str | None) -> bool:
+            return any(_inside(path, root) for root in roots)
 
         if call.kind in WRITE_KINDS:
             for path in call.file_paths:
-                if _inside(path, root):
+                if inside_any(path):
                     return _deny(path)
             return None
 
@@ -95,7 +103,7 @@ def check(call: ToolCall) -> Decision | None:
         for command in call.commands:
             for target in command.redirects:
                 resolved = resolve_path(target, call.cwd)
-                if _inside(resolved, root) or _GUARDRAILS_MENTION.search(target or ""):
+                if inside_any(resolved) or _GUARDRAILS_MENTION.search(target or ""):
                     return _deny(resolved or target)
 
             name = (command.command_name or "").lower()
@@ -105,7 +113,7 @@ def check(call: ToolCall) -> Decision | None:
                 continue
             for operand in command.subcommand_path:
                 resolved = resolve_path(operand, call.cwd)
-                if _inside(resolved, root):
+                if inside_any(resolved):
                     return _deny(resolved)
             if _GUARDRAILS_MENTION.search(command.raw or ""):
                 return _deny(None)

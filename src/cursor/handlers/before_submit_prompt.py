@@ -85,6 +85,7 @@ def _run_security_scan(
     prompt_text: str,
     session_id: str,
     cwd: str | None,
+    workspace_roots: list | None = None,
 ) -> dict | None:
     """
     Run the security scan on the prompt text.
@@ -109,7 +110,10 @@ def _run_security_scan(
         except Exception as me:
             logger.debug(f"Security schema migration check skipped: {me}")
 
-        sec_cfg = load_security_config(cwd=cwd)
+        # A prompt has no cwd of its own: every workspace root's security
+        # profiles apply, strictest wins.
+        roots = [normalize_cwd(root) for root in (workspace_roots or []) if root]
+        sec_cfg = load_security_config(cwd=cwd, workspace_roots=roots)
 
         if not sec_cfg.enabled:
             logger.debug("Security scanning disabled - skipping prompt scan")
@@ -151,6 +155,9 @@ def _run_security_scan(
             result=scan_result,
             blocked=True,
             masked_text=masked_text,
+            platform="cursor",
+            config=sec_cfg,
+            session_root=(roots[0] if roots else cwd),
         )
         logger.info(
             f"Security event logged: event_id={event_id}, "
@@ -238,7 +245,7 @@ def handle_before_submit_prompt() -> None:
         # If the scan detects secrets, block immediately. The raw secret is
         # never written to USER_PROMPT. write_finding() logs the masked version
         # to SECURITY_SCAN_EVENT. Failures always fail open.
-        block_response = _run_security_scan(prompt_text, session_id, cwd)
+        block_response = _run_security_scan(prompt_text, session_id, cwd, workspace_roots)
         if block_response is not None:
             debug(f"Prompt blocked by security scan - session_id={session_id}")
             print(json.dumps(block_response))

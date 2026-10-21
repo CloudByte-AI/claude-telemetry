@@ -69,14 +69,9 @@ def render_workspace_file(root: str, preset: str) -> str:
 
 
 def _write_atomically(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + f".{os.getpid()}.tmp")
-    try:
-        temporary.write_text(text, encoding="utf-8")
-        os.replace(temporary, path)
-    finally:
-        if temporary.exists():
-            temporary.unlink()
+    from src.common.atomic_files import write_atomically
+
+    write_atomically(path, text)
 
 
 def cmd_init(args) -> int:
