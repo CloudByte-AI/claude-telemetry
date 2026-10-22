@@ -125,6 +125,9 @@ def normalise(payload: dict, project_dir: str | None = None) -> ToolCall:
         permission_mode=str(payload.get("permission_mode") or "default"),
         agent_id=payload.get("agent_id"),
         agent_type=payload.get("agent_type"),
+        # Claude Code prompts for an ask and fires PostToolUse once the tool
+        # ran, so an approval can be remembered (src/guardrails/approvals.py).
+        remembers_approvals=True,
         command=str(command),
         dialect=dialect,
         file_paths=tuple(str(p) for p in paths),
@@ -250,12 +253,44 @@ def _claude_log() -> None:
     _log_ready = True
 
 
+def remember_if_approved(decision: Decision, call: ToolCall, logger=None) -> None:
+    """
+    For an ask the user is shown under a policy that remembers approvals:
+    note what approving it remembers, so the PostToolUse hook can open the
+    window if the tool runs (src/guardrails/approvals.py). Never raises.
+    """
+    if decision.action != ASK or decision.remembered or not decision.memory_key:
+        return
+    try:
+        from src.guardrails.approvals import record_pending
+        record_pending(decision, call)
+    except Exception as exc:
+        if logger is not None:
+            logger.debug(f"guardrails: could not note the ask for remembering (non-fatal): {exc}")
+
+
+def note_if_shown(decision: Decision, call: ToolCall, logger=None) -> None:
+    """
+    For an ask the user is shown: mark it, so the PostToolUse hook can record
+    that it ran - the evidence its audit row's user_decision is read from
+    (src/guardrails/asks.py). Never raises.
+    """
+    if decision.action != ASK or decision.remembered or not decision.prompted:
+        return
+    try:
+        from src.guardrails.asks import note_shown
+        note_shown(call.tool_use_id)
+    except Exception as exc:
+        if logger is not None:
+            logger.debug(f"guardrails: could not mark the ask as shown (non-fatal): {exc}")
+
+
 def _record(decision: Decision, payload: dict, logger, project_dir: str | None = None) -> None:
     """
     Audit and notify, once the answer is on stdout. Never raises; the
     notification is never waited for.
     """
-    if not (decision.should_audit or decision.is_opinion):
+    if not (decision.should_audit or decision.is_opinion or decision.memory_key):
         return
     try:
         call = normalise(payload, project_dir)
@@ -269,6 +304,9 @@ def _record(decision: Decision, payload: dict, logger, project_dir: str | None =
             append_event(decision, call)
         except Exception as exc:
             logger.debug(f"guardrails: audit spool write failed (non-fatal): {exc}")
+
+    note_if_shown(decision, call, logger)
+    remember_if_approved(decision, call, logger)
 
     if decision.is_opinion:
         try:

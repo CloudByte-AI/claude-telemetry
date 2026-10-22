@@ -96,6 +96,11 @@ class ToolCall:
     permission_mode: str = "default"
     agent_id: str | None = None         # set when the call came from a subagent
     agent_type: str | None = None
+    # Whether the platform can show an `ask` and report its approval (a
+    # PostToolUse after the tool ran), which approvals.py needs to remember an
+    # approval. Set by the adapter: a capability, so this package never
+    # branches on which platform is calling.
+    remembers_approvals: bool = False
 
     # shell surface
     command: str = ""                   # the raw string, exactly as written
@@ -227,6 +232,7 @@ class ToolCall:
         permission_mode: str = "default",
         agent_id: str | None = None,
         agent_type: str | None = None,
+        remembers_approvals: bool = False,
         command: str | None = None,
         dialect: Dialect | str | None = None,
         file_paths: tuple[str, ...] | list[str] | None = None,
@@ -272,6 +278,7 @@ class ToolCall:
             permission_mode=permission_mode or "default",
             agent_id=agent_id,
             agent_type=agent_type,
+            remembers_approvals=bool(remembers_approvals),
             command=command_text,
             commands=commands,
             dialect=resolved_dialect.name,

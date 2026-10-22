@@ -73,6 +73,20 @@ def handle_session_end():
             print(json.dumps({"status": "error", "message": "No session_id"}))
             return
 
+        # Remembered guardrail approvals end with the session; leftovers of
+        # sessions that never ended cleanly are swept here too.
+        try:
+            from src.guardrails.approvals import forget_session, sweep
+            forget_session(session_id)
+            sweep()
+        except Exception as exc:
+            logger.debug(f"guardrails: could not clear remembered approvals (non-fatal): {exc}")
+        try:
+            from src.guardrails.asks import sweep as sweep_asks
+            sweep_asks()
+        except Exception as exc:
+            logger.debug(f"guardrails: ask markers sweep failed (non-fatal): {exc}")
+
         # ── Fallback: recover any missed stop-hook pairs ─────────────────────
         # Covers the case where the user denied a tool / interrupted on the
         # last turn of the session, preventing the stop hook from firing.

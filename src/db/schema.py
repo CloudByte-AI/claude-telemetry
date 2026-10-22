@@ -305,7 +305,7 @@ CREATE TABLE IF NOT EXISTS TOOL_GUARDRAIL_EVENT (
     action          TEXT NOT NULL, -- allow | ask | deny, as the policy decided
     alert_level     TEXT,          -- critical | warn | info
     decision_source TEXT,          -- matcher | policy | fallthrough | disabled | error
-    user_decision   TEXT,          -- approved | rejected | auto_denied | not_prompted (Cursor ask) | NULL
+    user_decision   TEXT,          -- approved | rejected | auto_denied | not_prompted (Cursor ask) | remembered (approved within its window) | NULL
     eval_ms         REAL,
     timestamp       DATETIME,
     policy_scope    TEXT,          -- which policy file decided: global | workspace | builtin

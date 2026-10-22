@@ -116,7 +116,7 @@ TABLE_NAMES = ("bash", "file", "mcp", "web")
 # the engine never reads them.
 KNOWN_SETTINGS = (
     "schema_version", "enabled", "plan", "tables",
-    "allowlist", "mcp_allowlist", "known_hosts",
+    "allowlist", "mcp_allowlist", "known_hosts", "ask_memory",
 )
 LIST_SETTINGS = ("allowlist", "mcp_allowlist", "known_hosts")
 EDITOR_KEY_PREFIX = _yaml_cache.EDITOR_KEY_PREFIX
@@ -142,6 +142,10 @@ class GuardrailsProfile:
     source: str = "absent"
     # Identifies this policy; recorded on every audit row. See _fingerprint().
     fingerprint: str | None = None
+    # Remembered approvals (src/guardrails/approvals.py): None = every ask
+    # prompts; else `same_target` or `any_target`, for `ask_memory_minutes`.
+    ask_memory_mode: str | None = None
+    ask_memory_minutes: int = 15
 
     def table_for(self, kind: str) -> Table | None:
         return self.tables.get(TABLE_FOR_KIND.get(kind, ""))
@@ -262,6 +266,39 @@ def _read_list(raw: dict[str, Any], name: str, errors: list[str]) -> list[str]:
     return items
 
 
+_ASK_MEMORY_KEYS = ("mode", "minutes")
+
+
+def _read_ask_memory(value: Any, errors: list[str]) -> tuple[str | None, int]:
+    """
+    `ask_memory: {mode: same_target | any_target | off, minutes: 1-60}` as
+    (mode or None, minutes). Anything wrong is reported and read as OFF: an
+    unreadable setting must never remember more than the author meant.
+    """
+    from src.guardrails.approvals import DEFAULT_MINUTES, MAX_MINUTES, MODE_OFF, MODES
+
+    if value is None:
+        return None, DEFAULT_MINUTES
+    if not isinstance(value, dict):
+        errors.append(f"ask_memory must be a mapping like `{{mode: same_target, minutes: 15}}`, "
+                      f"not {_describe(value)} - approvals are not remembered")
+        return None, DEFAULT_MINUTES
+    for key in value:
+        if key not in _ASK_MEMORY_KEYS:
+            errors.append(f"ask_memory: unknown setting '{key}' (known: {', '.join(_ASK_MEMORY_KEYS)})")
+    mode = value.get("mode", MODE_OFF)
+    if not isinstance(mode, str) or mode not in MODES:
+        errors.append(f"ask_memory.mode must be one of {', '.join(MODES)}, not {_describe(mode)} "
+                      f"- approvals are not remembered")
+        return None, DEFAULT_MINUTES
+    minutes = value.get("minutes", DEFAULT_MINUTES)
+    if isinstance(minutes, bool) or not isinstance(minutes, int) or not 1 <= minutes <= MAX_MINUTES:
+        errors.append(f"ask_memory.minutes must be a whole number from 1 to {MAX_MINUTES}, not "
+                      f"{_describe(minutes)} - approvals are not remembered")
+        return None, DEFAULT_MINUTES
+    return (None if mode == MODE_OFF else mode), minutes
+
+
 def _fingerprint(raw: dict) -> str | None:
     """First 16 hex of the SHA256 of the policy as loaded, `ui_` keys left out (yaml_cache.fingerprint)."""
     return _yaml_cache.fingerprint(raw, EDITOR_KEY_PREFIX)
@@ -343,6 +380,7 @@ def parse_profile(raw: Any, source: str = "user") -> GuardrailsProfile:
     allowlist = _read_list(raw, "allowlist", errors)
     mcp_allowlist = _read_list(raw, "mcp_allowlist", errors)
     known_hosts = _read_list(raw, "known_hosts", errors)
+    ask_memory_mode, ask_memory_minutes = _read_ask_memory(raw.get("ask_memory"), errors)
 
     return GuardrailsProfile(
         enabled=enabled,
@@ -355,6 +393,8 @@ def parse_profile(raw: Any, source: str = "user") -> GuardrailsProfile:
         errors=tuple(errors),
         source=source,
         fingerprint=_fingerprint(raw),
+        ask_memory_mode=ask_memory_mode,
+        ask_memory_minutes=ask_memory_minutes,
     )
 
 
