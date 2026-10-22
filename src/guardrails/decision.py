@@ -23,6 +23,10 @@ ACTIONS = (ALLOW, ASK, DENY)
 # Ordering used when a call needs the strongest of several verdicts, mirroring
 # Claude Code's own multi-hook precedence (deny > ask > allow).
 _SEVERITY = {ALLOW: 0, ASK: 1, DENY: 2}
+# A remembered ask (approved within its window) ranks between allow and ask: it
+# outranks an allow so its audit row is kept, and a real ask from another
+# policy still wins over it, so one policy's memory never silences another's.
+_REMEMBERED_SEVERITY = 0.5
 
 # ── Alert levels ──────────────────────────────────────────────────────────────
 
@@ -107,6 +111,19 @@ class Decision:
     # records `user_decision = not_prompted`.
     prompted: bool = True
 
+    # Remembered approvals (src/guardrails/approvals.py).
+    # remembered: this `ask` was approved within its window, so it is not shown
+    #   again; the audit row records `user_decision = remembered`.
+    # memory_key / memory_minutes / memory_mode: what approving this ask will
+    #   remember, and for how long; None when the policy remembers nothing.
+    remembered: bool = False
+    memory_key: str | None = None
+    # Every key approving this ask remembers: each frame the deciding rule
+    # matched in the call (memory_key is the first of them).
+    memory_keys: tuple[str, ...] = ()
+    memory_minutes: int | None = None
+    memory_mode: str | None = None
+
     @property
     def is_opinion(self) -> bool:
         """
@@ -116,9 +133,10 @@ class Decision:
         Claude Code, `permissionDecision: "allow"` SKIPS the user's own
         permission prompt, and installing a guardrail must never remove one.
         An `allow` row emits `{}` and the user's permission settings decide.
-        `should_audit` is independent of this.
+        A remembered ask is not emitted either, for the same reason: it is
+        silence, never an `allow`. `should_audit` is independent of this.
         """
-        return self.action in (ASK, DENY)
+        return self.action in (ASK, DENY) and not self.remembered
 
     @property
     def should_audit(self) -> bool:
@@ -153,9 +171,18 @@ class Decision:
 
     @property
     def message(self) -> str:
-        """What the user (ask) or the agent (deny) reads: `CloudByte guardrails: <detail>`."""
+        """
+        What the user (ask) or the agent (deny) reads: `CloudByte guardrails: <detail>`,
+        and, for an ask its policy remembers, what approving it will remember.
+        """
         detail = self.detail
-        return f"{MESSAGE_PREFIX}: {detail}" if detail else MESSAGE_PREFIX
+        text = f"{MESSAGE_PREFIX}: {detail}" if detail else MESSAGE_PREFIX
+        if self.action == ASK and self.memory_minutes and not self.remembered:
+            scope = ("anything this rule covers" if self.memory_mode == "any_target"
+                     else "this same action")
+            text += (f". If you approve, {scope} will not ask again for "
+                     f"{self.memory_minutes} minutes in this session.")
+        return text
 
     @classmethod
     def no_opinion(cls, source: str = SOURCE_DISABLED, eval_ms: float = 0.0) -> "Decision":
@@ -174,8 +201,15 @@ class Decision:
                    source=SOURCE_ERROR)
 
 
+def severity(decision: Decision) -> float:
+    """How restrictive a decision is: deny > ask > remembered ask > allow."""
+    if decision.remembered:
+        return _REMEMBERED_SEVERITY
+    return _SEVERITY.get(decision.action, 0)
+
+
 def strongest(decisions: list[Decision]) -> Decision | None:
     """The most restrictive of several decisions - deny beats ask beats allow."""
     if not decisions:
         return None
-    return max(decisions, key=lambda d: _SEVERITY.get(d.action, 0))
+    return max(decisions, key=severity)

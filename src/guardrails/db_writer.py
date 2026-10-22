@@ -11,6 +11,9 @@ event_id) and deletes only the files it wrote, so concurrent drains are safe.
 
     deny                                      -> auto_denied (nobody was asked)
     ask the platform could not show (Cursor)  -> not_prompted (it ran unreviewed)
+    ask PostToolUse saw run (asks.py)         -> approved (the tool ran: the only
+                                                 evidence for a subagent's call,
+                                                 which never gets a TOOL row)
     ask, TOOL row whose output is Claude
          Code's rejection message             -> rejected
     ask, any other TOOL row                   -> approved (the tool ran)
@@ -43,7 +46,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from src.common.logging import get_logger
-from src.guardrails import spool
+from src.guardrails import asks, spool
 
 logger = get_logger(__name__)
 
@@ -59,6 +62,7 @@ APPROVED = "approved"
 REJECTED = "rejected"
 AUTO_DENIED = "auto_denied"
 NOT_PROMPTED = "not_prompted"
+REMEMBERED = "remembered"
 
 # The tool_result Claude Code records when the developer declines a permission
 # prompt. Matched as a PREFIX of the tool's output, never as a substring, so a
@@ -139,9 +143,13 @@ def drain(conn=None, tool_hashers: Mapping[str, ToolHasher] | None = None,
 
         written = 0
         done: set = set()
+        settled: set = set()   # tool_use_ids whose ask is resolved: their asks.py markers go
         for path, row in batch:
             try:
-                cursor.execute(_INSERT, _values(row, resolve_user_decision(cursor, row)))
+                user_decision = resolve_user_decision(cursor, row)
+                cursor.execute(_INSERT, _values(row, user_decision))
+                if user_decision is not None and row.get("tool_use_id"):
+                    settled.add(row["tool_use_id"])
                 if cursor.rowcount:
                     written += 1
                 elif not _stored(cursor, row.get("event_id")):
@@ -162,12 +170,14 @@ def drain(conn=None, tool_hashers: Mapping[str, ToolHasher] | None = None,
             link_tool_calls(cursor, platform, tool_hash, (blocked_records or {}).get(platform))
             for platform, tool_hash in (tool_hashers or {}).items()
         )
-        resolved = resolve_pending(cursor)
+        resolved = resolve_pending(cursor, settled)
         connection.commit()
 
         # After the commit, not before: a crash in between only makes the next
-        # drain repeat an insert, which INSERT OR IGNORE absorbs.
+        # drain repeat an insert, which INSERT OR IGNORE absorbs. The same holds
+        # for the ask markers: removed only once their decision is stored.
         spool.remove(done)
+        asks.forget(settled)
 
         if written or resolved or linked:
             logger.info(
@@ -230,6 +240,10 @@ def resolve_user_decision(cursor, row: dict) -> str | None:
         return AUTO_DENIED
     if action != "ask":
         return None
+    # Decided when the call was made: an ask approved within its window, never
+    # shown, so the TOOL row says nothing about it (src/guardrails/approvals.py).
+    if row.get("user_decision") == REMEMBERED:
+        return REMEMBERED
     # A missing key means prompted: resolve_pending() passes table rows, which
     # have no `prompted` - an unprompted ask was stored as not_prompted already.
     if row.get("prompted", True) is False:
@@ -238,6 +252,12 @@ def resolve_user_decision(cursor, row: dict) -> str | None:
     tool_use_id = row.get("tool_use_id")
     if not tool_use_id:
         return None
+
+    # PostToolUse fires only after the tool ran, so the call was approved. Read
+    # first: a subagent's call never gets a TOOL row, and without this it was
+    # labelled rejected once its turn ended.
+    if asks.has_ran(tool_use_id):
+        return APPROVED
 
     try:
         found, output = _tool_output(cursor, tool_use_id)
@@ -250,10 +270,11 @@ def resolve_user_decision(cursor, row: dict) -> str | None:
     return None
 
 
-def resolve_pending(cursor) -> int:
+def resolve_pending(cursor, settled: set | None = None) -> int:
     """
     Resolve asks written earlier with user_decision NULL, now that later hooks
     may have recorded what happened. Returns how many were resolved. Never raises.
+    Adds the tool_use_id of each resolved ask to `settled` when given.
     """
     try:
         cursor.execute(
@@ -283,6 +304,8 @@ def resolve_pending(cursor) -> int:
                 (decision, row["event_id"]),
             )
             resolved += cursor.rowcount or 0
+            if settled is not None:
+                settled.add(row["tool_use_id"])
         except Exception as exc:
             logger.debug(f"guardrails: could not resolve {row['event_id']!r}: {exc}")
     return resolved

@@ -29,6 +29,7 @@ from src.guardrails.decision import (
     ACTIONS,
     ALERT_LEVELS,
     ALLOW,
+    ASK,
     Decision,
     INFO,
     SOURCE_FALLTHROUGH,
@@ -364,6 +365,10 @@ class Rule:
                 return frame
         return None
 
+    def matching_frames(self, frames: Iterable[Frame]) -> list[Frame]:
+        """Every frame satisfying every constraint, in order."""
+        return [frame for frame in frames if self._matches_frame(frame)]
+
     def _matches_frame(self, frame: Frame) -> bool:
         for name, expected in self.booleans:
             if bool(resolve_field(name, frame)) is not expected:
@@ -385,11 +390,61 @@ class Table:
 
     def evaluate(self, frames: list[Frame]) -> tuple[Rule, Frame] | None:
         """First match wins, literally top to bottom."""
+        result, _, _ = self.evaluate_remembering(frames, None)
+        return result
+
+    def evaluate_remembering(
+        self, frames: list[Frame], memory: Any,
+    ) -> tuple[tuple[Rule, Frame] | None, list[tuple[Rule, Frame, str]], list[Frame]]:
+        """
+        First match wins, except that an `ask` whose every matching frame was
+        approved within its window (approvals.Memory) does not win: evaluation
+        goes on to the next rule. Returns (the winning rule and frame, the
+        remembered (rule, frame, key) matches passed over on the way, and - for
+        a winning ask - every frame of it not yet remembered, which is what
+        approving it remembers).
+
+        Skipping rather than dropping the final verdict is what keeps memory
+        from hiding anything: in `rm -rf build && curl evil.example` an
+        approved delete is passed over and the curl rule below it still
+        decides. One frame of a rule that is not remembered and the rule asks,
+        as it always did.
+        """
+        remembered: list[tuple[Rule, Frame, str]] = []
         for rule in self.rules:
-            frame = rule.matches(frames)
-            if frame is not None:
-                return rule, frame
-        return None
+            if memory is None or rule.action != ASK:
+                frame = rule.matches(frames)
+                if frame is not None:
+                    return (rule, frame), remembered, []
+                continue
+            hits = rule.matching_frames(frames)
+            if not hits:
+                continue
+            fresh = [f for f in hits if not memory.is_remembered(memory.key(rule.rule_id, frame_target(f)))]
+            if fresh:
+                return (rule, fresh[0]), remembered, fresh
+            remembered.append((rule, hits[0], memory.key(rule.rule_id, frame_target(hits[0]))))
+        return None, remembered, []
+
+
+def frame_target(frame: Frame) -> str:
+    """
+    What a rule match acts on, as remembered approvals key it: the matcher's
+    target (a path, a host), else the command it matched, else the call's own
+    target, URL host, MCP tool or command.
+    """
+    match, command, call = frame.match, frame.command, frame.call
+    if match is not None and match.target:
+        return str(match.target)
+    if command is not None and command.raw:
+        return command.raw
+    if call.target_path:
+        return call.target_path
+    if call.hosts:
+        return call.hosts[0]
+    if call.mcp_server or call.mcp_tool:
+        return f"mcp:{call.mcp_server or ''}/{call.mcp_tool or ''}"
+    return call.command or call.tool_name or ""
 
 
 # ── Rule ids ──────────────────────────────────────────────────────────────────
@@ -590,19 +645,41 @@ def decide(
     table: Table,
     call: ToolCall,
     matches: Sequence[MatchResult],
+    memory: Any = None,
 ) -> Decision:
     """
     Run one table against one call and return the verdict.
 
     `source` records HOW the decision was reached: a matcher hit, a plain
     policy rule, or the table's default.
+
+    `memory` (approvals.Memory, or None for none) passes over asks approved
+    within their window. When that leaves nothing stricter than an allow, the
+    verdict is the first remembered ask marked `remembered`: silent, but still
+    audited. An ask the user is shown carries the key approving it remembers.
     """
     frames = build_frames(call, matches)
-    result = table.evaluate(frames)
+    result, remembered, fresh = table.evaluate_remembering(frames, memory)
+    if remembered and (result is None or result[0].action == ALLOW):
+        rule, frame, key = remembered[0]
+        return replace(_decision(rule, frame, call), remembered=True, memory_key=key,
+                       memory_keys=(key,), memory_minutes=memory.minutes, memory_mode=memory.mode)
     if result is None:
         return Decision.no_opinion(source=SOURCE_FALLTHROUGH)
 
     rule, frame = result
+    decision = _decision(rule, frame, call)
+    if memory is not None and rule.action == ASK:
+        # The user approves the whole call, so every frame this rule matched
+        # in it is remembered - not only the one the prompt names.
+        keys = tuple(dict.fromkeys(memory.key(rule.rule_id, frame_target(f)) for f in (fresh or [frame])))
+        decision = replace(decision, memory_key=keys[0], memory_keys=keys,
+                           memory_minutes=memory.minutes, memory_mode=memory.mode)
+    return decision
+
+
+def _decision(rule: Rule, frame: Frame, call: ToolCall) -> Decision:
+    """The Decision one rule makes on one frame, with its provenance."""
     match = frame.match
 
     if rule.is_fallthrough:

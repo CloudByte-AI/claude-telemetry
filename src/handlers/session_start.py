@@ -157,6 +157,22 @@ def handle_session_start():
             except Exception as e:
                 logger.debug(f"session_registry.register failed: {e}")
 
+        # Remembered guardrail approvals left by sessions that never ended
+        # cleanly (a closed terminal, a crash: no SessionEnd) are swept here,
+        # so cleanup never depends on a clean exit. Only files untouched for a
+        # day go, so no open window of any running session is touched.
+        try:
+            from src.guardrails.approvals import sweep
+            sweep()
+        except Exception as e:
+            logger.debug(f"guardrails: approvals sweep failed (non-fatal): {e}")
+        # The same for shown-ask markers (asks.py) whose ask was never resolved.
+        try:
+            from src.guardrails.asks import sweep as sweep_asks
+            sweep_asks()
+        except Exception as e:
+            logger.debug(f"guardrails: ask markers sweep failed (non-fatal): {e}")
+
         # Quick check: ensure worker is running
         try:
             from src.workers.worker_checker import ensure_worker_quick_sync

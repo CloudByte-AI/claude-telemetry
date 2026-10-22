@@ -8,13 +8,21 @@ but stdlib until it knows which platform is calling, and fails closed if the
 guardrails code cannot be imported (_check_failed).
 
     python -m src.hook_entry claude
+    python -m src.hook_entry claude post_tool_use
     python -m src.hook_entry cursor before_shell_execution
+
+`claude post_tool_use` is the one post-execution hook here: it opens the window
+of a remembered approval once an asked-about tool has run (approvals.py), and
+never fails closed, since it decides nothing.
 """
 
 import os
 import sys
 
 USAGE = "Usage: python -m src.hook_entry <claude|cursor> [hook_name]"
+# `claude post_tool_use`: shown asks that ran (src/guardrails/asks.py) and
+# remembered approvals (src/guardrails/approvals.py).
+POST_TOOL_USE = "post_tool_use"
 
 # Duplicated from src.guardrails.config, which would pull in the engine;
 # test_contracts.py asserts the copies stay equal.
@@ -23,6 +31,13 @@ _GUARDRAILS_RELATIVE_DIR = (".cloudbyte", "guardrails")
 # The global profile (config.PROFILE_FILENAME), then its legacy name.
 _PROFILE_FILENAMES = ("global_profile.yaml", "guardrails_profile.yaml")
 _WORKSPACES_DIRNAME = "workspaces"
+# approvals.py's pending notes, under the guardrails directory; asserted equal
+# to approvals.py's own names in test_approvals.py.
+_PENDING_APPROVALS = ("approvals", "pending")
+# asks.py's markers of shown asks, under the guardrails directory; asserted
+# equal to asks.py's own names in test_asks.py.
+_SHOWN_ASKS = ("asks",)
+_SHOWN_SUFFIX = ".shown"
 _TRUTHY = ("1", "true", "yes", "on")
 
 # "No opinion" per platform. Claude Code takes `{}` and applies the user's
@@ -84,6 +99,9 @@ def main(argv: list[str]) -> int:
         print(f"Unknown platform '{platform}'. {USAGE}", file=sys.stderr)
         return 1
 
+    if platform == "claude" and len(argv) > 1 and argv[1] == POST_TOOL_USE:
+        return _post_tool_use()
+
     if _is_inactive():
         print(_NO_OPINION[platform])
         return 0
@@ -110,6 +128,56 @@ def main(argv: list[str]) -> int:
               file=sys.stderr)
 
     return dispatch(argv[1] if len(argv) > 1 else "", record=owner is None)
+
+
+def _has_entries(parts: tuple, suffix: str) -> bool:
+    directory = os.path.join(os.path.expanduser("~"), *_GUARDRAILS_RELATIVE_DIR, *parts)
+    try:
+        with os.scandir(directory) as entries:
+            return any(entry.name.endswith(suffix) for entry in entries)
+    except OSError:
+        return False
+
+
+def _has_pending_approvals() -> bool:
+    """
+    Whether any ask is waiting to be remembered (approvals.py's pending notes),
+    using nothing but `os`. PostToolUse fires for every governed tool call and
+    almost never has a note to act on, so this keeps that path to a directory
+    listing.
+    """
+    return _has_entries(_PENDING_APPROVALS, ".json")
+
+
+def _has_shown_asks() -> bool:
+    """Whether any shown ask is waiting for its tool to run (asks.py), with `os` alone."""
+    return _has_entries(_SHOWN_ASKS, _SHOWN_SUFFIX)
+
+
+def _drain_stdin() -> None:
+    """Read and discard the hook input, so the writer never blocks on a full pipe."""
+    try:
+        sys.stdin.buffer.read()
+    except Exception:
+        pass
+
+
+def _post_tool_use() -> int:
+    """
+    Claude Code PostToolUse: record that an asked-about call ran, and turn an
+    approved ask into an approval window (src/handlers/post_tool_use.py). It
+    decides nothing, so unlike PreToolUse it never fails closed: whatever goes
+    wrong, it prints nothing and exits 0.
+    """
+    if _is_inactive() or not (_has_shown_asks() or _has_pending_approvals()):
+        _drain_stdin()
+        return 0
+    try:
+        from src.handlers.post_tool_use import handle_post_tool_use
+    except Exception:
+        _drain_stdin()
+        return 0
+    return handle_post_tool_use()
 
 
 def _check_failed(platform: str, exc: Exception) -> int:

@@ -129,6 +129,8 @@ def evaluate(
     if guarded is not None:
         return replace(guarded, eval_ms=elapsed())
 
+    from src.guardrails.approvals import memory_for
+
     matches: list[MatchResult] | None = None
     decisions: list[Decision] = []
     for policy in active:
@@ -142,8 +144,11 @@ def evaluate(
             continue
         if matches is None:
             matches = run_matchers(call)    # the same for every profile, so once
+        # Each policy remembers its own approvals: the key carries the policy's
+        # fingerprint, scope and folder (approvals.memory_for).
+        memory = memory_for(call, current, policy.scope, policy.workspace_root)
         decisions.append(replace(
-            decide(table, call, matches),
+            decide(table, call, matches, memory),
             profile_hash=current.fingerprint,
             policy_scope=policy.scope,
             workspace_root=policy.workspace_root,
