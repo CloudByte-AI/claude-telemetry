@@ -38,7 +38,7 @@ from src.guardrails.decision import (
 )
 from src.guardrails.matchers.base import MatchResult
 from src.guardrails.parser import Command
-from src.guardrails.toolcall import ToolCall
+from src.guardrails.toolcall import KIND_SHELL, ToolCall
 
 OPERATORS = ("equals", "starts_with", "ends_with", "contains", "regex")
 
@@ -158,7 +158,9 @@ def build_frames(call: ToolCall, matches: Sequence[MatchResult]) -> list[Frame]:
     by_name = {c.command_name: c for c in call.commands}
 
     for match in matches:
-        command = by_name.get(match.command_name) if match.command_name else None
+        command = getattr(match, "command", None)
+        if command is None and match.command_name:
+            command = by_name.get(match.command_name)
         frames.append(Frame(call=call, match=match, command=command))
 
     for command in call.commands:
@@ -678,6 +680,66 @@ def decide(
     return decision
 
 
+# Fields holding the call's whole text, which a rule may search directly.
+_TEXT_FIELDS = ("command", "content")
+_EXCERPT_CONTEXT = 40
+
+
+def _match_span(constraint: Constraint, text: str) -> tuple[int, int] | None:
+    """Where in `text` a whole-text constraint matched, or None."""
+    pattern = constraint.pattern
+    if constraint.operator == "regex":
+        hit = next(safe_regex.compile_finder(pattern).finditer(text[:MAX_REGEX_INPUT]), None)
+        return (hit.start, hit.end) if hit else None
+    if constraint.operator == "contains":
+        at = text.find(pattern)
+        return (at, at + len(pattern)) if at >= 0 else None
+    if constraint.operator == "starts_with":
+        return (0, len(pattern)) if text.startswith(pattern) else None
+    if constraint.operator == "ends_with":
+        return (len(text) - len(pattern), len(text)) if pattern and text.endswith(pattern) else None
+    if constraint.operator == "equals":
+        return (0, len(text)) if text == pattern else None
+    return None
+
+
+def _text_evidence(rule: Rule, call: ToolCall) -> tuple[str, str | None] | None:
+    """
+    For a rule that matched the call's whole text rather than a matcher hit:
+    (the matched text with a little context, the parsed command it sits in).
+
+    Without this the row showed whichever frame came first - the chain's first
+    command - so a `truncate` regex that matched a Tailwind class deep inside a
+    heredoc was audited as the `cd` that started the chain.
+    """
+    for constraint in rule.constraints:
+        if constraint.field not in _TEXT_FIELDS:
+            continue
+        text = str((call.command if constraint.field == "command" else call.content) or "")
+        try:
+            span = _match_span(constraint, text)
+        except Exception:
+            span = None
+        if span is None:
+            continue
+        start, end = span
+        excerpt = " ".join(text[max(0, start - _EXCERPT_CONTEXT):end + _EXCERPT_CONTEXT].split())
+        if start > _EXCERPT_CONTEXT:
+            excerpt = "..." + excerpt
+        if end + _EXCERPT_CONTEXT < len(text):
+            excerpt += "..."
+        matched = text[start:end]
+        # The command whose own text or here-document holds the match (with a
+        # little context, so a common word is credited to the right command).
+        around = text[max(0, start - 20):end + 20]
+        owner = next((c.command_name for c in call.commands
+                      if matched and (around in c.raw or around in c.stdin)), None) \
+            or next((c.command_name for c in call.commands
+                     if matched and (matched in c.raw or matched in c.stdin)), None)
+        return excerpt, owner
+    return None
+
+
 def _decision(rule: Rule, frame: Frame, call: ToolCall) -> Decision:
     """The Decision one rule makes on one frame, with its provenance."""
     match = frame.match
@@ -690,6 +752,22 @@ def _decision(rule: Rule, frame: Frame, call: ToolCall) -> Decision:
         source = SOURCE_POLICY
 
     command = frame.command
+    evidence = (match.evidence if match else (command.raw if command else call.command))
+    command_name = command.command_name if command else (match.command_name if match else None)
+    target = None
+    text_matched = False
+    if not any(c.field == "operation" for c in rule.constraints):
+        found = _text_evidence(rule, call)
+        if found:
+            evidence, command_name = found
+            # The rule read the text, not this frame's matcher hit: naming that
+            # hit's operation and target would explain the wrong thing.
+            match = None
+            text_matched = True
+    # A shell call's first path (often a `cd`) says nothing about a text
+    # match; a file tool's path is the file whose content matched.
+    if not (text_matched and call.kind == KIND_SHELL):
+        target = match.target if match and match.target else call.target_path
     return Decision(
         action=rule.action,
         reason=rule.reason,
@@ -699,8 +777,8 @@ def _decision(rule: Rule, frame: Frame, call: ToolCall) -> Decision:
         rule_id=rule.rule_id,
         rule_rank=rule.rank,
         source=source,
-        target=(match.target if match and match.target else call.target_path),
-        evidence=(match.evidence if match else (command.raw if command else call.command))[:256] or None,
-        command_name=(command.command_name if command else (match.command_name if match else None)),
+        target=target,
+        evidence=(evidence or "")[:256] or None,
+        command_name=command_name,
         requires_audit=rule.audit,
     )

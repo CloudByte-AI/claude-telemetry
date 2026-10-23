@@ -2,8 +2,8 @@
   "taxonomy_version": 1,
   "generated_from": "src/guardrails/registry.py - DO NOT HAND-EDIT",
   "operation_count": 74,
-  "implemented_count": 24,
-  "reserved_count": 50,
+  "implemented_count": 31,
+  "reserved_count": 43,
   "operations": [
     {
       "operation": "db.bulk_delete",
@@ -62,26 +62,32 @@
     {
       "operation": "db.migration",
       "domain": "db",
-      "description": "Runs a schema migration",
+      "description": "Applies, reverts or resets a database schema migration",
       "applies_to": [
         "shell"
       ],
       "default_action": "allow",
       "default_alert": "warn",
-      "implemented": false,
-      "facts": []
+      "implemented": true,
+      "facts": [
+        "direction",
+        "tool"
+      ]
     },
     {
       "operation": "db.truncate",
       "domain": "db",
-      "description": "Empties a table",
+      "description": "Empties a table (SQL TRUNCATE sent to a database client)",
       "applies_to": [
         "shell"
       ],
       "default_action": "ask",
       "default_alert": "critical",
-      "implemented": false,
-      "facts": []
+      "implemented": true,
+      "facts": [
+        "client",
+        "table"
+      ]
     },
     {
       "operation": "devflow.ci.trigger",
@@ -186,7 +192,8 @@
       "default_alert": "warn",
       "implemented": true,
       "facts": [
-        "interpreter"
+        "interpreter",
+        "source"
       ]
     },
     {
@@ -231,14 +238,17 @@
     {
       "operation": "exec.scheduled",
       "domain": "exec",
-      "description": "Schedules future execution (cron, at, systemd timer)",
+      "description": "Schedules future execution (cron, at, Task Scheduler, systemd timer, launchd)",
       "applies_to": [
         "shell"
       ],
       "default_action": "ask",
       "default_alert": "warn",
-      "implemented": false,
-      "facts": []
+      "implemented": true,
+      "facts": [
+        "action",
+        "scheduler"
+      ]
     },
     {
       "operation": "exec.shell.eval",
@@ -304,6 +314,7 @@
       "default_alert": "warn",
       "implemented": true,
       "facts": [
+        "disposable",
         "forced",
         "recursive",
         "target_count"
@@ -525,8 +536,12 @@
       ],
       "default_action": "ask",
       "default_alert": "critical",
-      "implemented": false,
-      "facts": []
+      "implemented": true,
+      "facts": [
+        "credential",
+        "mcp_server",
+        "verb"
+      ]
     },
     {
       "operation": "mcp.delete",
@@ -621,7 +636,7 @@
     {
       "operation": "net.download.exec",
       "domain": "net",
-      "description": "Pipes downloaded content straight into an interpreter",
+      "description": "Runs downloaded content: piped into an interpreter, evaluated, or saved and run",
       "applies_to": [
         "shell"
       ],
@@ -630,7 +645,8 @@
       "implemented": true,
       "facts": [
         "fetcher",
-        "host"
+        "host",
+        "technique"
       ]
     },
     {
@@ -672,7 +688,7 @@
     {
       "operation": "net.upload",
       "domain": "net",
-      "description": "Sends local data to a remote host",
+      "description": "Sends local data to another host",
       "applies_to": [
         "shell"
       ],
@@ -681,7 +697,8 @@
       "implemented": true,
       "facts": [
         "host",
-        "method"
+        "method",
+        "network"
       ]
     },
     {
@@ -719,8 +736,11 @@
       ],
       "default_action": "ask",
       "default_alert": "critical",
-      "implemented": false,
-      "facts": []
+      "implemented": true,
+      "facts": [
+        "area",
+        "technique"
+      ]
     },
     {
       "operation": "sec.cert.modify",
@@ -882,14 +902,17 @@
     {
       "operation": "vcs.clean",
       "domain": "vcs",
-      "description": "Discards untracked files from the working tree",
+      "description": "Discards untracked files or uncommitted changes from the working tree",
       "applies_to": [
         "shell"
       ],
       "default_action": "ask",
       "default_alert": "warn",
-      "implemented": false,
-      "facts": []
+      "implemented": true,
+      "facts": [
+        "ignored",
+        "scope"
+      ]
     },
     {
       "operation": "vcs.config.change",
@@ -912,8 +935,11 @@
       ],
       "default_action": "ask",
       "default_alert": "critical",
-      "implemented": false,
-      "facts": []
+      "implemented": true,
+      "facts": [
+        "helper",
+        "method"
+      ]
     },
     {
       "operation": "vcs.force_push",
