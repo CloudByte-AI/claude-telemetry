@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from src.common import yaml_cache as _yaml_cache
 from src.common.paths import get_guardrails_dir
 from src.guardrails.decision import ASK
 from src.guardrails.rules import BUILTIN_ID_PREFIX, Table, ensure_unique_ids, parse_table
@@ -115,10 +116,10 @@ TABLE_NAMES = ("bash", "file", "mcp", "web")
 # the engine never reads them.
 KNOWN_SETTINGS = (
     "schema_version", "enabled", "plan", "tables",
-    "allowlist", "mcp_allowlist", "known_hosts",
+    "allowlist", "mcp_allowlist", "known_hosts", "ask_memory",
 )
 LIST_SETTINGS = ("allowlist", "mcp_allowlist", "known_hosts")
-EDITOR_KEY_PREFIX = "ui_"
+EDITOR_KEY_PREFIX = _yaml_cache.EDITOR_KEY_PREFIX
 
 _TRUE_WORDS = frozenset({"true", "yes", "on", "1"})
 _FALSE_WORDS = frozenset({"false", "no", "off", "0"})
@@ -141,6 +142,10 @@ class GuardrailsProfile:
     source: str = "absent"
     # Identifies this policy; recorded on every audit row. See _fingerprint().
     fingerprint: str | None = None
+    # Remembered approvals (src/guardrails/approvals.py): None = every ask
+    # prompts; else `same_target` or `any_target`, for `ask_memory_minutes`.
+    ask_memory_mode: str | None = None
+    ask_memory_minutes: int = 15
 
     def table_for(self, kind: str) -> Table | None:
         return self.tables.get(TABLE_FOR_KIND.get(kind, ""))
@@ -152,127 +157,26 @@ class GuardrailsProfile:
         return any(v and v in self.allowlist for v in values)
 
 
+# ── YAML reading, parsed-mapping cache, fingerprint ──────────────────────────
+# Shared with security scanning: src/common/yaml_cache.py. These wrappers keep
+# the guardrails names and log wording.
+
 def _load_yaml(path: Path, what: str = "guardrails profile") -> dict | None:
-    """
-    Parse a YAML mapping. `what` names the file in log messages.
-
-    Uses CSafeLoader when libyaml is available, which is much faster, and falls
-    back silently, since the only difference is speed.
-    """
-    try:
-        import yaml
-        try:
-            from yaml import CSafeLoader as _Loader   # type: ignore[attr-defined]
-        except ImportError:
-            from yaml import SafeLoader as _Loader    # type: ignore[assignment]
-
-        with open(path, encoding="utf-8") as handle:
-            raw = yaml.load(handle, Loader=_Loader)
-    except Exception as exc:
-        _log().warning(f"{what} unreadable at {path}: {exc}")
-        return None
-    if raw is None:
-        return {}
-    if not isinstance(raw, dict):
-        _log().warning(f"{what} at {path} is not a mapping")
-        return None
-    return raw
+    """Parse a YAML mapping (see yaml_cache.load_yaml)."""
+    return _yaml_cache.load_yaml(path, what)
 
 
 def read_yaml_mapping(path: Path, what: str = "guardrails profile") -> dict | None:
     """
-    A YAML mapping from disk, through the parsed-mapping cache below. None when
-    the file is unreadable or not a mapping; an empty file is {}. Never raises.
+    A YAML mapping from disk, through the parsed-mapping cache. None when the
+    file is unreadable or not a mapping; an empty file is {}. Never raises.
 
     Used for every hand-edited YAML file in the guardrails directory.
     """
-    raw = _read_cache(path)
-    if raw is None:
-        raw = _load_yaml(path, what)
-        if raw is not None:
-            _write_cache(path, raw)
-    return raw
+    return _yaml_cache.read_yaml_mapping(path, what)
 
 
-# ── Parsed-profile cache ──────────────────────────────────────────────────────
-#
-# Most of the cost of reading the profile on the hot path is `import yaml`, not
-# the parse, so the parsed mapping is cached as JSON (stdlib) beside the YAML.
-#
-#   - it caches the RAW mapping, not a compiled policy, so validation and rule
-#     construction still run on every call and behaviour is identical either way
-#   - it is keyed on the source file's mtime and size, so a hand-edit can never
-#     be served stale and there is no invalidation step to forget
-#   - a miss, a corrupt cache or an unwritable directory just means reading the
-#     YAML
-
-CACHE_SUFFIX = ".cache.json"
-_CACHE_FORMAT = 1
-
-
-def _cache_path(source: Path) -> Path:
-    return source.with_name(source.name + CACHE_SUFFIX)
-
-
-def _read_cache(source: Path) -> dict | None:
-    """The cached mapping if it is current for `source`, else None."""
-    try:
-        import json
-
-        cache = _cache_path(source)
-        stat = source.stat()
-        with open(cache, encoding="utf-8") as handle:
-            payload = json.load(handle)
-
-        if (
-            payload.get("format") == _CACHE_FORMAT
-            and payload.get("source_mtime_ns") == stat.st_mtime_ns
-            and payload.get("source_size") == stat.st_size
-            and isinstance(payload.get("profile"), dict)
-        ):
-            return payload["profile"]
-    except Exception:
-        pass
-    return None
-
-
-def _write_cache(source: Path, raw: dict) -> None:
-    """
-    Write the cache atomically. Never raises - it is only an optimisation.
-
-    Several processes can miss the cache at once (every Cursor hook is its own
-    process). Each writes its own temp file and renames it into place; on
-    Windows the rename fails if another process holds the target open, which is
-    fine since an identical copy won. The temp file is removed on every failure
-    path.
-    """
-    import os as _os
-
-    temporary = None
-    try:
-        import json
-
-        stat = source.stat()
-        cache = _cache_path(source)
-        payload = {
-            "format": _CACHE_FORMAT,
-            "source": str(source),
-            "source_mtime_ns": stat.st_mtime_ns,
-            "source_size": stat.st_size,
-            "profile": raw,
-        }
-        temporary = cache.with_name(cache.name + f".{_os.getpid()}.tmp")
-        temporary.write_text(json.dumps(payload), encoding="utf-8")
-        _os.replace(temporary, cache)
-        temporary = None
-    except Exception:
-        pass
-    finally:
-        if temporary is not None:
-            try:
-                _os.remove(temporary)
-            except Exception:
-                pass
+CACHE_SUFFIX = _yaml_cache.CACHE_SUFFIX
 
 
 def load_preset(name: str) -> dict:
@@ -362,23 +266,42 @@ def _read_list(raw: dict[str, Any], name: str, errors: list[str]) -> list[str]:
     return items
 
 
+_ASK_MEMORY_KEYS = ("mode", "minutes")
+
+
+def _read_ask_memory(value: Any, errors: list[str]) -> tuple[str | None, int]:
+    """
+    `ask_memory: {mode: same_target | any_target | off, minutes: 1-60}` as
+    (mode or None, minutes). Anything wrong is reported and read as OFF: an
+    unreadable setting must never remember more than the author meant.
+    """
+    from src.guardrails.approvals import DEFAULT_MINUTES, MAX_MINUTES, MODE_OFF, MODES
+
+    if value is None:
+        return None, DEFAULT_MINUTES
+    if not isinstance(value, dict):
+        errors.append(f"ask_memory must be a mapping like `{{mode: same_target, minutes: 15}}`, "
+                      f"not {_describe(value)} - approvals are not remembered")
+        return None, DEFAULT_MINUTES
+    for key in value:
+        if key not in _ASK_MEMORY_KEYS:
+            errors.append(f"ask_memory: unknown setting '{key}' (known: {', '.join(_ASK_MEMORY_KEYS)})")
+    mode = value.get("mode", MODE_OFF)
+    if not isinstance(mode, str) or mode not in MODES:
+        errors.append(f"ask_memory.mode must be one of {', '.join(MODES)}, not {_describe(mode)} "
+                      f"- approvals are not remembered")
+        return None, DEFAULT_MINUTES
+    minutes = value.get("minutes", DEFAULT_MINUTES)
+    if isinstance(minutes, bool) or not isinstance(minutes, int) or not 1 <= minutes <= MAX_MINUTES:
+        errors.append(f"ask_memory.minutes must be a whole number from 1 to {MAX_MINUTES}, not "
+                      f"{_describe(minutes)} - approvals are not remembered")
+        return None, DEFAULT_MINUTES
+    return (None if mode == MODE_OFF else mode), minutes
+
+
 def _fingerprint(raw: dict) -> str | None:
-    """
-    First 16 hex characters of the SHA256 of the policy as loaded. Never raises.
-
-    Hashed from the parsed mapping, not the file bytes: editing a comment or the
-    layout leaves the hash unchanged, while reordering rules changes it. Editor
-    data (`ui_` keys) is left out because it never affects a decision.
-    """
-    try:
-        import hashlib
-        import json
-
-        policy = {k: v for k, v in raw.items() if not str(k).startswith(EDITOR_KEY_PREFIX)}
-        text = json.dumps(policy, sort_keys=True, default=str)
-        return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
-    except Exception:
-        return None
+    """First 16 hex of the SHA256 of the policy as loaded, `ui_` keys left out (yaml_cache.fingerprint)."""
+    return _yaml_cache.fingerprint(raw, EDITOR_KEY_PREFIX)
 
 
 def _unknown_setting(key: Any) -> str:
@@ -457,6 +380,7 @@ def parse_profile(raw: Any, source: str = "user") -> GuardrailsProfile:
     allowlist = _read_list(raw, "allowlist", errors)
     mcp_allowlist = _read_list(raw, "mcp_allowlist", errors)
     known_hosts = _read_list(raw, "known_hosts", errors)
+    ask_memory_mode, ask_memory_minutes = _read_ask_memory(raw.get("ask_memory"), errors)
 
     return GuardrailsProfile(
         enabled=enabled,
@@ -469,6 +393,8 @@ def parse_profile(raw: Any, source: str = "user") -> GuardrailsProfile:
         errors=tuple(errors),
         source=source,
         fingerprint=_fingerprint(raw),
+        ask_memory_mode=ask_memory_mode,
+        ask_memory_minutes=ask_memory_minutes,
     )
 
 
@@ -651,34 +577,5 @@ def _builtin_prefix_notes(profile: GuardrailsProfile) -> list[str]:
 
 
 def _strict_loader():
-    """A safe YAML loader that refuses duplicate keys. Validation only - never the hot path."""
-    import yaml
-
-    try:
-        from yaml import CSafeLoader as _Base      # type: ignore[attr-defined]
-    except ImportError:
-        from yaml import SafeLoader as _Base       # type: ignore[assignment]
-
-    class _NoDuplicatesLoader(_Base):              # type: ignore[misc, valid-type]
-        pass
-
-    def construct_mapping(loader, node, deep=False):
-        first_seen: dict[Any, int] = {}
-        for key_node, _ in node.value:
-            key = loader.construct_object(key_node, deep=True)
-            try:
-                if key in first_seen:
-                    raise yaml.constructor.ConstructorError(
-                        None, None,
-                        f"duplicate key '{key}' (first defined on line {first_seen[key] + 1}) - "
-                        f"YAML would silently keep only the last one",
-                        key_node.start_mark,
-                    )
-                first_seen[key] = key_node.start_mark.line
-            except TypeError:
-                continue                            # an unhashable key; the parser reports it
-        return loader.construct_mapping(node, deep=deep)
-
-    _NoDuplicatesLoader.add_constructor(
-        yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, construct_mapping)
-    return _NoDuplicatesLoader
+    """A safe YAML loader that refuses duplicate keys (yaml_cache.strict_loader)."""
+    return _yaml_cache.strict_loader()

@@ -26,6 +26,18 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|PowerShell|Write|Edit|NotebookEdit|Read|WebFetch|WebSearch|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-sync --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.hook_entry claude post_tool_use",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [

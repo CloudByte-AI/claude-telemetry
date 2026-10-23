@@ -84,6 +84,9 @@ def _row(decision, call) -> dict:
         "session_root": _session_root(call),
         # Not a column: tells the drain an ask was never shown (see db_writer).
         "prompted": decision.prompted,
+        # Known now for a remembered ask (approved within its window); every
+        # other outcome is resolved by the drain (db_writer).
+        "user_decision": "remembered" if getattr(decision, "remembered", False) else None,
         "eval_ms": decision.eval_ms,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }

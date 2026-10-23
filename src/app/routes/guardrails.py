@@ -117,7 +117,9 @@ async def claude_pre_tool_use(request: Request) -> JSONResponse:
         return JSONResponse({})
 
     try:
-        from src.handlers.pre_tool_use import PROJECT_DIR_HEADER, decide_payload, normalise
+        from src.handlers.pre_tool_use import (
+            PROJECT_DIR_HEADER, decide_payload, normalise, note_if_shown, remember_if_approved,
+        )
 
         # The hook's CLAUDE_PROJECT_DIR, forwarded like the kill switch; this
         # process's own environment belongs to whichever session started it.
@@ -130,6 +132,10 @@ async def claude_pre_tool_use(request: Request) -> JSONResponse:
                 append_event(decision, normalise(payload, project_dir))
             except Exception as exc:
                 logger.debug(f"guardrails: audit spool write failed (non-fatal): {exc}")
+        if decision.is_opinion:
+            note_if_shown(decision, normalise(payload, project_dir), logger)
+        if decision.memory_key:
+            remember_if_approved(decision, normalise(payload, project_dir), logger)
 
         call = lambda: normalise(payload, project_dir)  # noqa: E731 - built only if notified
         return JSONResponse(output, background=_notification_task(decision, call))

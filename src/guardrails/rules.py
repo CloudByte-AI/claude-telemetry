@@ -29,6 +29,7 @@ from src.guardrails.decision import (
     ACTIONS,
     ALERT_LEVELS,
     ALLOW,
+    ASK,
     Decision,
     INFO,
     SOURCE_FALLTHROUGH,
@@ -37,7 +38,7 @@ from src.guardrails.decision import (
 )
 from src.guardrails.matchers.base import MatchResult
 from src.guardrails.parser import Command
-from src.guardrails.toolcall import ToolCall
+from src.guardrails.toolcall import KIND_SHELL, ToolCall
 
 OPERATORS = ("equals", "starts_with", "ends_with", "contains", "regex")
 
@@ -157,7 +158,9 @@ def build_frames(call: ToolCall, matches: Sequence[MatchResult]) -> list[Frame]:
     by_name = {c.command_name: c for c in call.commands}
 
     for match in matches:
-        command = by_name.get(match.command_name) if match.command_name else None
+        command = getattr(match, "command", None)
+        if command is None and match.command_name:
+            command = by_name.get(match.command_name)
         frames.append(Frame(call=call, match=match, command=command))
 
     for command in call.commands:
@@ -364,6 +367,10 @@ class Rule:
                 return frame
         return None
 
+    def matching_frames(self, frames: Iterable[Frame]) -> list[Frame]:
+        """Every frame satisfying every constraint, in order."""
+        return [frame for frame in frames if self._matches_frame(frame)]
+
     def _matches_frame(self, frame: Frame) -> bool:
         for name, expected in self.booleans:
             if bool(resolve_field(name, frame)) is not expected:
@@ -385,11 +392,61 @@ class Table:
 
     def evaluate(self, frames: list[Frame]) -> tuple[Rule, Frame] | None:
         """First match wins, literally top to bottom."""
+        result, _, _ = self.evaluate_remembering(frames, None)
+        return result
+
+    def evaluate_remembering(
+        self, frames: list[Frame], memory: Any,
+    ) -> tuple[tuple[Rule, Frame] | None, list[tuple[Rule, Frame, str]], list[Frame]]:
+        """
+        First match wins, except that an `ask` whose every matching frame was
+        approved within its window (approvals.Memory) does not win: evaluation
+        goes on to the next rule. Returns (the winning rule and frame, the
+        remembered (rule, frame, key) matches passed over on the way, and - for
+        a winning ask - every frame of it not yet remembered, which is what
+        approving it remembers).
+
+        Skipping rather than dropping the final verdict is what keeps memory
+        from hiding anything: in `rm -rf build && curl evil.example` an
+        approved delete is passed over and the curl rule below it still
+        decides. One frame of a rule that is not remembered and the rule asks,
+        as it always did.
+        """
+        remembered: list[tuple[Rule, Frame, str]] = []
         for rule in self.rules:
-            frame = rule.matches(frames)
-            if frame is not None:
-                return rule, frame
-        return None
+            if memory is None or rule.action != ASK:
+                frame = rule.matches(frames)
+                if frame is not None:
+                    return (rule, frame), remembered, []
+                continue
+            hits = rule.matching_frames(frames)
+            if not hits:
+                continue
+            fresh = [f for f in hits if not memory.is_remembered(memory.key(rule.rule_id, frame_target(f)))]
+            if fresh:
+                return (rule, fresh[0]), remembered, fresh
+            remembered.append((rule, hits[0], memory.key(rule.rule_id, frame_target(hits[0]))))
+        return None, remembered, []
+
+
+def frame_target(frame: Frame) -> str:
+    """
+    What a rule match acts on, as remembered approvals key it: the matcher's
+    target (a path, a host), else the command it matched, else the call's own
+    target, URL host, MCP tool or command.
+    """
+    match, command, call = frame.match, frame.command, frame.call
+    if match is not None and match.target:
+        return str(match.target)
+    if command is not None and command.raw:
+        return command.raw
+    if call.target_path:
+        return call.target_path
+    if call.hosts:
+        return call.hosts[0]
+    if call.mcp_server or call.mcp_tool:
+        return f"mcp:{call.mcp_server or ''}/{call.mcp_tool or ''}"
+    return call.command or call.tool_name or ""
 
 
 # ── Rule ids ──────────────────────────────────────────────────────────────────
@@ -590,19 +647,101 @@ def decide(
     table: Table,
     call: ToolCall,
     matches: Sequence[MatchResult],
+    memory: Any = None,
 ) -> Decision:
     """
     Run one table against one call and return the verdict.
 
     `source` records HOW the decision was reached: a matcher hit, a plain
     policy rule, or the table's default.
+
+    `memory` (approvals.Memory, or None for none) passes over asks approved
+    within their window. When that leaves nothing stricter than an allow, the
+    verdict is the first remembered ask marked `remembered`: silent, but still
+    audited. An ask the user is shown carries the key approving it remembers.
     """
     frames = build_frames(call, matches)
-    result = table.evaluate(frames)
+    result, remembered, fresh = table.evaluate_remembering(frames, memory)
+    if remembered and (result is None or result[0].action == ALLOW):
+        rule, frame, key = remembered[0]
+        return replace(_decision(rule, frame, call), remembered=True, memory_key=key,
+                       memory_keys=(key,), memory_minutes=memory.minutes, memory_mode=memory.mode)
     if result is None:
         return Decision.no_opinion(source=SOURCE_FALLTHROUGH)
 
     rule, frame = result
+    decision = _decision(rule, frame, call)
+    if memory is not None and rule.action == ASK:
+        # The user approves the whole call, so every frame this rule matched
+        # in it is remembered - not only the one the prompt names.
+        keys = tuple(dict.fromkeys(memory.key(rule.rule_id, frame_target(f)) for f in (fresh or [frame])))
+        decision = replace(decision, memory_key=keys[0], memory_keys=keys,
+                           memory_minutes=memory.minutes, memory_mode=memory.mode)
+    return decision
+
+
+# Fields holding the call's whole text, which a rule may search directly.
+_TEXT_FIELDS = ("command", "content")
+_EXCERPT_CONTEXT = 40
+
+
+def _match_span(constraint: Constraint, text: str) -> tuple[int, int] | None:
+    """Where in `text` a whole-text constraint matched, or None."""
+    pattern = constraint.pattern
+    if constraint.operator == "regex":
+        hit = next(safe_regex.compile_finder(pattern).finditer(text[:MAX_REGEX_INPUT]), None)
+        return (hit.start, hit.end) if hit else None
+    if constraint.operator == "contains":
+        at = text.find(pattern)
+        return (at, at + len(pattern)) if at >= 0 else None
+    if constraint.operator == "starts_with":
+        return (0, len(pattern)) if text.startswith(pattern) else None
+    if constraint.operator == "ends_with":
+        return (len(text) - len(pattern), len(text)) if pattern and text.endswith(pattern) else None
+    if constraint.operator == "equals":
+        return (0, len(text)) if text == pattern else None
+    return None
+
+
+def _text_evidence(rule: Rule, call: ToolCall) -> tuple[str, str | None] | None:
+    """
+    For a rule that matched the call's whole text rather than a matcher hit:
+    (the matched text with a little context, the parsed command it sits in).
+
+    Without this the row showed whichever frame came first - the chain's first
+    command - so a `truncate` regex that matched a Tailwind class deep inside a
+    heredoc was audited as the `cd` that started the chain.
+    """
+    for constraint in rule.constraints:
+        if constraint.field not in _TEXT_FIELDS:
+            continue
+        text = str((call.command if constraint.field == "command" else call.content) or "")
+        try:
+            span = _match_span(constraint, text)
+        except Exception:
+            span = None
+        if span is None:
+            continue
+        start, end = span
+        excerpt = " ".join(text[max(0, start - _EXCERPT_CONTEXT):end + _EXCERPT_CONTEXT].split())
+        if start > _EXCERPT_CONTEXT:
+            excerpt = "..." + excerpt
+        if end + _EXCERPT_CONTEXT < len(text):
+            excerpt += "..."
+        matched = text[start:end]
+        # The command whose own text or here-document holds the match (with a
+        # little context, so a common word is credited to the right command).
+        around = text[max(0, start - 20):end + 20]
+        owner = next((c.command_name for c in call.commands
+                      if matched and (around in c.raw or around in c.stdin)), None) \
+            or next((c.command_name for c in call.commands
+                     if matched and (matched in c.raw or matched in c.stdin)), None)
+        return excerpt, owner
+    return None
+
+
+def _decision(rule: Rule, frame: Frame, call: ToolCall) -> Decision:
+    """The Decision one rule makes on one frame, with its provenance."""
     match = frame.match
 
     if rule.is_fallthrough:
@@ -613,6 +752,22 @@ def decide(
         source = SOURCE_POLICY
 
     command = frame.command
+    evidence = (match.evidence if match else (command.raw if command else call.command))
+    command_name = command.command_name if command else (match.command_name if match else None)
+    target = None
+    text_matched = False
+    if not any(c.field == "operation" for c in rule.constraints):
+        found = _text_evidence(rule, call)
+        if found:
+            evidence, command_name = found
+            # The rule read the text, not this frame's matcher hit: naming that
+            # hit's operation and target would explain the wrong thing.
+            match = None
+            text_matched = True
+    # A shell call's first path (often a `cd`) says nothing about a text
+    # match; a file tool's path is the file whose content matched.
+    if not (text_matched and call.kind == KIND_SHELL):
+        target = match.target if match and match.target else call.target_path
     return Decision(
         action=rule.action,
         reason=rule.reason,
@@ -622,8 +777,8 @@ def decide(
         rule_id=rule.rule_id,
         rule_rank=rule.rank,
         source=source,
-        target=(match.target if match and match.target else call.target_path),
-        evidence=(match.evidence if match else (command.raw if command else call.command))[:256] or None,
-        command_name=(command.command_name if command else (match.command_name if match else None)),
+        target=target,
+        evidence=(evidence or "")[:256] or None,
+        command_name=command_name,
         requires_audit=rule.audit,
     )

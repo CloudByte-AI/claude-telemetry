@@ -562,7 +562,7 @@ def stop() -> None:
                 from src.security.masker import mask_text as _mask_response
                 from src.security.db_writer import write_finding
 
-                _sec_cfg = load_security_config(cwd=cwd)
+                _sec_cfg = load_security_config(cwd=cwd, workspace_root=os.environ.get("CLAUDE_PROJECT_DIR"))
                 if _sec_cfg.enabled and _sec_cfg.scope == "both":
                     _response_text = last_processed_pair.get("response", "")
                     if _response_text:
@@ -575,6 +575,9 @@ def stop() -> None:
                                 result=_sec_result,
                                 blocked=False,
                                 masked_text=_masked_response,
+                                platform="claude_code",
+                                config=_sec_cfg,
+                                session_root=os.environ.get("CLAUDE_PROJECT_DIR") or cwd,
                             )
                             _rms = _sec_result.scan_ms
                             _rms_str = f"{_rms:.2f}" if _rms < 1 else f"{int(_rms)}"
@@ -647,6 +650,10 @@ def main():
     if command == "guardrails":
         from src.guardrails.cli import main as guardrails_cli
         sys.exit(guardrails_cli(sys.argv[2:]))
+
+    if command == "security":
+        from src.security.cli import main as security_cli
+        sys.exit(security_cli(sys.argv[2:]))
 
     handlers = {
         "setup": setup,

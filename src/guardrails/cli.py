@@ -69,14 +69,9 @@ def render_workspace_file(root: str, preset: str) -> str:
 
 
 def _write_atomically(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + f".{os.getpid()}.tmp")
-    try:
-        temporary.write_text(text, encoding="utf-8")
-        os.replace(temporary, path)
-    finally:
-        if temporary.exists():
-            temporary.unlink()
+    from src.common.atomic_files import write_atomically
+
+    write_atomically(path, text)
 
 
 def cmd_init(args) -> int:
@@ -108,6 +103,16 @@ def cmd_init(args) -> int:
     return 0
 
 
+def remembered_approvals_label(profile) -> str:
+    """How a policy treats an approved ask (approvals.py), in plain words."""
+    mode, minutes = profile.ask_memory_mode, profile.ask_memory_minutes
+    if mode == "same_target":
+        return f"remembered for {minutes} minutes per session (same rule, same target)"
+    if mode == "any_target":
+        return f"remembered for {minutes} minutes per session (same rule, any target)"
+    return "asked every time"
+
+
 def cmd_status(args) -> int:
     from src.guardrails.config import load_profile, user_profile_path
     from src.guardrails.workspaces import list_workspace_files, load_workspace_profiles
@@ -117,6 +122,7 @@ def cmd_status(args) -> int:
     print(f"Session folder: {root}")
     print(f"Global policy:  {user_profile_path()} "
           f"({'on' if global_profile.enabled else 'off'}, {global_profile.source})")
+    print(f"  Approvals:    {remembered_approvals_label(global_profile)}")
 
     applied = load_workspace_profiles(root, None)
     if applied:
@@ -125,6 +131,7 @@ def cmd_status(args) -> int:
             owner = "organisation" if workspace.managed else "you"
             state = "on" if workspace.profile.enabled else "off"
             print(f"  {workspace.root}  [{owner}, {state}]  {workspace.path.name}")
+            print(f"    Approvals: {remembered_approvals_label(workspace.profile)}")
     else:
         print("Workspace policies for this folder: none")
 

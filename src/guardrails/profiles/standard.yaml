@@ -47,25 +47,29 @@ tables:
   bash:
     # Cleaning build output is the most common recursive delete an agent does.
     # Allowing it FIRST keeps the ask below rare enough to be read.
+    # `disposable: true` means every target, as written, is build or dependency
+    # output, so `rm -rf node_modules src` still asks and a project that lives
+    # under a folder like /build-tools is not waved through.
     - { id: cb.fs.cleanup-node-modules,
-        operation: fs.delete.recursive, target_path: {contains: "node_modules"},
+        operation: fs.delete.recursive, disposable: true, target_path: {contains: "node_modules"},
         decision: allow, alert: info, reason: "Dependency directory cleanup" }
     - { id: cb.fs.cleanup-dist,
-        operation: fs.delete.recursive, target_path: {contains: "/dist"},
+        operation: fs.delete.recursive, disposable: true, target_path: {contains: "/dist"},
         decision: allow, alert: info, reason: "Build output cleanup" }
     - { id: cb.fs.cleanup-build,
-        operation: fs.delete.recursive, target_path: {contains: "/build"},
+        operation: fs.delete.recursive, disposable: true, target_path: {contains: "/build"},
         decision: allow, alert: info, reason: "Build output cleanup" }
     - { id: cb.fs.cleanup-next,
-        operation: fs.delete.recursive, target_path: {contains: "/.next"},
+        operation: fs.delete.recursive, disposable: true, target_path: {contains: "/.next"},
         decision: allow, alert: info, reason: "Build output cleanup" }
     - { id: cb.fs.cleanup-pycache,
-        operation: fs.delete.recursive, target_path: {contains: "__pycache__"},
+        operation: fs.delete.recursive, disposable: true, target_path: {contains: "__pycache__"},
         decision: allow, alert: info, reason: "Build output cleanup" }
 
-    # 1. Recursive or forced delete of anything else.
+    # 1. Recursive delete of anything else. A forced delete of single files
+    #    (`rm -f out.txt`) is not recursive and does not ask.
     - { id: cb.fs.recursive-delete,
-        operation: fs.delete.recursive,
+        operation: fs.delete.recursive, recursive: true,
         decision: ask, alert: warn,
         reason: "Recursive delete - review the target before approving" }
 

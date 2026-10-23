@@ -36,7 +36,11 @@ class PublishMatcher(BaseMatcher):
         "podman": (("push",),),
         "helm": (("push",),),
         "mvn": (("deploy",),),
+        "mvnw": (("deploy",),),
+        "mvnw.cmd": (("deploy",),),
         "gradle": (("publish",),),
+        "gradlew": (("publish",),),
+        "gradlew.bat": (("publish",),),
         "dotnet": (("nuget", "push"),),
         "nuget": (("push",),),
         "gh": (("release", "create"),),
@@ -47,8 +51,15 @@ class PublishMatcher(BaseMatcher):
             runs = self._PUBLISHERS.get(command.command_name)
             if not runs:
                 continue
+            # The subcommand itself, so a package.json script named publish
+            # (`<npm> run publish`) and a package NAMED publish are not
+            # publishes. Maven and Gradle take a list of goals/tasks, so any
+            # position counts for them.
+            path = command.subcommand_path
+            # The project wrappers (./gradlew, ./mvnw) are the same tools.
+            anywhere = command.command_name in ("mvn", "mvnw", "mvnw.cmd", "gradle", "gradlew", "gradlew.bat")
             for run in runs:
-                if not self.has_token_run(command.subcommand_path, run):
+                if not (self.has_token_run(path, run) if anywhere else self.starts_with_run(path, run)):
                     continue
                 lowered = {f.lower() for f in command.flags}
                 # A dry run publishes nothing, so it is not this operation.

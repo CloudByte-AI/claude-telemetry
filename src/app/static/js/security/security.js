@@ -308,6 +308,7 @@ function resetPm() {
     document.getElementById('pm-name').value      = '';
     document.getElementById('pm-regex-val').value  = '';
     document.getElementById('pm-severity').value   = 'HIGH';
+    document.getElementById('pm-category').value   = '';
     document.getElementById('pm-result').style.display = 'none';
     document.getElementById('pm-save').disabled    = true;
     document.getElementById('pm-save').textContent = 'Save Pattern';
@@ -346,6 +347,7 @@ function editPattern(btn) {
     // Pre-fill name and severity
     document.getElementById('pm-name').value    = data.name || '';
     document.getElementById('pm-severity').value = data.severity || 'HIGH';
+    document.getElementById('pm-category').value = data.category || '';
 
     if (data.examples && data.examples.length) {
         // Examples mode
@@ -511,17 +513,18 @@ function renderPmResult(data) {
 async function savePattern() {
     const name     = (document.getElementById('pm-name').value || '').trim();
     const severity = document.getElementById('pm-severity').value || 'HIGH';
+    const category = (document.getElementById('pm-category').value || '').trim();
 
     let body;
     if (_pmActiveTab === 'examples') {
         const examples = Array.from(
             document.querySelectorAll('#pm-examples-list .pm-ex-row input')
         ).map(i => i.value.trim()).filter(Boolean);
-        body = { name, examples, severity, pattern: selectedPattern };
+        body = { name, examples, severity, category, pattern: selectedPattern };
     } else {
         const regex = (document.getElementById('pm-regex-val').value || '').trim();
         if (!regex) { showPmError('Enter a regex pattern.'); return; }
-        body = { name, pattern: regex, severity };
+        body = { name, pattern: regex, severity, category };
     }
 
     const btn = document.getElementById('pm-save');

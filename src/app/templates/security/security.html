@@ -156,6 +156,20 @@
 </div>
 {% endif %}
 
+{% if skipped_patterns %}
+<div class="sec-toast sec-toast-err" role="status">
+    ✗ {{ skipped_patterns|length }} custom pattern(s) can't be used and are skipped when scanning:
+    {% for p in skipped_patterns %}<br>&nbsp;&nbsp;<strong>{{ p.name }}</strong> - {{ p.problem }}{% endfor %}
+</div>
+{% endif %}
+
+{% if workspace_files %}
+<div class="sec-toast" role="status">
+    📁 Folder-specific security profiles on this machine:
+    {% for w in workspace_files %}<br>&nbsp;&nbsp;{{ w.root or w.file }}{% if not w.enabled %} (off){% endif %}{% endfor %}
+</div>
+{% endif %}
+
 <!-- ── Status bar ────────────────────────────────── -->
 <div class="sc-status-bar sec-status">
     <div class="sc-status-left sec-status-left">
@@ -340,7 +354,7 @@
         <div class="cpl-row" data-pattern='{{ p | tojson }}'>
             <div class="cpl-indicator {% if p.get('examples') %}cpl-ind-ex{% else %}cpl-ind-rx{% endif %}"></div>
             <div class="cpl-info">
-                <div class="cpl-name">{{ p.name }}</div>
+                <div class="cpl-name">{{ p.name }}{% if p.get('category') %} <span class="cpl-type" title="Findings are reported under this category">{{ p.category }}</span>{% endif %}</div>
                 <div class="cpl-meta">
                     {% if p.get('pattern') %}
                     <code class="cpl-pattern">{{ p.pattern | truncate(55, True, '…') }}</code>
@@ -524,6 +538,15 @@
                 <div class="pm-field">
                     <label class="pm-label">Name</label>
                     <input type="text" id="pm-name" class="pm-input" placeholder="e.g. Your Secret Token">
+                </div>
+                <div class="pm-field" style="max-width:170px;">
+                    <label class="pm-label">Category <span style="font-weight:400;opacity:.7">(optional)</span></label>
+                    <input type="text" id="pm-category" class="pm-input" maxlength="60" placeholder="e.g. Internal tokens"
+                           list="pm-category-options"
+                           title="A built-in category (e.g. AWS) - the pattern then follows that category's switch - or your own. Findings are reported under it instead of Custom.">
+                    <datalist id="pm-category-options">
+                        {% for c in pattern_categories or [] %}<option value="{{ c }}"></option>{% endfor %}
+                    </datalist>
                 </div>
                 <div class="pm-field" style="max-width:130px;">
                     <label class="pm-label">Severity</label>

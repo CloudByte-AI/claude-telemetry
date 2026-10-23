@@ -96,19 +96,44 @@ def notify_decision(decision: Decision, call: ToolCall) -> bool:
 
     Call it after the decision has been answered, from the install that
     records the decision, so one decision makes one notification.
+
+    Every outcome is one log line, so "no notification appeared" can be
+    answered from the client's log. The line names the rule, never the command
+    or file, which can hold secrets.
     """
     try:
-        if not wants_notification(decision) or not notifications.supported():
+        about = _log_context(decision, call)
+        if not wants_notification(decision):
+            _log().info(f"guardrails notification skipped ({about}): only critical and warn rules notify")
             return False
-        if decision.alert_level not in SHOW_LEVELS[load_show_setting()]:
+        if not notifications.supported():
+            _log().warning(f"guardrails notification skipped ({about}): "
+                           f"desktop notifications are not available on this machine")
+            return False
+        setting = load_show_setting()
+        if decision.alert_level not in SHOW_LEVELS[setting]:
+            _log().info(f"guardrails notification skipped ({about}): the show setting is {setting}")
             return False
         key = repeat_key(decision, call)
         if shown_recently(key):
+            _log().info(f"guardrails notification skipped ({about}): the same alert was shown "
+                        f"less than {REPEAT_WINDOW_SECONDS}s ago (key {key})")
             return False
-        return notifications.show(build_notice(decision, call, tag=key))
-    except Exception as exc:
-        _log().debug(f"guardrails notification skipped: {exc}")
+        if notifications.show(build_notice(decision, call, tag=key)):
+            _log().info(f"guardrails notification handed to the OS ({about}, key {key})")
+            return True
+        _log().warning(f"guardrails notification not shown ({about}): the OS backend reported "
+                       f"a failure, see the notifications lines above")
         return False
+    except Exception as exc:
+        _log().warning(f"guardrails notification failed: {type(exc).__name__}: {exc}")
+        return False
+
+
+def _log_context(decision: Decision, call: ToolCall) -> str:
+    """Client, verdict, rule and level, for a log line. No command or path text."""
+    return (f"{call.platform} {decision.action}, rule {decision.rule_id or '-'}, "
+            f"alert {decision.alert_level}")
 
 
 def wants_notification(decision: Decision) -> bool:

@@ -85,7 +85,7 @@ def show(notice: Notice) -> bool:
     try:
         return bool(backend.show(notice))
     except Exception as exc:
-        _log().debug(f"notification not shown: {exc}")
+        _log().warning(f"notification not shown: {type(exc).__name__}: {exc}")
         return False
 
 
@@ -139,7 +139,7 @@ def _backend():
         import importlib
         return importlib.import_module(module_path)
     except Exception as exc:
-        _log().debug(f"notification backend {module_path} unavailable: {exc}")
+        _log().warning(f"notification backend {module_path} unavailable: {type(exc).__name__}: {exc}")
         return None
 
 

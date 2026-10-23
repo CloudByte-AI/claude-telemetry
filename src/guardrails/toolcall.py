@@ -14,7 +14,6 @@ constraints.
 
 from __future__ import annotations
 
-import os
 import posixpath
 import re
 from dataclasses import dataclass, field
@@ -48,51 +47,13 @@ WRITE_KINDS = frozenset({KIND_WRITE, KIND_EDIT, KIND_DELETE})
 
 _URL = re.compile(r"\b(?:https?|ftp|ssh|git|s3|gs)://([^\s/'\"<>|]+)", re.IGNORECASE)
 _SCP_TARGET = re.compile(r"\b(?:[\w.\-]+@)([A-Za-z0-9.\-]+\.[A-Za-z]{2,}|\d{1,3}(?:\.\d{1,3}){3}):")
-# A drive letter followed by a separator or nothing: `C:/...`, `C:\...`, `C:`.
-# `C:foo` (relative to drive C's current directory) is deliberately not matched
-# and stays relative - a lexical resolver cannot know that directory.
-_WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:(?=[\\/]|$)")
-
-
-def _split_drive(text: str) -> tuple[str, str]:
-    """
-    (`C:`, `/rest`) for a drive path, (``, text) otherwise.
-
-    The rest always starts with `/`, so normpath treats a bare `C:` as a root.
-    """
-    if not _WINDOWS_DRIVE.match(text):
-        return "", text
-    rest = text[2:]
-    return text[:2], rest if rest.startswith("/") else "/" + rest
-
-
-def resolve_path(path: str | None, cwd: str | None) -> str | None:
-    """
-    Resolve a path for comparison, without touching the filesystem.
-
-    Purely lexical on purpose: the path often does not exist yet (a `Write`
-    creates it), and a stat on a network drive can stall the hot path.
-    Separators are normalised to `/` so one profile rule works on every
-    platform. A drive root resolves to `C:/`, the way the POSIX root resolves
-    to `/`, so `C:/..` cannot climb above it.
-    """
-    if not path:
-        return None
-    text = str(path).strip().strip('"').strip("'")
-    if not text:
-        return None
-
-    text = os.path.expanduser(text) if text.startswith("~") else text
-    text = text.replace("\\", "/")
-
-    drive, rest = _split_drive(text)
-    if not drive and not rest.startswith("/") and cwd:
-        base = str(cwd).replace("\\", "/").rstrip("/") or "/"
-        drive, rest = _split_drive(posixpath.join(base, rest))
-
-    # With the drive split off the rest is rooted, so `..` cannot climb above
-    # the drive root.
-    return drive + posixpath.normpath(rest)
+# Lexical path resolution lives in src/common (security scanning uses it too);
+# re-exported here, where guardrails code and tests import it from.
+from src.common.lexical_paths import (  # noqa: E402
+    WINDOWS_DRIVE as _WINDOWS_DRIVE,
+    resolve_path,
+    split_drive as _split_drive,
+)
 
 
 def extract_hosts(text: str) -> tuple[str, ...]:
@@ -135,6 +96,11 @@ class ToolCall:
     permission_mode: str = "default"
     agent_id: str | None = None         # set when the call came from a subagent
     agent_type: str | None = None
+    # Whether the platform can show an `ask` and report its approval (a
+    # PostToolUse after the tool ran), which approvals.py needs to remember an
+    # approval. Set by the adapter: a capability, so this package never
+    # branches on which platform is calling.
+    remembers_approvals: bool = False
 
     # shell surface
     command: str = ""                   # the raw string, exactly as written
@@ -266,6 +232,7 @@ class ToolCall:
         permission_mode: str = "default",
         agent_id: str | None = None,
         agent_type: str | None = None,
+        remembers_approvals: bool = False,
         command: str | None = None,
         dialect: Dialect | str | None = None,
         file_paths: tuple[str, ...] | list[str] | None = None,
@@ -311,6 +278,7 @@ class ToolCall:
             permission_mode=permission_mode or "default",
             agent_id=agent_id,
             agent_type=agent_type,
+            remembers_approvals=bool(remembers_approvals),
             command=command_text,
             commands=commands,
             dialect=resolved_dialect.name,
