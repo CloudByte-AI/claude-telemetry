@@ -97,6 +97,13 @@ class PrivilegeEscalationMatcher(BaseMatcher):
     FACTS = ("escalator", "wrapped_command")
 
     def match(self, call: ToolCall) -> MatchResult | None:
+        # PowerShell: `Start-Process <program> -Verb RunAs` starts it elevated.
+        for command in call.commands:
+            program = command.raw.split(None, 1)[0].lower() if command.raw else ""
+            if (program in ("start-process", "saps", "start") and "-verb" in {f.lower() for f in command.flags}
+                    and "runas" in {o.lower() for o in command.subcommand_path}):
+                wrapped = next((o for o in command.subcommand_path if o.lower() != "runas"), None)
+                return self.hit(target=wrapped, command=command, escalator="runas", wrapped_command=wrapped)
         for command in self.commands_named(call, _PRIVILEGE_COMMANDS):
             # The parser already unwrapped the inner command, so name it here:
             # "sudo (rm)" is a far more useful audit row than "sudo".
@@ -202,4 +209,85 @@ class EncodedExecutionMatcher(BaseMatcher):
             decoder = decoders[0]
             return self.hit(target=decoder.command_name, evidence=f"{decoder.raw}  ->  {evaluator.raw}",
                             command=decoder, technique="decode_then_execute", decoder=decoder.command_name)
+        return None
+
+
+# PowerShell scheduled-task cmdlets (the parser lower-cases cmdlet names).
+_PS_SCHEDULE = {
+    "register-scheduledtask": "create", "register-scheduledjob": "create",
+    "set-scheduledtask": "modify", "set-scheduledjob": "modify",
+    "unregister-scheduledtask": "remove", "unregister-scheduledjob": "remove",
+}
+_SCHTASKS = {"/create": "create", "/change": "modify", "/delete": "remove"}
+_LAUNCHCTL = {"load": "create", "bootstrap": "create", "submit": "create", "enable": "create",
+              "unload": "remove", "bootout": "remove", "remove": "remove"}
+_SYSTEMD_RUN_TIMERS = ("--on-calendar", "--on-active", "--on-boot", "--on-startup",
+                       "--on-unit-active", "--on-unit-inactive", "--on-clock-change", "--on-timezone-change")
+
+
+def _schedule(command) -> tuple[str, str] | None:
+    """(scheduler, action) when this command adds, changes or removes a schedule."""
+    name = command.command_name.lower()
+    flags = command.flags
+    operands = command.subcommand_path
+    if name == "crontab":
+        # crontab FILE / crontab - (or a pipe) installs; -e edits; -r removes;
+        # -l only lists. `-u user` names whose table, so its value is not a file.
+        files = [o for o in operands if o != _value_of(command, "-u")]
+        if {"-r", "-ir"} & flags or "-r" in command.argv:
+            return "cron", "remove"
+        if "-e" in flags:
+            return "cron", "modify"
+        if "-l" in flags and not files:
+            return None
+        return "cron", "install"
+    if name in ("at", "batch"):
+        if {"-l", "-c", "-r", "-d"} & flags:
+            return ("at", "remove") if {"-r", "-d"} & flags else None
+        return "at", "create"
+    if name == "atrm":
+        return "at", "remove"
+    if name in ("schtasks", "schtasks.exe"):
+        # Git Bash users double the slash (`//create`) to stop path conversion.
+        switches = [("/" + o.lstrip("/")).lower() for o in operands if o.startswith("/")]
+        if "/?" in switches:
+            return None   # help text: `schtasks /change /?`
+        action = next((_SCHTASKS[s] for s in switches if s in _SCHTASKS), None)
+        return ("schtasks", action) if action else None
+    if name in _PS_SCHEDULE:
+        return "powershell", _PS_SCHEDULE[name]
+    if name == "systemd-run" and any(f.startswith(_SYSTEMD_RUN_TIMERS) for f in command.argv):
+        return "systemd", "create"
+    if name == "systemctl" and operands and operands[0] in ("enable", "start", "restart", "reenable") \
+            and any(o.endswith(".timer") for o in operands[1:]):
+        return "systemd", "create"
+    if name == "launchctl" and operands and operands[0] in _LAUNCHCTL:
+        return "launchd", _LAUNCHCTL[operands[0]]
+    return None
+
+
+def _value_of(command, flag: str) -> str | None:
+    argv = command.argv
+    return argv[argv.index(flag) + 1] if flag in argv and argv.index(flag) + 1 < len(argv) else None
+
+
+@register_matcher
+class ScheduledExecutionMatcher(BaseMatcher):
+    OPERATION = "exec.scheduled"
+    DOMAIN = "exec"
+    DESCRIPTION = "Schedules future execution (cron, at, Task Scheduler, systemd timer, launchd)"
+    APPLIES_TO = (KIND_SHELL,)
+    DEFAULT_ACTION = "ask"
+    DEFAULT_ALERT = "warn"
+    # scheduler: cron, at, schtasks, powershell, systemd, launchd.
+    # action: install / create / modify / remove. Listing a schedule
+    # (crontab -l, atq, schtasks /query) is not this operation.
+    FACTS = ("scheduler", "action")
+
+    def match(self, call: ToolCall) -> MatchResult | None:
+        for command in call.commands:
+            found = _schedule(command)
+            if found:
+                scheduler, action = found
+                return self.hit(target=scheduler, command=command, scheduler=scheduler, action=action)
         return None

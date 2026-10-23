@@ -126,22 +126,60 @@ class DockerPrivilegedMatcher(BaseMatcher):
             if not (self.starts_with_run(sub, ("run",)) or self.starts_with_run(sub, ("create",))
                     or self.starts_with_run(sub, ("container", "run")) or self.starts_with_run(sub, ("container", "create"))):
                 continue
-            lowered = {f.lower() for f in command.flags}
+            # Only docker's own options count: everything after the image is
+            # the container's command line (`... gitlab/glab auth login --device`).
+            options = self._run_options(command.argv)
+            lowered = {t.partition("=")[0].lower() for t in options if t.startswith("-")}
             if "--privileged" in lowered:
                 return self.hit(target="privileged", command=command, technique="privileged",
                                 flags=["--privileged"])
-            shared = self._shared_namespaces(command)
+            shared = self._shared_namespaces(options)
             if shared or "--cap-add" in lowered or "--device" in lowered:
                 found = sorted(set(shared) | (lowered & {"--cap-add", "--device"}))
                 return self.hit(target=found[0], command=command, technique="host_namespace", flags=found)
-            mount = self._host_mount(command)
+            mount = self._host_mount(options)
             if mount:
                 return self.hit(target=mount, command=command, technique="host_mount", flags=["--volume"])
         return None
 
-    def _shared_namespaces(self, command) -> list[str]:
+    # `docker run` / `create` options that take a value (docs.docker.com).
+    _RUN_VALUE_OPTIONS = frozenset({
+        "-a", "--attach", "--add-host", "--annotation", "--blkio-weight", "--blkio-weight-device",
+        "--cap-add", "--cap-drop", "--cgroup-parent", "--cgroupns", "--cidfile", "--cpu-period",
+        "--cpu-quota", "--cpu-rt-period", "--cpu-rt-runtime", "-c", "--cpu-shares", "--cpus",
+        "--cpuset-cpus", "--cpuset-mems", "--device", "--device-cgroup-rule", "--device-read-bps",
+        "--device-read-iops", "--device-write-bps", "--device-write-iops", "--dns", "--dns-option",
+        "--dns-search", "--domainname", "--entrypoint", "-e", "--env", "--env-file", "--expose",
+        "--gpus", "--group-add", "--health-cmd", "--health-interval", "--health-retries",
+        "--health-start-interval", "--health-start-period", "--health-timeout", "-h", "--hostname",
+        "--ip", "--ip6", "--ipc", "--isolation", "--kernel-memory", "-l", "--label", "--label-file",
+        "--link", "--link-local-ip", "--log-driver", "--log-opt", "--mac-address", "-m", "--memory",
+        "--memory-reservation", "--memory-swap", "--memory-swappiness", "--mount", "--name",
+        "--network", "--net", "--network-alias", "--oom-score-adj", "--pid", "--pids-limit",
+        "--platform", "-p", "--publish", "--pull", "--restart", "--runtime", "--security-opt",
+        "--shm-size", "--stop-signal", "--stop-timeout", "--storage-opt", "--sysctl", "--tmpfs",
+        "--ulimit", "-u", "--user", "--userns", "--uts", "-v", "--volume", "--volume-driver",
+        "--volumes-from", "-w", "--workdir",
+    })
+
+    def _run_options(self, argv: tuple[str, ...]) -> list[str]:
+        """The tokens between `run`/`create` and the image: docker's own options and their values."""
+        start = next((i + 1 for i, t in enumerate(argv) if t in ("run", "create")), len(argv))
+        options: list[str] = []
+        i = start
+        while i < len(argv):
+            token = argv[i]
+            if token == "--" or not token.startswith("-"):
+                break   # the image; what follows is the container's command
+            options.append(token)
+            if token in self._RUN_VALUE_OPTIONS and i + 1 < len(argv):
+                options.append(argv[i + 1])
+                i += 1
+            i += 1
+        return options
+
+    def _shared_namespaces(self, argv) -> list[str]:
         found = []
-        argv = command.argv
         for i, token in enumerate(argv):
             name, eq, value = token.partition("=")
             if name.lower() in self._HOST_NAMESPACES:
@@ -150,9 +188,8 @@ class DockerPrivilegedMatcher(BaseMatcher):
                     found.append(name.lower())
         return found
 
-    def _host_mount(self, command) -> str | None:
+    def _host_mount(self, argv) -> str | None:
         """The host side of a -v/--volume/--mount that exposes the host itself."""
-        argv = command.argv
         for i, token in enumerate(argv):
             name, eq, value = token.partition("=")
             if name in ("-v", "--volume"):

@@ -36,22 +36,18 @@ _RESERVED: tuple[tuple[str, str, str, tuple[str, ...], str, str], ...] = (
     ("fs.move", "fs", "Moves or renames a filesystem path", _SHELL, "allow", "info"),
     ("fs.symlink", "fs", "Creates a symbolic or hard link", _SHELL, "allow", "warn"),
     # ── exec ──────────────────────────────────────────────────────────────
-    ("exec.scheduled", "exec", "Schedules future execution (cron, at, systemd timer)", _SHELL, "ask", "warn"),
     ("exec.remote", "exec", "Executes a command on a remote host", _SHELL, "ask", "warn"),
     ("exec.background", "exec", "Detaches a process to run in the background", _SHELL, "allow", "info"),
     ("exec.shell.eval", "exec", "Evaluates a dynamically constructed shell string", _SHELL, "ask", "warn"),
     ("exec.process.kill", "exec", "Terminates a running process", _SHELL, "allow", "info"),
     # ── vcs ───────────────────────────────────────────────────────────────
-    ("vcs.clean", "vcs", "Discards untracked files from the working tree", _SHELL, "ask", "warn"),
     ("vcs.remote.add", "vcs", "Adds or changes a version-control remote", _SHELL, "ask", "warn"),
     ("vcs.tag.delete", "vcs", "Deletes a tag locally or on a remote", _SHELL, "allow", "warn"),
     ("vcs.config.change", "vcs", "Changes version-control configuration", _SHELL, "allow", "info"),
     ("vcs.submodule", "vcs", "Adds, updates or removes a submodule", _SHELL, "allow", "info"),
-    ("vcs.credential.store", "vcs", "Stores version-control credentials on disk", _SHELL, "ask", "critical"),
     # ── mcp ───────────────────────────────────────────────────────────────
     ("mcp.ungoverned", "mcp", "MCP tool outside the configured allowlist", (KIND_MCP,), "allow", "warn"),
     ("mcp.external_send", "mcp", "MCP tool that sends data to an external service", (KIND_MCP,), "allow", "warn"),
-    ("mcp.credential_access", "mcp", "MCP tool that reads credentials", (KIND_MCP,), "ask", "critical"),
     ("mcp.new_server", "mcp", "First use of a previously unseen MCP server", (KIND_MCP,), "allow", "warn"),
     ("mcp.elevated", "mcp", "MCP tool requesting elevated capability", (KIND_MCP,), "ask", "warn"),
     ("mcp.bulk", "mcp", "MCP tool operating on many records at once", (KIND_MCP,), "allow", "warn"),
@@ -68,14 +64,12 @@ _RESERVED: tuple[tuple[str, str, str, tuple[str, ...], str, str], ...] = (
     ("net.scan", "net", "Scans hosts or ports", _SHELL, "ask", "warn"),
     # ── db ────────────────────────────────────────────────────────────────
     ("db.bulk_delete", "db", "Deletes many rows in one statement", _SHELL, "ask", "warn"),
-    ("db.migration", "db", "Runs a schema migration", _SHELL, "allow", "warn"),
     ("db.grant", "db", "Grants or revokes database privileges", _SHELL, "ask", "warn"),
     # ── sec ───────────────────────────────────────────────────────────────
     ("sec.credential.write", "sec", "Writes a credential to disk or a store", _FILES, "ask", "critical"),
     ("sec.key.generate", "sec", "Generates a cryptographic key", _SHELL, "allow", "info"),
     ("sec.cert.modify", "sec", "Installs or modifies a certificate or trust store", _SHELL, "ask", "critical"),
     ("sec.firewall.change", "sec", "Changes firewall or security-group rules", _SHELL, "ask", "critical"),
-    ("sec.audit.disable", "sec", "Disables logging, history or auditing", _SHELL, "ask", "critical"),
     # ── sys ───────────────────────────────────────────────────────────────
     ("sys.service.control", "sys", "Starts, stops or restarts a system service", _SHELL, "allow", "warn"),
     ("sys.user.modify", "sys", "Creates, modifies or deletes a system user or group", _SHELL, "ask", "critical"),

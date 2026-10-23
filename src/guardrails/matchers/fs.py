@@ -81,6 +81,15 @@ _METADATA_COMMANDS = frozenset({
 # git subcommands that look a path up in the index or ignore rules, never its contents.
 _GIT_PATH_LOOKUPS = frozenset({"check-ignore", "ls-files", "status"})
 _GIT_VALUE_OPTIONS = frozenset({"-C", "-c", "--git-dir", "--work-tree", "--namespace"})
+_GIT_PRINTS_REV_PATH = frozenset({"show", "cat-file"})
+
+
+def _rev_path(operand: str) -> str:
+    """`HEAD:.env` -> `.env`; a plain path, a URL or a drive (`C:/x`) unchanged."""
+    rev, sep, path = operand.partition(":")
+    if not sep or "://" in operand or (len(rev) == 1 and rev.isalpha()):
+        return operand
+    return path
 # An operand that is code, a query or a remote script rather than a path:
 # `node -e "...('.env.prod')"`, `--scripts "grep x .env"` (quotes left inside
 # after the shell removed its own), `--query "Contents[0].Key"`,
@@ -124,6 +133,16 @@ def _file_operands(command) -> list[str]:
         sub = BaseMatcher.operands_from_subcommand(command, _GIT_VALUE_OPTIONS)
         if sub and sub[0] in _GIT_PATH_LOOKUPS:
             return []
+        # `git hash-object FILE` prints a hash; `-w` also stores the content.
+        if sub and sub[0] == "hash-object" and "-w" not in command.flags:
+            return []
+        # `git show HEAD:.env` / `git cat-file -p main:config/secrets.yml` print
+        # the file at that revision: the path is after the colon.
+        if sub and sub[0] in _GIT_PRINTS_REV_PATH:
+            # `cat-file -e/-t/-s` test existence or print the type or size, not the content.
+            if sub[0] == "cat-file" and command.flags & {"-e", "-t", "-s"}:
+                return []
+            return [_rev_path(o) for o in sub[1:] if _looks_like_path(_rev_path(o))]
     operands = [o for o in command.subcommand_path if not o.startswith("-")]
     pattern_flags = _PATTERN_FIRST.get(name)
     if pattern_flags is not None and operands and not (command.flags & pattern_flags):
@@ -146,6 +165,47 @@ def _candidate_paths(call: ToolCall) -> list[tuple[str, str, object]]:
             if resolved:
                 found.append((resolved, command.raw, command))
     return found
+
+
+# `find` tests that narrow what it matches: with one, `-delete` removes the
+# matching files; without any, everything under the start paths.
+_FIND_FILTERS = frozenset({
+    "-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex",
+    "-type", "-newer", "-mtime", "-mmin", "-atime", "-amin", "-ctime", "-cmin", "-size",
+    "-empty", "-user", "-group", "-perm", "-lname", "-ilname", "-links", "-inum", "-samefile",
+})
+_FIND_EXEC = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
+
+
+def _find_delete(command) -> tuple[list[str], bool, bool] | None:
+    """
+    For `find ... -delete` or `find ... -exec rm ...`: (start paths, recursive,
+    forced). find's options are words (`-name`, `-delete`), so argv is read
+    as written rather than as bundled single-letter flags.
+    """
+    if command.command_name != "find":
+        return None
+    argv = list(command.argv)
+    starts: list[str] = []
+    for token in argv:
+        if token.startswith(("-", "(", "!", ")")) or token in ("\\(", "\\)"):
+            break
+        starts.append(token)
+    filtered = any(t in _FIND_FILTERS for t in argv)
+    if "-delete" in argv:
+        return starts or ["."], not filtered, True
+    for i, token in enumerate(argv):
+        if token in _FIND_EXEC and i + 1 < len(argv) and posixpath.basename(argv[i + 1]) in _DELETE_COMMANDS:
+            run = []
+            for word in argv[i + 2:]:
+                if word in (";", "\\;", "+"):
+                    break
+                run.append(word)
+            short = "".join(w[1:] for w in run if w.startswith("-") and not w.startswith("--"))
+            recursive = "r" in short.lower() or "--recursive" in run
+            forced = "f" in short or "--force" in run
+            return starts or ["."], recursive, forced
+    return None
 
 
 # Folders that are disposable build or dependency output.
@@ -181,6 +241,10 @@ class DeleteMatcher(BaseMatcher):
                 None,
             )
             return self.hit(target=target, command=command)
+        for command in call.commands:
+            found = _find_delete(command)
+            if found:
+                return self.hit(target=resolve_path(found[0][0], call.cwd), command=command)
         return None
 
 
@@ -197,14 +261,21 @@ class RecursiveDeleteMatcher(BaseMatcher):
     FACTS = ("recursive", "forced", "target_count", "disposable")
 
     def match(self, call: ToolCall) -> MatchResult | None:
-        deletes = [c for c in self.commands_named(call, _DELETE_COMMANDS)
-                   if c.has_recursive_flag or c.has_force_flag]
+        # (command, targets, recursive, forced) for every forced or recursive delete.
+        deletes = [
+            (c, [o for o in c.subcommand_path if not o.startswith("-")], c.has_recursive_flag, c.has_force_flag)
+            for c in self.commands_named(call, _DELETE_COMMANDS)
+            if c.has_recursive_flag or c.has_force_flag
+        ]
+        for command in call.commands:
+            found = _find_delete(command)
+            if found and (found[1] or found[2]):
+                deletes.append((command, *found))
         # One hit per call, so it is the most severe delete: in
         # `rm -f a.tgz && rm -rf /tmp/pkg` that is the recursive one, which a
         # rule scoped on `recursive: true` must not miss.
-        deletes.sort(key=lambda c: not c.has_recursive_flag)
-        for command in deletes:
-            targets = [o for o in command.subcommand_path if not o.startswith("-")]
+        deletes.sort(key=lambda d: not d[2])
+        for command, targets, recursive, forced in deletes:
             # The target a rule sees is the one worth reviewing: in
             # `rm -rf node_modules src` that is src, so an "allow node_modules
             # cleanup" rule cannot wave the whole command through.
@@ -213,8 +284,8 @@ class RecursiveDeleteMatcher(BaseMatcher):
             return self.hit(
                 target=resolved,
                 command=command,
-                recursive=command.has_recursive_flag,
-                forced=command.has_force_flag,
+                recursive=recursive,
+                forced=forced,
                 target_count=len(targets),
                 disposable=bool(targets) and all(_is_disposable(t) for t in targets),
             )

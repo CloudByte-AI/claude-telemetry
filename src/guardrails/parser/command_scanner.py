@@ -77,7 +77,8 @@ POSIX = Dialect(
     allows_env_prefix=True,
     # `;;` before `;` and `&&`/`||` before `&`/`|`: longest match wins.
     operators=("&&", "||", ";;", ";", "|&", "|", "&", "\n"),
-    substitution_prefixes=("$(",),
+    # `<(cmd)` / `>(cmd)` are process substitutions: commands, not redirects.
+    substitution_prefixes=("$(", "<(", ">("),
     case_insensitive_flags=False,
     case_insensitive_names=False,
     executable_suffixes=(),
@@ -134,6 +135,81 @@ _WRAPPERS: dict[str, int] = {
     "watch": 0,
 }
 
+# Package runners: they run a tool from a package, so the tool is the command
+# (`npx prisma migrate deploy` runs prisma). name -> (the subcommand runs that
+# run something - empty when the runner itself does - and the runner's options
+# that take a value, so a value is not mistaken for the tool).
+_PACKAGE_RUNNERS: dict[str, tuple[tuple[tuple[str, ...], ...], frozenset[str]]] = {
+    "npx": ((), frozenset({"-p", "--package"})),
+    "pnpx": ((), frozenset({"-p", "--package"})),
+    "bunx": ((), frozenset({"-p", "--package"})),
+    "uvx": ((), frozenset({"--from", "--with", "--with-requirements", "--python", "-p", "--index", "--index-url"})),
+    "npm": ((("exec",), ("x",)), frozenset({"-p", "--package", "-w", "--workspace"})),
+    "pnpm": ((("exec",), ("dlx",)), frozenset({"-C", "--dir", "-F", "--filter", "--package"})),
+    "yarn": ((("dlx",), ("exec",)), frozenset({"-p", "--package"})),
+    "bun": ((("x",),), frozenset({"-p", "--package"})),
+    "uv": ((("run",), ("tool", "run")), frozenset({
+        "--with", "--with-requirements", "--python", "-p", "--project", "--directory", "--env-file",
+        "--extra", "--group", "--only-group", "--package", "--index", "--index-url", "--from",
+    })),
+    "pipx": ((("run",),), frozenset({"--spec", "--python", "--pip-args", "--index-url"})),
+    "poetry": ((("run",),), frozenset({"-C", "--directory", "-P", "--project"})),
+    "pdm": ((("run",),), frozenset({"-p", "--project"})),
+    "pipenv": ((("run",),), frozenset()),
+    "bundle": ((("exec",),), frozenset({"--gemfile"})),
+    "conda": ((("run",),), frozenset({"-n", "--name", "-p", "--prefix", "--cwd"})),
+    "mamba": ((("run",),), frozenset({"-n", "--name", "-p", "--prefix", "--cwd"})),
+    "dotnet": ((("tool", "run"),), frozenset()),
+}
+# Runner options whose value is itself a command line: `npx -c "eslint ."`.
+_RUNNER_CALL_FLAGS = frozenset({"-c", "--call"})
+
+
+def _runner_inner(name: str, argv: tuple[str, ...]) -> tuple[int | None, str | None]:
+    """
+    For a package runner: (argv index where the tool it runs starts, or None;
+    the command line given to -c/--call, or None).
+    """
+    runs, value_flags = _PACKAGE_RUNNERS[name]
+    i = 0
+
+    def skip_options(i: int) -> tuple[int, str | None]:
+        while i < len(argv):
+            token = argv[i]
+            if token == "--":
+                return i + 1, None
+            if not token.startswith("-") or len(token) == 1:
+                return i, None
+            option = token.partition("=")[0]
+            if option in _RUNNER_CALL_FLAGS and name in ("npx", "pnpx", "npm", "pnpm"):
+                if "=" in token:
+                    return len(argv), token.partition("=")[2]
+                return len(argv), argv[i + 1] if i + 1 < len(argv) else None
+            i += 2 if option in value_flags and "=" not in token else 1
+        return i, None
+
+    if runs:
+        i, call = skip_options(i)
+        if call is not None:
+            return None, call
+        run = next((r for r in runs if tuple(argv[i:i + len(r)]) == r), None)
+        if run is None:
+            return None, None
+        i += len(run)
+    i, call = skip_options(i)
+    if call is not None:
+        return None, call
+    return (i if i < len(argv) else None), None
+
+
+def _package_tool(word: str) -> str:
+    """The tool a package spec names: `prisma@5.2` -> prisma, `@scope/cli@1` -> @scope/cli."""
+    if word.startswith("@"):
+        scope, _, rest = word[1:].partition("/")
+        return "@" + scope + "/" + rest.partition("@")[0] if rest else word
+    return word.partition("@")[0] or word
+
+
 # `command -v x` / `command -V x` only LOOK UP x; they do not run it.
 _LOOKUP_ONLY_FLAGS = frozenset({"-v", "-V"})
 
@@ -169,7 +245,13 @@ _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 # PowerShell assignment: `$x = cmd`, `$env:FOO = cmd`, glued `$x=cmd`.
 _PS_ASSIGNMENT = re.compile(r"^\$[A-Za-z_][\w:.]*$")
 _PS_ASSIGNMENT_GLUED = re.compile(r"^\$[A-Za-z_][\w:.]*=$")
-_REDIRECT = re.compile(r"^(?:\d*)(?:>>|>&|>|<<<|<<|<)$")
+_REDIRECT = re.compile(r"^(?:\d*|&|\*)(?:>>|>&|>\||>|<<<|<<|<&|<>|<)$")
+# Where a substitution sat inside a word: a private mark while scanning, shown
+# as SUBSTITUTION_PLACEHOLDER in the word (`"$(pwd)/build"` -> `$(...)/build`).
+_SUBSTITUTED = "\x00"
+SUBSTITUTION_PLACEHOLDER = "$(...)"
+# The redirection operator at a position (longest first).
+_REDIRECT_OP = re.compile(r"&>>|&>|>>|>&|>\||>|<<<|<<|<&|<>|<")
 
 # Recursion cap for substitutions and nested shells; hostile input can nest
 # arbitrarily.
@@ -354,7 +436,13 @@ def _scan(text: str, dialect: Dialect) -> tuple[list[_Token], list[str], list[st
 
     def flush(end: int) -> None:
         if buf:
-            tokens.append(_Token("word", "".join(buf), buf_start, end))
+            word = "".join(buf)
+            # A word that was only a substitution (`eval "$(curl ...)"`) has no
+            # text of its own. One that also has text keeps a placeholder where
+            # the substitution was: `"$(pwd)/build"` is `$(...)/build`, not
+            # `/build`, and `"$(cat f)":refs/heads/main` is not `:main`.
+            if word.strip(_SUBSTITUTED):
+                tokens.append(_Token("word", word.replace(_SUBSTITUTED, SUBSTITUTION_PLACEHOLDER), buf_start, end))
             buf.clear()
 
     def take_substitution(paren_at: int) -> int:
@@ -387,10 +475,12 @@ def _scan(text: str, dialect: Dialect) -> tuple[list[_Token], list[str], list[st
                 continue
             if text.startswith("$(", i):
                 i = take_substitution(i + 1)
+                buf.append(_SUBSTITUTED)
                 continue
             if ch == "`" and dialect.backtick_substitutes:
                 inner, after = _until(text, i + 1, "`")
                 substitutions.append(inner)
+                buf.append(_SUBSTITUTED)
                 i = after
                 continue
             buf.append(ch)
@@ -416,12 +506,18 @@ def _scan(text: str, dialect: Dialect) -> tuple[list[_Token], list[str], list[st
 
         sub_prefix = next((p for p in dialect.substitution_prefixes if text.startswith(p, i)), None)
         if sub_prefix:
+            if not buf:
+                buf_start = i
             i = take_substitution(i + len(sub_prefix) - 1)
+            buf.append(_SUBSTITUTED)
             continue
 
         if ch == "`" and dialect.backtick_substitutes:
+            if not buf:
+                buf_start = i
             inner, after = _until(text, i + 1, "`")
             substitutions.append(inner)
+            buf.append(_SUBSTITUTED)
             i = after
             continue
 
@@ -444,6 +540,32 @@ def _scan(text: str, dialect: Dialect) -> tuple[list[_Token], list[str], list[st
                 heredoc_bodies.append("")
                 i = spec[2]
                 continue
+
+        # A redirection is its own token even when glued to its neighbours:
+        # `2>/dev/null`, `2>&1`, `&>log`. The file descriptor in front (`2`,
+        # or PowerShell's `*`) belongs to it, and so does a duplicated one
+        # (`&1`), which must not read as a background `&` and a command `1`.
+        if ch in "<>" or text.startswith("&>", i):
+            prefix = "".join(buf)
+            fd = prefix if prefix.isdigit() or (prefix == "*" and dialect.name != POSIX_NAME) else ""
+            if fd:
+                buf.clear()
+            else:
+                flush(i)
+            start = i - len(fd)
+            op = _REDIRECT_OP.match(text, i).group(0)
+            i += len(op)
+            if op.endswith("&"):
+                k = i
+                while k < n and (text[k].isdigit() or text[k] == "-"):
+                    k += 1
+                if k > i:
+                    tokens.append(_Token("word", fd + op, start, i))
+                    tokens.append(_Token("word", text[i:k], i, k))
+                    i = k
+                    continue
+            tokens.append(_Token("word", fd + op, start, i))
+            continue
 
         if ch in ("(", ")"):
             # Grouping / subshell. Treated as a separator: the contents are
@@ -515,7 +637,12 @@ def _resolve_name(token: str, dialect: Dialect) -> str:
     return dialect.aliases.get(name.lower(), name) if dialect.aliases else name
 
 
-def _expand_flag(token: str, dialect: Dialect, whole_word: bool = False) -> set[str]:
+# Tools whose single-dash options are whole words, never bundles of letters:
+# find's `-regex` is not -r -e -g -e -x, terraform's `-auto-approve` is one option.
+_SINGLE_DASH_WORDS = frozenset({"find", "java", "javac", "terraform", "tofu"})
+
+
+def _expand_flag(token: str, dialect: Dialect, whole_word: bool = False, bundles: bool = True) -> set[str]:
     """
     Normalise one flag token into every form a rule might name.
 
@@ -529,7 +656,7 @@ def _expand_flag(token: str, dialect: Dialect, whole_word: bool = False) -> set[
     flag = token.lower() if case_insensitive else token
     out = {flag}
     # Long flags and PowerShell-style whole-word flags never bundle.
-    if flag.startswith("--") or case_insensitive:
+    if flag.startswith("--") or case_insensitive or not bundles:
         return out
     if len(flag) > 2 and flag[0] == "-" and flag[1] != "-" and flag[1:].isalpha():
         out.update(f"-{c}" for c in flag[1:])
@@ -630,7 +757,8 @@ def _build_command(
             continue
         if not end_of_flags and token.startswith("-") and len(token) > 1:
             flag, _, inline_value = token.partition("=")
-            flags.update(_expand_flag(flag, dialect, whole_word=windows_host))
+            flags.update(_expand_flag(flag, dialect, whole_word=windows_host,
+                                      bundles=name not in _SINGLE_DASH_WORDS))
             if inline_value:
                 operands.append(inline_value)
                 operand_positions.append(position)
@@ -668,6 +796,19 @@ def _build_command(
         if inner_words and inner_words != words[idx:]:
             commands += _build_command(
                 inner_words, dialect, depth + 1, True, " ".join(inner_words),
+                stdin=stdin, piped_from=piped_from,
+            )
+
+    # `npx prisma migrate deploy`, `pnpm exec eslint .`, `uv run pytest`: the
+    # tool the runner starts is a command in its own right.
+    if name in _PACKAGE_RUNNERS and not windows_host:
+        start, call = _runner_inner(name, argv)
+        if call:
+            commands += parse_chain(call, dialect, _depth=depth + 1)
+        elif start is not None:
+            inner_words = [_package_tool(argv[start])] + list(argv[start + 1:])
+            commands += _build_command(
+                inner_words, dialect, depth + 1, True, " ".join(argv[start:]),
                 stdin=stdin, piped_from=piped_from,
             )
 

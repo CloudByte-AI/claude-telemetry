@@ -169,7 +169,9 @@ class DownloadAndExecuteMatcher(BaseMatcher):
         for command in commands:
             source = next((f for f in fetchers if f.command_name in command.piped_from), None)
             if source is not None and _writes_to_stdout(source) and self.reads_code_from_stdin(command):
-                return self._found(call, source, command, "pipe")
+                found = self._found(call, source, command, "pipe")
+                if found:
+                    return found
 
         # 2. eval "$(curl -fsSL ...)" / source <(curl ...) / iex (iwr ...): what
         #    is evaluated is the download itself - not merely an evaluator and a
@@ -182,11 +184,15 @@ class DownloadAndExecuteMatcher(BaseMatcher):
             if evaluated:
                 if evaluated.group(1).lower().startswith("new-object"):
                     # iex (New-Object Net.WebClient).DownloadString(url): no fetcher command at all.
-                    return self._found(call, evaluator, evaluator, "evaluate")
+                    found = self._found(call, evaluator, evaluator, "evaluate")
+                    if found:
+                        return found
                 source = next((f for f in fetchers if f.command_name == _canonical_fetcher(evaluated.group(1))
                                and _writes_to_stdout(f)), None)
                 if source is not None:
-                    return self._found(call, source, evaluator, "evaluate")
+                    found = self._found(call, source, evaluator, "evaluate")
+                    if found:
+                        return found
 
         # ... or run as a shell's script: bash <(curl ...) / sh -c "$(curl ...)".
         for runner in commands:
@@ -197,7 +203,9 @@ class DownloadAndExecuteMatcher(BaseMatcher):
                 source = next((f for f in fetchers if f.command_name == _canonical_fetcher(evaluated.group(1))
                                and _writes_to_stdout(f)), None)
                 if source is not None:
-                    return self._found(call, source, runner, "evaluate")
+                    found = self._found(call, source, runner, "evaluate")
+                    if found:
+                        return found
 
         # 3. curl -o install.sh URL && bash install.sh  /  ... -OutFile $exe; Start-Process $exe
         for index, fetcher in enumerate(commands):
@@ -215,12 +223,17 @@ class DownloadAndExecuteMatcher(BaseMatcher):
                     and any(_same_file(o, saved) for o in later.subcommand_path)
                 )
                 if runs_it:
-                    return self._found(call, fetcher, later, "download_then_run")
+                    found = self._found(call, fetcher, later, "download_then_run")
+                    if found:
+                        return found
         return None
 
-    def _found(self, call: ToolCall, fetcher: Command, runner: Command, technique: str) -> MatchResult:
+    def _found(self, call: ToolCall, fetcher: Command, runner: Command, technique: str) -> MatchResult | None:
         host = next((h for h in (url_host(o, call.command) for o in fetcher.subcommand_path) if h), None)
         host = host or (call.hosts[0] if call.hosts else None)
+        # Content served by this machine (localhost, 127.0.0.1) is not remote code.
+        if host and network_of(host) == "loopback":
+            return None
         return self.hit(
             target=host,
             evidence=fetcher.raw if fetcher is runner else f"{fetcher.raw}  ->  {runner.raw}",

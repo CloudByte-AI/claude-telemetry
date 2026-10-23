@@ -2,8 +2,8 @@
   "taxonomy_version": 1,
   "generated_from": "src/guardrails/registry.py - DO NOT HAND-EDIT",
   "operation_count": 74,
-  "implemented_count": 25,
-  "reserved_count": 49,
+  "implemented_count": 31,
+  "reserved_count": 43,
   "operations": [
     {
       "operation": "db.bulk_delete",
@@ -62,14 +62,17 @@
     {
       "operation": "db.migration",
       "domain": "db",
-      "description": "Runs a schema migration",
+      "description": "Applies, reverts or resets a database schema migration",
       "applies_to": [
         "shell"
       ],
       "default_action": "allow",
       "default_alert": "warn",
-      "implemented": false,
-      "facts": []
+      "implemented": true,
+      "facts": [
+        "direction",
+        "tool"
+      ]
     },
     {
       "operation": "db.truncate",
@@ -235,14 +238,17 @@
     {
       "operation": "exec.scheduled",
       "domain": "exec",
-      "description": "Schedules future execution (cron, at, systemd timer)",
+      "description": "Schedules future execution (cron, at, Task Scheduler, systemd timer, launchd)",
       "applies_to": [
         "shell"
       ],
       "default_action": "ask",
       "default_alert": "warn",
-      "implemented": false,
-      "facts": []
+      "implemented": true,
+      "facts": [
+        "action",
+        "scheduler"
+      ]
     },
     {
       "operation": "exec.shell.eval",
@@ -530,8 +536,12 @@
       ],
       "default_action": "ask",
       "default_alert": "critical",
-      "implemented": false,
-      "facts": []
+      "implemented": true,
+      "facts": [
+        "credential",
+        "mcp_server",
+        "verb"
+      ]
     },
     {
       "operation": "mcp.delete",
@@ -726,8 +736,11 @@
       ],
       "default_action": "ask",
       "default_alert": "critical",
-      "implemented": false,
-      "facts": []
+      "implemented": true,
+      "facts": [
+        "area",
+        "technique"
+      ]
     },
     {
       "operation": "sec.cert.modify",
@@ -889,14 +902,17 @@
     {
       "operation": "vcs.clean",
       "domain": "vcs",
-      "description": "Discards untracked files from the working tree",
+      "description": "Discards untracked files or uncommitted changes from the working tree",
       "applies_to": [
         "shell"
       ],
       "default_action": "ask",
       "default_alert": "warn",
-      "implemented": false,
-      "facts": []
+      "implemented": true,
+      "facts": [
+        "ignored",
+        "scope"
+      ]
     },
     {
       "operation": "vcs.config.change",
@@ -919,8 +935,11 @@
       ],
       "default_action": "ask",
       "default_alert": "critical",
-      "implemented": false,
-      "facts": []
+      "implemented": true,
+      "facts": [
+        "helper",
+        "method"
+      ]
     },
     {
       "operation": "vcs.force_push",

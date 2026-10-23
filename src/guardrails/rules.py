@@ -38,7 +38,7 @@ from src.guardrails.decision import (
 )
 from src.guardrails.matchers.base import MatchResult
 from src.guardrails.parser import Command
-from src.guardrails.toolcall import ToolCall
+from src.guardrails.toolcall import KIND_SHELL, ToolCall
 
 OPERATORS = ("equals", "starts_with", "ends_with", "contains", "regex")
 
@@ -729,7 +729,13 @@ def _text_evidence(rule: Rule, call: ToolCall) -> tuple[str, str | None] | None:
         if end + _EXCERPT_CONTEXT < len(text):
             excerpt += "..."
         matched = text[start:end]
-        owner = next((c.command_name for c in call.commands if matched and matched in c.raw), None)
+        # The command whose own text or here-document holds the match (with a
+        # little context, so a common word is credited to the right command).
+        around = text[max(0, start - 20):end + 20]
+        owner = next((c.command_name for c in call.commands
+                      if matched and (around in c.raw or around in c.stdin)), None) \
+            or next((c.command_name for c in call.commands
+                     if matched and (matched in c.raw or matched in c.stdin)), None)
         return excerpt, owner
     return None
 
@@ -748,6 +754,8 @@ def _decision(rule: Rule, frame: Frame, call: ToolCall) -> Decision:
     command = frame.command
     evidence = (match.evidence if match else (command.raw if command else call.command))
     command_name = command.command_name if command else (match.command_name if match else None)
+    target = None
+    text_matched = False
     if not any(c.field == "operation" for c in rule.constraints):
         found = _text_evidence(rule, call)
         if found:
@@ -755,6 +763,11 @@ def _decision(rule: Rule, frame: Frame, call: ToolCall) -> Decision:
             # The rule read the text, not this frame's matcher hit: naming that
             # hit's operation and target would explain the wrong thing.
             match = None
+            text_matched = True
+    # A shell call's first path (often a `cd`) says nothing about a text
+    # match; a file tool's path is the file whose content matched.
+    if not (text_matched and call.kind == KIND_SHELL):
+        target = match.target if match and match.target else call.target_path
     return Decision(
         action=rule.action,
         reason=rule.reason,
@@ -764,7 +777,7 @@ def _decision(rule: Rule, frame: Frame, call: ToolCall) -> Decision:
         rule_id=rule.rule_id,
         rule_rank=rule.rank,
         source=source,
-        target=(match.target if match and match.target else call.target_path),
+        target=target,
         evidence=(evidence or "")[:256] or None,
         command_name=command_name,
         requires_audit=rule.audit,
