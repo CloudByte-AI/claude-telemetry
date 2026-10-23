@@ -42,11 +42,12 @@ tables:
         decision: deny, alert: critical,
         reason: "Drive-root deletion is blocked. Delete a specific subdirectory instead." }
 
-    # Piping a download straight into a shell: the remote host chooses what runs.
+    # Running a download - piped into a shell, evaluated, or saved and run in the
+    # same command: the remote host chooses what runs.
     - { id: cb.net.download-exec,
         operation: net.download.exec,
         decision: deny, alert: critical,
-        reason: "Downloading and executing in one step is blocked. Download the script, then run it after review." }
+        reason: "Running downloaded code is blocked. Download the script, read it, then run it as a separate step." }
 
     # Encoded execution exists to defeat inspection, which is what this layer is.
     - { id: cb.exec.encoded,
