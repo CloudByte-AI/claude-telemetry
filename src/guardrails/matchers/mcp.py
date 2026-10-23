@@ -26,6 +26,14 @@ _WRITE_VERBS = (
 _DELETE_VERBS = ("delete", "remove", "destroy", "drop", "purge", "truncate", "revoke")
 
 
+# A tool whose name STARTS with one of these reads: `get_merge_request`,
+# `list_push_rules`, `get_post_comments` carry a write word but write nothing.
+_READ_VERBS = frozenset({
+    "get", "list", "read", "search", "query", "fetch", "find", "describe", "show", "count",
+    "view", "check", "lookup", "browse", "inspect", "preview", "download", "export", "status",
+})
+
+
 def _verb_in(tool: str | None, verbs: tuple[str, ...]) -> str | None:
     """
     The verb found in a tool name, matched on whole name segments so that
@@ -34,6 +42,8 @@ def _verb_in(tool: str | None, verbs: tuple[str, ...]) -> str | None:
     if not tool:
         return None
     segments = tool.replace("-", "_").lower().split("_")
+    if segments and segments[0] in _READ_VERBS:
+        return None
     for verb in verbs:
         if verb in segments:
             return verb

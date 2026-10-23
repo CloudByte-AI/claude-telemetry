@@ -2,8 +2,8 @@
   "taxonomy_version": 1,
   "generated_from": "src/guardrails/registry.py - DO NOT HAND-EDIT",
   "operation_count": 74,
-  "implemented_count": 24,
-  "reserved_count": 50,
+  "implemented_count": 25,
+  "reserved_count": 49,
   "operations": [
     {
       "operation": "db.bulk_delete",
@@ -74,14 +74,17 @@
     {
       "operation": "db.truncate",
       "domain": "db",
-      "description": "Empties a table",
+      "description": "Empties a table (SQL TRUNCATE sent to a database client)",
       "applies_to": [
         "shell"
       ],
       "default_action": "ask",
       "default_alert": "critical",
-      "implemented": false,
-      "facts": []
+      "implemented": true,
+      "facts": [
+        "client",
+        "table"
+      ]
     },
     {
       "operation": "devflow.ci.trigger",
@@ -186,7 +189,8 @@
       "default_alert": "warn",
       "implemented": true,
       "facts": [
-        "interpreter"
+        "interpreter",
+        "source"
       ]
     },
     {
@@ -304,6 +308,7 @@
       "default_alert": "warn",
       "implemented": true,
       "facts": [
+        "disposable",
         "forced",
         "recursive",
         "target_count"
@@ -621,7 +626,7 @@
     {
       "operation": "net.download.exec",
       "domain": "net",
-      "description": "Pipes downloaded content straight into an interpreter",
+      "description": "Runs downloaded content: piped into an interpreter, evaluated, or saved and run",
       "applies_to": [
         "shell"
       ],
@@ -630,7 +635,8 @@
       "implemented": true,
       "facts": [
         "fetcher",
-        "host"
+        "host",
+        "technique"
       ]
     },
     {
@@ -672,7 +678,7 @@
     {
       "operation": "net.upload",
       "domain": "net",
-      "description": "Sends local data to a remote host",
+      "description": "Sends local data to another host",
       "applies_to": [
         "shell"
       ],
@@ -681,7 +687,8 @@
       "implemented": true,
       "facts": [
         "host",
-        "method"
+        "method",
+        "network"
       ]
     },
     {

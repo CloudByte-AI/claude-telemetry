@@ -56,10 +56,10 @@ tables:
 
     # ── ask tier ─────────────────────────────────────────────────────────
     - { id: cb.fs.cleanup-node-modules,
-        operation: fs.delete.recursive, target_path: {contains: "node_modules"},
+        operation: fs.delete.recursive, disposable: true, target_path: {contains: "node_modules"},
         decision: allow, alert: info, reason: "Dependency directory cleanup" }
     - { id: cb.fs.recursive-delete,
-        operation: fs.delete.recursive,
+        operation: fs.delete.recursive, recursive: true,
         decision: ask, alert: warn,
         reason: "Recursive delete - review the target before approving" }
 

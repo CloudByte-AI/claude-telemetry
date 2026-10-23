@@ -60,6 +60,14 @@ class Dialect:
     executable_suffixes: tuple[str, ...]
     # cmdlet / alias -> canonical POSIX command name.
     aliases: dict[str, str] = field(default_factory=dict)
+    # `<<WORD` here-documents. Their body is the command's standard input, not
+    # commands: a commit message line reading "sudo is no longer needed" must
+    # not look like a sudo (POSIX only; PowerShell's @'...'@ is a quoted string).
+    heredocs: bool = False
+    # `#` at the start of a word comments out the rest of the line (both shells;
+    # PowerShell also has `<# ... #>` blocks).
+    line_comments: bool = True
+    block_comments: tuple[str, str] | None = None
 
 
 POSIX = Dialect(
@@ -73,6 +81,7 @@ POSIX = Dialect(
     case_insensitive_flags=False,
     case_insensitive_names=False,
     executable_suffixes=(),
+    heredocs=True,
 )
 
 # Other dialects (PowerShell) live in their own modules and call
@@ -125,15 +134,41 @@ _WRAPPERS: dict[str, int] = {
     "watch": 0,
 }
 
-# Interpreters whose `-c` argument is itself a command chain.
+# `command -v x` / `command -V x` only LOOK UP x; they do not run it.
+_LOOKUP_ONLY_FLAGS = frozenset({"-v", "-V"})
+
+# POSIX reserved words that precede the command they introduce, and those that
+# only close a block. (`for`/`case`/`select` headers are not commands either,
+# but their words are a list, not a command, so they stay as they are.)
+POSIX_NAME = "posix"
+_LEADING_KEYWORDS = frozenset({"if", "then", "else", "elif", "do", "while", "until", "!", "{"})
+_CLOSING_KEYWORDS = frozenset({"fi", "done", "esac", "}"})
+
+# Interpreters whose code argument is itself a command chain. Only the
+# argument right after the flag is code for a POSIX shell (later ones are $0,
+# $1...); PowerShell and cmd join everything after it into one command line.
 _NESTED_SHELLS: dict[str, tuple[str, ...]] = {
     "bash": ("-c",), "sh": ("-c",), "zsh": ("-c",), "dash": ("-c",), "ksh": ("-c",),
-    "powershell": ("-command", "-c", "-encodedcommand"),
-    "pwsh": ("-command", "-c", "-encodedcommand"),
+    "powershell": ("-command", "-c"),
+    "pwsh": ("-command", "-c"),
     "cmd": ("/c", "/k"),
 }
+_JOINED_CODE = frozenset({"powershell", "pwsh", "cmd"})
+
+# PowerShell and cmd keep their own flag rules even when started from a POSIX
+# shell (Git Bash runs `powershell -NoProfile -Command ...` all the time):
+# `-NoProfile` is ONE case-insensitive flag, not the bundle -N -o -P -r -f -i -l -e.
+_WINDOWS_HOSTS = frozenset({"powershell", "pwsh", "cmd"})
+
+# Shells that run a here-document fed to them as commands, when they are given
+# no script to run instead. Any other consumer (cat, python, psql, git...)
+# receives the body as data.
+_HEREDOC_SHELLS = frozenset({"bash", "sh", "zsh", "dash", "ksh"})
 
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+# PowerShell assignment: `$x = cmd`, `$env:FOO = cmd`, glued `$x=cmd`.
+_PS_ASSIGNMENT = re.compile(r"^\$[A-Za-z_][\w:.]*$")
+_PS_ASSIGNMENT_GLUED = re.compile(r"^\$[A-Za-z_][\w:.]*=$")
 _REDIRECT = re.compile(r"^(?:\d*)(?:>>|>&|>|<<<|<<|<)$")
 
 # Recursion cap for substitutions and nested shells; hostile input can nest
@@ -164,6 +199,12 @@ class Command:
     # True when this command was produced by unwrapping (sudo X) or by parsing a
     # nested `sh -c "..."`, rather than appearing literally in the chain.
     derived: bool = False
+    # Here-document text fed to this command's standard input (`psql <<EOF`).
+    # Data, not commands - a matcher may read it (SQL for a database client).
+    stdin: str = ""
+    # Names of the commands earlier in the same pipeline, whose output this
+    # command reads: `curl x | sh` gives sh piped_from=("curl",).
+    piped_from: tuple[str, ...] = ()
 
     @property
     def subcommand(self) -> str:
@@ -198,17 +239,63 @@ class _Token:
     end: int
 
 
+# `<<WORD`, `<<-WORD`, `<<'WORD'`, `<<"WORD"`, `<<\WORD` (not the `<<<` here-string).
+_HEREDOC_START = re.compile(r"<<(-?)[ \t]*(?:'([^'\n]*)'|\"([^\"\n]*)\"|\\?([A-Za-z0-9_.@:+-]+))")
+
+
+def _heredoc_spec(text: str, at: int) -> tuple[str, bool, int] | None:
+    """
+    At a `<<` that opens a here-document: (delimiter, strip_leading_tabs,
+    index just after the delimiter word). None for `<<<` or no delimiter.
+    """
+    if not text.startswith("<<", at) or text.startswith("<<<", at):
+        return None
+    found = _HEREDOC_START.match(text, at)
+    if not found:
+        return None
+    delimiter = next((g for g in found.groups()[1:] if g is not None), None)
+    if not delimiter:
+        return None
+    return delimiter, bool(found.group(1)), found.end()
+
+
+def _heredoc_body(text: str, start: int, delimiter: str, strip_tabs: bool) -> tuple[str, int]:
+    """
+    The body lines from `start` (the line after the `<<` line) up to the line
+    that is exactly the delimiter. Returns (body, index after that line). A
+    body that is never closed runs to the end of the text, as bash reads it.
+    """
+    lines: list[str] = []
+    i = start
+    n = len(text)
+    while i < n:
+        newline = text.find("\n", i)
+        end = n if newline == -1 else newline
+        line = text[i:end]
+        check = (line.lstrip("\t") if strip_tabs else line).rstrip("\r")
+        if check == delimiter:
+            return "\n".join(lines), (n if newline == -1 else newline + 1)
+        lines.append(line)
+        if newline == -1:
+            break
+        i = newline + 1
+    return "\n".join(lines), n
+
+
 def _balanced(text: str, open_at: int, opener: str, closer: str) -> tuple[str, int]:
     """
     Return (inner_text, index_after_close) for a bracket opening at `open_at`.
 
-    Skips over quoted regions so `$(echo ")")` does not close early. On an
-    unbalanced input the rest of the string is returned, which is the
-    conservative choice: more text gets parsed, not less.
+    Skips over quoted regions so `$(echo ")")` does not close early, and over
+    here-document bodies, so the usual commit form
+    `-m "$(cat <<'EOF' ... it's ... EOF)"` is not derailed by an apostrophe in
+    the message. On an unbalanced input the rest of the string is returned,
+    which is the conservative choice: more text gets parsed, not less.
     """
     depth = 0
     i = open_at
     quote: str | None = None
+    pending: list[tuple[str, bool]] = []
     n = len(text)
     while i < n:
         ch = text[i]
@@ -216,6 +303,18 @@ def _balanced(text: str, open_at: int, opener: str, closer: str) -> tuple[str, i
             if ch == quote:
                 quote = None
             i += 1
+            continue
+        if ch == "<":
+            spec = _heredoc_spec(text, i)
+            if spec:
+                pending.append((spec[0], spec[1]))
+                i = spec[2]
+                continue
+        if ch == "\n" and pending:
+            i += 1
+            for delimiter, strip_tabs in pending:
+                _, i = _heredoc_body(text, i, delimiter, strip_tabs)
+            pending.clear()
             continue
         if ch in ("'", '"'):
             quote = ch
@@ -229,16 +328,24 @@ def _balanced(text: str, open_at: int, opener: str, closer: str) -> tuple[str, i
     return text[open_at + 1:], n
 
 
-def _scan(text: str, dialect: Dialect) -> tuple[list[_Token], list[str]]:
+def _scan(text: str, dialect: Dialect) -> tuple[list[_Token], list[str], list[str]]:
     """
-    Split `text` into word and operator tokens, collecting substitution bodies.
+    Split `text` into word and operator tokens, collecting substitution bodies
+    and here-document bodies.
 
     Substitution bodies are returned separately rather than inlined, because
     `echo $(rm -rf /x)` must be seen as two commands - the outer `echo` and the
     inner `rm` - not as one `echo` with a funny-looking argument.
+
+    A here-document is the opposite: its body is DATA on the command's standard
+    input. It becomes a `heredoc` token (an index into the returned bodies) at
+    the `<<`, and its lines are skipped rather than read as commands. Comments
+    are skipped too, so `# then: curl x | sh` runs nothing.
     """
     tokens: list[_Token] = []
     substitutions: list[str] = []
+    heredoc_bodies: list[str] = []
+    pending: list[tuple[int, str, bool]] = []
     buf: list[str] = []
     buf_start = 0
     quote: str | None = None
@@ -318,6 +425,26 @@ def _scan(text: str, dialect: Dialect) -> tuple[list[_Token], list[str]]:
             i = after
             continue
 
+        # A comment starts only at the beginning of a word: `a#b` and `$#` are text.
+        if not buf and dialect.block_comments and text.startswith(dialect.block_comments[0], i):
+            close = text.find(dialect.block_comments[1], i + len(dialect.block_comments[0]))
+            i = n if close == -1 else close + len(dialect.block_comments[1])
+            continue
+        if ch == "#" and not buf and dialect.line_comments:
+            newline = text.find("\n", i)
+            i = n if newline == -1 else newline
+            continue
+
+        if ch == "<" and dialect.heredocs:
+            spec = _heredoc_spec(text, i)
+            if spec:
+                flush(i)
+                tokens.append(_Token("heredoc", str(len(heredoc_bodies)), i, spec[2]))
+                pending.append((len(heredoc_bodies), spec[0], spec[1]))
+                heredoc_bodies.append("")
+                i = spec[2]
+                continue
+
         if ch in ("(", ")"):
             # Grouping / subshell. Treated as a separator: the contents are
             # commands in their own right and are scanned in the same pass.
@@ -336,6 +463,11 @@ def _scan(text: str, dialect: Dialect) -> tuple[list[_Token], list[str]]:
             flush(i)
             tokens.append(_Token("op", op, i, i + len(op)))
             i += len(op)
+            # The line that opened here-documents is over: their bodies follow.
+            if op == "\n" and pending:
+                for index, delimiter, strip_tabs in pending:
+                    heredoc_bodies[index], i = _heredoc_body(text, i, delimiter, strip_tabs)
+                pending.clear()
             continue
 
         if not buf:
@@ -344,7 +476,7 @@ def _scan(text: str, dialect: Dialect) -> tuple[list[_Token], list[str]]:
         i += 1
 
     flush(n)
-    return tokens, substitutions
+    return tokens, substitutions, heredoc_bodies
 
 
 def _until(text: str, start: int, closer: str) -> tuple[str, int]:
@@ -383,22 +515,44 @@ def _resolve_name(token: str, dialect: Dialect) -> str:
     return dialect.aliases.get(name.lower(), name) if dialect.aliases else name
 
 
-def _expand_flag(token: str, dialect: Dialect) -> set[str]:
+def _expand_flag(token: str, dialect: Dialect, whole_word: bool = False) -> set[str]:
     """
     Normalise one flag token into every form a rule might name.
 
     `-rf` yields {-rf, -r, -f} so that `rm -rf x`, `rm -r -f x` and
     `rm -fr x` all satisfy the same `has_force_flag` check. A PowerShell
     `-Recurse` is lower-cased, since PowerShell flags are case-insensitive.
+    `whole_word` applies PowerShell's rules inside a POSIX chain, for
+    `powershell -NoProfile ...` started from Git Bash.
     """
-    flag = token.lower() if dialect.case_insensitive_flags else token
+    case_insensitive = dialect.case_insensitive_flags or whole_word
+    flag = token.lower() if case_insensitive else token
     out = {flag}
     # Long flags and PowerShell-style whole-word flags never bundle.
-    if flag.startswith("--") or dialect.case_insensitive_flags:
+    if flag.startswith("--") or case_insensitive:
         return out
     if len(flag) > 2 and flag[0] == "-" and flag[1] != "-" and flag[1:].isalpha():
         out.update(f"-{c}" for c in flag[1:])
     return out
+
+
+def _code_position(argv: tuple[str, ...], code_flags: tuple[str, ...], whole_word: bool) -> int | None:
+    """
+    Index in `argv` of the flag that introduces inline code: `-c`, a bundle
+    containing it (`-lc`), or for PowerShell any prefix of -Command (`-Comm`).
+    """
+    for position, token in enumerate(argv):
+        if token == "--":
+            return None
+        flag = (token.lower() if whole_word else token).partition("=")[0]
+        if flag in code_flags:
+            return position
+        if whole_word and "-command" in code_flags and len(flag) >= 2 and "-command".startswith(flag):
+            return position
+        if (not whole_word and "-c" in code_flags and flag.startswith("-")
+                and not flag.startswith("--") and flag[1:].isalpha() and "c" in flag[1:]):
+            return position
+    return None
 
 
 def _build_command(
@@ -407,21 +561,42 @@ def _build_command(
     depth: int,
     derived: bool,
     raw: str,
+    stdin: str = "",
+    piped_from: tuple[str, ...] = (),
 ) -> list[Command]:
     """Build the Command for one segment, plus any commands it wraps."""
     if not words:
         return []
 
-    # Strip leading environment assignments: `FOO=bar rm -rf x`.
+    # Strip leading environment assignments (`FOO=bar rm -rf x`) and the shell
+    # words that only introduce a command (`then rm -rf x`, `do rm -rf $d`,
+    # `! grep -q x`), which would otherwise be read as the command's name.
     idx = 0
-    if dialect.allows_env_prefix:
-        while idx < len(words) and _ASSIGNMENT.match(words[idx]):
+    while idx < len(words):
+        if dialect.allows_env_prefix and _ASSIGNMENT.match(words[idx]):
             idx += 1
-    if idx >= len(words):
+        elif dialect.name == POSIX_NAME and words[idx] in _LEADING_KEYWORDS:
+            idx += 1
+        # PowerShell `$pass = aws ecr get-login-password`: the command is aws.
+        elif (dialect.name != POSIX_NAME and _PS_ASSIGNMENT.match(words[idx])
+              and idx + 1 < len(words) and words[idx + 1] == "="):
+            idx += 2
+        elif dialect.name != POSIX_NAME and _PS_ASSIGNMENT_GLUED.match(words[idx]):
+            idx += 1
+        else:
+            break
+    if idx >= len(words) or (dialect.name == POSIX_NAME and words[idx] in _CLOSING_KEYWORDS
+                             and len(words) == idx + 1):
         return []
 
     name = _resolve_name(words[idx], dialect)
     argv = tuple(words[idx + 1:])
+
+    # powershell.exe / cmd.exe from a POSIX shell: one name, Windows flag rules.
+    host = name.lower()[:-4] if name.lower().endswith(".exe") else name.lower()
+    windows_host = host in _WINDOWS_HOSTS
+    if windows_host:
+        name = host
 
     flags: set[str] = set()
     operands: list[str] = []
@@ -449,9 +624,13 @@ def _build_command(
         if token == "--":
             end_of_flags = True
             continue
+        # cmd's switches are /c, /k, /q, /s...
+        if not end_of_flags and name == "cmd" and len(token) == 2 and token[0] == "/" and token[1].isalpha():
+            flags.add(token.lower())
+            continue
         if not end_of_flags and token.startswith("-") and len(token) > 1:
             flag, _, inline_value = token.partition("=")
-            flags.update(_expand_flag(flag, dialect))
+            flags.update(_expand_flag(flag, dialect, whole_word=windows_host))
             if inline_value:
                 operands.append(inline_value)
                 operand_positions.append(position)
@@ -468,6 +647,8 @@ def _build_command(
         redirects=tuple(redirects),
         dialect=dialect.name,
         derived=derived,
+        stdin=stdin,
+        piped_from=piped_from,
     )
     commands = [command]
 
@@ -476,23 +657,36 @@ def _build_command(
 
     # `sudo rm -rf /` is both a privilege escalation and a delete. Report both.
     # The inner command is rebuilt from the argv slice, NOT the operand list:
-    # `-rf` was consumed as sudo's flag and would otherwise be lost.
+    # `-rf` was consumed as sudo's flag and would otherwise be lost. The inner
+    # command is the one that reads the pipe and the here-document.
+    # `command -v sudo` only looks sudo up, so it wraps nothing.
     skip = _WRAPPERS.get(name)
-    if skip is not None and len(operand_positions) > skip:
+    looks_up_only = name == "command" and bool(flags & _LOOKUP_ONLY_FLAGS)
+    if skip is not None and not looks_up_only and len(operand_positions) > skip:
         inner_start = operand_positions[skip]
         inner_words = list(argv[inner_start:])
         if inner_words and inner_words != words[idx:]:
             commands += _build_command(
-                inner_words, dialect, depth + 1, True, " ".join(inner_words)
+                inner_words, dialect, depth + 1, True, " ".join(inner_words),
+                stdin=stdin, piped_from=piped_from,
             )
 
-    # `bash -c "rm -rf /"` hides a whole chain inside one operand.
+    # `bash -c "rm -rf /"` hides a whole chain inside one operand. Only the
+    # code itself is parsed: `-ExecutionPolicy Bypass` before it is not code.
     nested_flags = _NESTED_SHELLS.get(name)
-    if nested_flags and operands:
-        lowered = {f.lower() for f in flags}
-        if lowered & set(nested_flags):
-            for operand in operands:
-                commands += parse_chain(operand, dialect, _depth=depth + 1)
+    if nested_flags:
+        position = _code_position(argv, nested_flags, whole_word=windows_host)
+        if position is not None and position + 1 < len(argv):
+            code = " ".join(argv[position + 1:]) if name in _JOINED_CODE else argv[position + 1]
+            # cmd's `del` / `rd` are the same Windows names PowerShell aliases to rm.
+            nested_dialect = get_dialect("powershell") if name in _JOINED_CODE else dialect
+            commands += parse_chain(code, nested_dialect, _depth=depth + 1)
+
+    # `bash <<'EOF' ... EOF` runs its here-document; given a script or -c, the
+    # shell runs that instead and the here-document is the script's input.
+    if (stdin and name in _HEREDOC_SHELLS and "-c" not in flags
+            and (not operands or operands[0] == "-" or "-s" in flags)):
+        commands += parse_chain(stdin, dialect, _depth=depth + 1)
 
     return commands
 
@@ -517,28 +711,49 @@ def parse_chain(
     resolved = dialect if isinstance(dialect, Dialect) else get_dialect(dialect)
 
     try:
-        tokens, substitutions = _scan(command, resolved)
+        tokens, substitutions, heredoc_bodies = _scan(command, resolved)
     except Exception:
         return ()
 
     commands: list[Command] = []
     segment: list[str] = []
+    segment_stdin: list[str] = []
     seg_start: int | None = None
     seg_end = 0
+    # Pipeline bookkeeping: the names of the commands whose output flows into
+    # the next segment, so `curl x | tee f | sh` gives sh piped_from=(curl, tee).
+    pipeline: list[str] = []
+    last_names: list[str] = []
+    piped_from: tuple[str, ...] = ()
 
     def close_segment() -> None:
-        nonlocal segment, seg_start
+        nonlocal segment, segment_stdin, seg_start, last_names
         if segment and seg_start is not None:
             raw = command[seg_start:seg_end]
-            commands.extend(
-                _build_command(segment, resolved, _depth, False, raw.strip())
+            built = _build_command(
+                segment, resolved, _depth, False, raw.strip(),
+                stdin="\n".join(segment_stdin), piped_from=piped_from,
             )
+            commands.extend(built)
+            last_names = [c.command_name for c in built]
         segment = []
+        segment_stdin = []
         seg_start = None
 
     for token in tokens:
+        if token.kind == "heredoc":
+            segment_stdin.append(heredoc_bodies[int(token.value)])
+            if seg_start is not None:
+                seg_end = token.end
+            continue
         if token.kind == "op":
             close_segment()
+            if token.value in ("|", "|&"):
+                pipeline.extend(last_names)
+                piped_from = tuple(dict.fromkeys(pipeline))
+            elif token.value not in ("(", ")"):
+                # Grouping keeps the pipeline; any other separator ends it.
+                pipeline, last_names, piped_from = [], [], ()
             continue
         if seg_start is None:
             seg_start = token.start

@@ -69,18 +69,24 @@ POWERSHELL: Dialect = register_dialect(Dialect(
     case_insensitive_names=True,
     executable_suffixes=(".exe", ".cmd", ".bat", ".ps1", ".com"),
     aliases=ALIASES,
+    block_comments=("<#", "#>"),
 ))
 
 
-# Shapes that occur in PowerShell and not in POSIX.
+# Shapes that occur in PowerShell and not in POSIX. Each is anchored where it
+# can only be PowerShell: a cmdlet or `$var =` must START a statement, because
+# `git remote set-url`, `npm run test-e2e` and `[ $status = 0 ]` are bash - and
+# reading a bash chain as PowerShell stops `rm -rf src` splitting into -r -f,
+# which hides the recursive delete.
+_STATEMENT_START = r"(?:^|[;|{(\n]|&&|\|\|)\s*"
 _MARKERS = re.compile(
-    r"(?:^|[\s;|(])(?:"
-    r"\$env:"                                    # $env:PATH
-    r"|\$[A-Za-z_][A-Za-z0-9_]*\s*="             # $var = ...
-    r"|(?:Get|Set|New|Remove|Start|Stop|Invoke|Add|Copy|Move|Select|Out|Write|Test|Restart|Clear)-[A-Za-z]+"
-    r"|-(?:Recurse|Force|ErrorAction|LiteralPath|Confirm)\b"
-    r")",
-    re.IGNORECASE,
+    r"\$env:[A-Za-z_]"                                                   # $env:PATH
+    rf"|{_STATEMENT_START}\$[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_]\w*)?\s*=(?!=)"   # $var = ...
+    rf"|{_STATEMENT_START}(?i:(?:Get|Set|New|Remove|Start|Stop|Invoke|Add|Copy|Move|Select|Out|Write|"
+    r"Test|Restart|Clear|Import|Export|ConvertTo|ConvertFrom|Format|Measure|Where|ForEach|Sort|"
+    r"Join|Split|Resolve|Expand|Compress|Register|Unregister|Enable|Disable|Wait|Update|Install|"
+    r"Uninstall)-[A-Za-z]+)\b"                                           # Get-ChildItem ...
+    r"|\s-(?:Recurse|Force|ErrorAction|LiteralPath|Confirm)\b",          # case-sensitive: -Force, not -force
 )
 
 
@@ -91,5 +97,11 @@ def looks_like_powershell(command: str) -> bool:
     Deliberately one-directional: POSIX syntax is also valid PowerShell input,
     so ambiguous text stays POSIX. An adapter that knows the platform's shell
     should pass the dialect explicitly instead.
+
+    Quoted text is ignored: `rm -rf src && powershell -Command "Remove-Item x
+    -Force"` is a bash chain that happens to carry PowerShell as an argument.
     """
-    return bool(_MARKERS.search(command or ""))
+    return bool(_MARKERS.search(_QUOTED.sub(" ", command or "")))
+
+
+_QUOTED = re.compile(r"'[^']*'|\"(?:[^\"\\`]|[\\`].)*\"", re.DOTALL)

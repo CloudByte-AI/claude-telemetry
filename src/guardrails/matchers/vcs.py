@@ -16,6 +16,13 @@ from src.guardrails.toolcall import KIND_SHELL, ToolCall
 
 _GIT = frozenset({"git", "hub", "gh"})
 _FORCE_FLAGS = frozenset({"-f", "--force", "--force-with-lease", "--force-if-includes"})
+# git's global options that take a value, which the parser cannot tell from the
+# subcommand: `git -C /repo push` must still be a push, and `git -c x=y rebase`
+# a rebase.
+_GIT_VALUE_OPTIONS = frozenset({
+    "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--config-env",
+    "-R", "--repo",
+})
 
 
 @register_matcher
@@ -30,19 +37,19 @@ class ForcePushMatcher(BaseMatcher):
 
     def match(self, call: ToolCall) -> MatchResult | None:
         for command in self.commands_named(call, _GIT):
-            if not self.subcommand_is(command, "push"):
+            sub = self.operands_from_subcommand(command, _GIT_VALUE_OPTIONS)
+            if not self.starts_with_run(sub, ("push",)):
                 continue
             lowered = {f.lower() for f in command.flags}
-            if not (lowered & _FORCE_FLAGS):
+            # A `+refspec` is a force push of that ref.
+            plus_ref = any(o.startswith("+") and len(o) > 1 for o in sub[1:])
+            if not (lowered & _FORCE_FLAGS or plus_ref):
                 continue
             # --force-with-lease is the safe form: it refuses when the remote
             # moved. Reported as a fact so a profile can allow it while still
             # asking about a bare --force.
-            leased = "--force-with-lease" in lowered
-            remote = next(
-                (o for o in command.subcommand_path if o != "push"),
-                None,
-            )
+            leased = "--force-with-lease" in lowered and not ({"-f", "--force"} & lowered or plus_ref)
+            remote = sub[1] if len(sub) > 1 else None
             return self.hit(
                 target=remote,
                 command=command,
@@ -62,7 +69,9 @@ class HistoryRewriteMatcher(BaseMatcher):
     DEFAULT_ALERT = "warn"
     FACTS = ("operation_kind",)
 
-    # (token run, whether a flag is also required to make it destructive)
+    # (subcommand, whether a flag is also required to make it destructive).
+    # `restore --staged` only unstages, so it is not here; `--source` throws
+    # the working copy away for an older version.
     _REWRITES: tuple[tuple[tuple[str, ...], frozenset[str] | None], ...] = (
         (("reset",), frozenset({"--hard"})),
         (("rebase",), None),
@@ -70,16 +79,21 @@ class HistoryRewriteMatcher(BaseMatcher):
         (("filter-repo",), None),
         (("commit",), frozenset({"--amend"})),
         (("checkout",), frozenset({"--force", "-f"})),
-        (("restore",), frozenset({"--staged", "--source"})),
+        (("restore",), frozenset({"--source", "-s"})),
     )
+    # Steering a rebase already under way rewrites nothing new.
+    _REBASE_CONTROL = frozenset({"--abort", "--quit", "--continue", "--skip", "--edit-todo", "--show-current-patch"})
 
     def match(self, call: ToolCall) -> MatchResult | None:
         for command in self.commands_named(call, _GIT):
+            sub = self.operands_from_subcommand(command, _GIT_VALUE_OPTIONS)
             lowered = {f.lower() for f in command.flags}
             for run, required_flags in self._REWRITES:
-                if not self.has_token_run(command.subcommand_path, run):
+                if not self.starts_with_run(sub, run):
                     continue
                 if required_flags and not (lowered & required_flags):
+                    continue
+                if run == ("rebase",) and lowered & self._REBASE_CONTROL:
                     continue
                 return self.hit(
                     target=run[0],
@@ -102,22 +116,22 @@ class BranchDeleteMatcher(BaseMatcher):
     def match(self, call: ToolCall) -> MatchResult | None:
         for command in self.commands_named(call, _GIT):
             lowered = {f.lower() for f in command.flags}
-            path = command.subcommand_path
+            sub = self.operands_from_subcommand(command, _GIT_VALUE_OPTIONS)
 
             # git branch -d / -D  (note: -D is force, and the parser preserves
             # case on POSIX, so both spellings are checked explicitly)
-            if self.has_token_run(path, ("branch",)) and (
+            if self.starts_with_run(sub, ("branch",)) and (
                 {"-d", "-D", "--delete"} & (set(command.flags) | lowered)
             ):
-                branch = next((o for o in path if o != "branch"), None)
+                branch = sub[1] if len(sub) > 1 else None
                 return self.hit(target=branch, command=command, remote=False, branch=branch)
 
             # git push origin --delete <branch>   /   git push origin :<branch>
-            if self.has_token_run(path, ("push",)):
-                if "--delete" in lowered:
-                    branch = next((o for o in path if o not in ("push",)), None)
+            if self.starts_with_run(sub, ("push",)):
+                if "--delete" in lowered or "-d" in command.flags:
+                    branch = sub[-1] if len(sub) > 2 else None
                     return self.hit(target=branch, command=command, remote=True, branch=branch)
-                colon_ref = next((o for o in path if o.startswith(":") and len(o) > 1), None)
+                colon_ref = next((o for o in sub[1:] if o.startswith(":") and len(o) > 1), None)
                 if colon_ref:
                     return self.hit(
                         target=colon_ref[1:], command=command, remote=True, branch=colon_ref[1:]

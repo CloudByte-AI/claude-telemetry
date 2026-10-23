@@ -67,7 +67,6 @@ _RESERVED: tuple[tuple[str, str, str, tuple[str, ...], str, str], ...] = (
     ("net.tunnel", "net", "Opens a tunnel or port forward", _SHELL, "ask", "warn"),
     ("net.scan", "net", "Scans hosts or ports", _SHELL, "ask", "warn"),
     # ── db ────────────────────────────────────────────────────────────────
-    ("db.truncate", "db", "Empties a table", _SHELL, "ask", "critical"),
     ("db.bulk_delete", "db", "Deletes many rows in one statement", _SHELL, "ask", "warn"),
     ("db.migration", "db", "Runs a schema migration", _SHELL, "allow", "warn"),
     ("db.grant", "db", "Grants or revokes database privileges", _SHELL, "ask", "warn"),
