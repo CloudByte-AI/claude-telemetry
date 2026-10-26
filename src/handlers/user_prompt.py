@@ -343,6 +343,11 @@ def handle_user_prompt():
         )
         event_uuid = hook_data.get("uuid") or hook_data.get("id")
         event_timestamp = hook_data.get("timestamp") or hook_data.get("time")
+        # Claude Code's own id for this turn (2.1.196+; absent before). A blocked
+        # prompt is never stored, so its security event carries this to say
+        # which turn it was.
+        _hook_prompt_id = hook_data.get("prompt_id")
+        turn_prompt_id = _hook_prompt_id if isinstance(_hook_prompt_id, str) and _hook_prompt_id else None
 
         # ── Heartbeat this session in the shared active-session registry ─────
         # Uses register() (not a separate "touch if exists" call) so a session
@@ -431,6 +436,7 @@ def handle_user_prompt():
                         blocked=True,
                         masked_text=_masked,
                         platform="claude_code",
+                        prompt_id=turn_prompt_id,
                         config=_sec_cfg,
                         session_root=os.environ.get("CLAUDE_PROJECT_DIR") or cwd,
                     )
