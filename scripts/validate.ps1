@@ -208,6 +208,26 @@ if ($systemPython) {
     Write-Host "     Your default python is $($systemPython -replace 'Python ', '') - it will not be changed"
 }
 
+# Smart App Control (Windows 11) starts only programs that are signed or that
+# Microsoft already trusts. The Pythons `uv python install` downloads are not
+# signed, so on such a machine every plugin hook would die before any plugin
+# code runs. python.org's installer is signed, so it is used instead.
+# VerifiedAndReputablePolicyState: 0 off, 1 on, 2 evaluation (does not block).
+function Test-SmartAppControl {
+    try {
+        $state = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy" `
+            -Name "VerifiedAndReputablePolicyState" -ErrorAction Stop).VerifiedAndReputablePolicyState
+        return ($state -eq 1)
+    }
+    catch { return $false }
+}
+
+$SacOn = Test-SmartAppControl
+if ($SacOn) {
+    log "Smart App Control is on - only a Python that Windows allows to run will be used"
+    Write-Host "     Smart App Control is on - a signed Python from python.org will be used"
+}
+
 function Find-Python312 {
     # --no-project  so a pyproject.toml in the working directory cannot redirect
     #               the answer to an unrelated project environment
@@ -215,10 +235,24 @@ function Find-Python312 {
     #               interpreter; a venv cannot be used as a base for building
     #               the plugin's own environment. uv-managed installs are still
     #               included, only virtualenvs are excluded.
-    $out = Invoke-Native "uv" @("python", "find", $PY_TARGET, "--no-project", "--system")
+    $findArgs = @("python", "find", $PY_TARGET, "--no-project", "--system")
+    # Under Smart App Control a uv-managed install is never an answer, even one
+    # that is already on disk: Windows refuses to start it.
+    if ($SacOn) { $findArgs += @("--python-preference", "only-system") }
+    $out = Invoke-Native "uv" $findArgs
     if ($script:LastNativeExit -eq 0) {
         $path = $out.Trim()
-        if ($path -and (Test-Path $path)) { return $path }
+        if ($path -and (Test-Path $path)) {
+            # Found is not the same as allowed to run: prove it.
+            if ($SacOn) {
+                $null = Invoke-Native $path @("-c", "0")
+                if ($script:LastNativeExit -ne 0) {
+                    log "Python at $path is blocked from running (exit $($script:LastNativeExit))"
+                    return $null
+                }
+            }
+            return $path
+        }
     }
     return $null
 }
@@ -412,7 +446,12 @@ else {
     log "No Python $PY_TARGET found - provisioning"
 
     $uvInstallOk = $false
-    try { $uvInstallOk = Install-PythonViaUv } catch { log "uv python install threw: $_"; $uvInstallOk = $false }
+    if ($SacOn) {
+        log "Smart App Control is on - skipping uv python install (its builds are unsigned)"
+    }
+    else {
+        try { $uvInstallOk = Install-PythonViaUv } catch { log "uv python install threw: $_"; $uvInstallOk = $false }
+    }
     $global:LASTEXITCODE = 0
 
     if ($uvInstallOk) { $pythonPath = Find-Python312 }
@@ -441,9 +480,15 @@ else {
     # through the Windows registry.
     $directOk = $false
     if (-not $pythonPath) {
-        log "uv could not download Python - falling back to a system install"
         Write-Host ""
-        Write-Host "[WARN] uv could not download Python $PY_TARGET - trying a system install..."
+        if ($SacOn) {
+            log "Smart App Control is on - installing signed Python from python.org"
+            Write-Host "Installing a signed Python $PY_TARGET from python.org..."
+        }
+        else {
+            log "uv could not download Python - falling back to a system install"
+            Write-Host "[WARN] uv could not download Python $PY_TARGET - trying a system install..."
+        }
 
         try { $directOk = Install-Python-Via-Direct-Download } catch { $directOk = $false }
         $global:LASTEXITCODE = 0
@@ -467,8 +512,14 @@ else {
         log "All Python provisioning methods failed"
         Write-Host ""
         Write-Host "[FAIL] Could not provide Python $PY_TARGET"
-        Write-Host "Install it manually with either:"
-        Write-Host "  uv python install $PY_TARGET"
+        if ($SacOn) {
+            # A uv-managed Python would be blocked by Smart App Control too.
+            Write-Host "Install it manually from python.org (its installer is signed):"
+        }
+        else {
+            Write-Host "Install it manually with either:"
+            Write-Host "  uv python install $PY_TARGET"
+        }
         Write-Host "  https://www.python.org/downloads/"
         Write-Host "Then re-run the installer."
         exit 1
