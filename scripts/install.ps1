@@ -873,6 +873,45 @@ function Test-EnvStale {
     return $false
 }
 
+# Smart App Control (Windows 11) starts only programs that are signed or that
+# Microsoft already trusts. Older installs built the plugin environment on a
+# uv-downloaded Python, which is unsigned, so on such a machine every hook dies
+# before any plugin code runs. Same check as validate.ps1.
+# VerifiedAndReputablePolicyState: 0 off, 1 on, 2 evaluation (does not block).
+function Test-SmartAppControl {
+    try {
+        $state = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy" `
+            -Name "VerifiedAndReputablePolicyState" -ErrorAction Stop).VerifiedAndReputablePolicyState
+        return ($state -eq 1)
+    }
+    catch { return $false }
+}
+
+# Condition 3 of the uv sync check, Smart App Control only: will Windows start
+# the environment's own python at all? Neither condition above can see this -
+# the environment is complete and current, it just cannot run.
+function Test-EnvBlocked {
+    param([string] $Dir)
+
+    $py = Join-Path $Dir ".venv\Scripts\python.exe"
+    if (-not (Test-Path $py)) { return $false }
+    $null = Invoke-Native $py @("-c", "0")
+    return ($script:LastNativeExit -ne 0)
+}
+
+# A Python 3.12 that is installed system-wide (python.org, never a uv download)
+# and that Windows actually starts. $null when there is none.
+function Find-RunnablePython312 {
+    $out = Invoke-Native "uv" @("python", "find", "3.12", "--no-project", "--system",
+                                "--python-preference", "only-system")
+    if ($script:LastNativeExit -ne 0) { return $null }
+    $path = $out.Trim()
+    if (-not $path -or -not (Test-Path $path)) { return $null }
+    $null = Invoke-Native $path @("-c", "0")
+    if ($script:LastNativeExit -ne 0) { return $null }
+    return $path
+}
+
 # Ask the user to confirm a manual IDE step, then verify it actually happened.
 #
 # This deliberately does NOT poll blindly for a fixed timeout. A fixed wait is
@@ -1342,21 +1381,39 @@ function Invoke-PluginSync {
     # sufficient alone: a .venv can exist without an interpreter (interrupted
     # build), and a complete .venv can be older than the uv.lock it was built
     # from (plugin upgraded in place).
-    $built = Test-BuiltEnv $Dir
-    $stale = Test-EnvStale $Dir
+    $built   = Test-BuiltEnv $Dir
+    $stale   = Test-EnvStale $Dir
+    $blocked = $built -and $script:SacOn -and (Test-EnvBlocked $Dir)
 
-    if ($built -and -not $stale) {
+    if ($built -and -not $stale -and -not $blocked) {
         SayOk "${Name}: dependencies already installed and up to date"
         Say  "  Location: $Dir"
         return $true
     }
-    if ($built) { Say "${Name}: dependencies changed since the last install - updating them" }
-    else        { Say "${Name}: installing dependencies for the first time" }
+    if ($blocked)   { Say "${Name}: Windows Smart App Control blocks this environment's Python - rebuilding it" }
+    elseif ($built) { Say "${Name}: dependencies changed since the last install - updating them" }
+    else            { Say "${Name}: installing dependencies for the first time" }
 
     Say "  Location: $Dir"
     Say "  This downloads Python packages and can take a minute the first time..."
 
-    $syncArgs = @("sync", "--frozen", "--python", "3.12", "--directory", $Dir)
+    # Under Smart App Control the environment must be built on a Python Windows
+    # will start: name it explicitly, or uv may pick its own unsigned download.
+    $pyArg = "3.12"
+    if ($script:SacOn) {
+        $runnable = Find-RunnablePython312
+        if ($runnable) { $pyArg = $runnable }
+        else { SayWarn "${Name}: Smart App Control is on but no signed Python 3.12 was found - re-run without -SkipPrereqs" }
+    }
+
+    # uv cannot query an interpreter Windows refuses to start, so it cannot
+    # rebuild in place: remove the environment first. Nothing can hold it open,
+    # because nothing could start its python.
+    if ($blocked -and $pyArg -ne "3.12") {
+        Remove-Item -Path (Join-Path $Dir ".venv") -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    $syncArgs = @("sync", "--frozen", "--python", $pyArg, "--directory", $Dir)
 
     # An inherited VIRTUAL_ENV from the caller's shell makes uv warn and target
     # the wrong environment - hide it for the duration of the sync.
@@ -1397,6 +1454,9 @@ function Invoke-PluginSync {
     Write-Host "         uv sync --frozen --python 3.12 --directory `"$Dir`""
     return $false
 }
+
+$script:SacOn = Test-SmartAppControl
+if ($script:SacOn) { log "Smart App Control is on - plugin environments must run on a signed Python" }
 
 $uvAvailable = Test-Command "uv"
 if (-not $uvAvailable) {
