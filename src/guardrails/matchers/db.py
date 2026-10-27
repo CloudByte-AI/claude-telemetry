@@ -10,14 +10,68 @@ from __future__ import annotations
 
 import re
 
-from src.guardrails.matchers.base import BaseMatcher, MatchResult
+from src.guardrails.matchers.base import BaseMatcher, MatchResult, remote_runs, targets_production
 from src.guardrails.registry import register_matcher
-from src.guardrails.toolcall import KIND_SHELL, ToolCall
+from src.guardrails.toolcall import KIND_MCP, KIND_SHELL, ToolCall
 
 _CLIENTS = frozenset({
     "psql", "mysql", "mysqladmin", "mariadb", "sqlite3", "mongo", "mongosh",
     "redis-cli", "clickhouse-client", "cockroach", "sqlcmd", "prisma", "flyway",
 })
+# Command-line tools that drop a whole database or role on their own.
+_DROP_COMMANDS = {"dropdb": "database", "dropuser": "role"}
+
+# MCP tools that send SQL: a tool named for SQL or queries, with the statement
+# in one of these arguments.
+_SQL_TOOL_WORDS = frozenset({"sql", "query", "execute", "statement", "statements"})
+_SQL_ARGUMENTS = ("sql", "query", "statement", "statements", "sqlQuery", "sql_query")
+# Servers whose `query` is a log or metrics query, not SQL.
+_NOT_SQL_SERVERS = re.compile(r"datadog|logs|metrics|grafana|prometheus|sentry|splunk|elastic", re.IGNORECASE)
+_WORD_SPLIT = re.compile(r"[a-z0-9]+")
+
+
+def _mcp_sql(call: ToolCall) -> str | None:
+    """The SQL an MCP tool call sends, or None."""
+    if call.kind != KIND_MCP or not isinstance(call.raw_input, dict):
+        return None
+    if _NOT_SQL_SERVERS.search(call.mcp_server or "") or _NOT_SQL_SERVERS.search(call.mcp_tool or ""):
+        return None
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", call.mcp_tool or "").lower()
+    if not set(_WORD_SPLIT.findall(spaced)) & _SQL_TOOL_WORDS:
+        return None
+    parts = []
+    for key in _SQL_ARGUMENTS:
+        value = call.raw_input.get(key)
+        if isinstance(value, str):
+            parts.append(value)
+        elif isinstance(value, list):
+            parts.extend(str(v) for v in value if isinstance(v, str))
+    return "\n;".join(parts) or None
+
+
+def _sql_sources(call: ToolCall) -> list[tuple[str, str, str, object]]:
+    """
+    (sql, client, channel, command) for every place this call sends SQL: a
+    database client's arguments and here-document (channel `client`), a client
+    run inside a container or on another machine (`docker_exec`,
+    `kubectl_exec`, `ssh`; the command is the wrapper), and an MCP SQL tool
+    (`mcp`, no command).
+    """
+    sources: list[tuple[str, str, str, object]] = []
+    for command in call.commands:
+        if command.command_name in _CLIENTS:
+            for text in _sql_texts(command):
+                sources.append((text, command.command_name, "client", command))
+    for run in remote_runs(call):
+        for inner in run.commands:
+            if inner.command_name in _CLIENTS:
+                for text in _sql_texts(inner):
+                    sources.append((text, inner.command_name, run.channel, run.wrapper))
+    sql = _mcp_sql(call)
+    if sql:
+        server = (call.mcp_server or "").removeprefix("mcp__").removesuffix("__") or "mcp"
+        sources.append((sql, server, "mcp", None))
+    return sources
 
 _DROP = re.compile(r"\bdrop\s+(database|schema|table|index|view|collection)\b", re.IGNORECASE)
 # TRUNCATE as a statement: at the start of the SQL or after `;`, so a
@@ -49,26 +103,39 @@ class DatabaseDropMatcher(BaseMatcher):
     OPERATION = "db.drop"
     DOMAIN = "db"
     DESCRIPTION = "Drops a database, schema, table or collection"
-    APPLIES_TO = (KIND_SHELL,)
+    APPLIES_TO = (KIND_SHELL, KIND_MCP)
     DEFAULT_ACTION = "ask"
     DEFAULT_ALERT = "critical"
-    FACTS = ("object_type", "client")
+    # channel: client (a database client run here), docker_exec,
+    # kubectl_exec, ssh (a client run in a container or on another machine),
+    # mcp (an MCP SQL tool) or command (dropdb, dropuser).
+    FACTS = ("object_type", "client", "channel", "production")
 
     def match(self, call: ToolCall) -> MatchResult | None:
         for command in call.commands:
-            if command.command_name not in _CLIENTS:
-                continue
-            for text in _sql_texts(command):
-                found = _DROP.search(text)
-                if found:
-                    return self.hit(
-                        target=found.group(1).lower(),
-                        evidence=found.group(0),
-                        command=command,
-                        object_type=found.group(1).lower(),
-                        client=command.command_name,
-                    )
+            object_type = _DROP_COMMANDS.get(command.command_name)
+            if object_type and command.subcommand_path:
+                return self.hit(target=command.subcommand_path[-1], command=command, object_type=object_type,
+                                client=command.command_name, channel="command",
+                                production=targets_production(command, call))
+        for text, client, channel, command in _sql_sources(call):
+            found = _DROP.search(text)
+            if found:
+                return self.hit(
+                    target=found.group(1).lower(),
+                    evidence=found.group(0),
+                    command=command,
+                    object_type=found.group(1).lower(),
+                    client=client,
+                    channel=channel,
+                    production=bool(command is not None and targets_production(command, call)),
+                )
         return None
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        return f"drop a {result.facts.get('object_type')} ({result.facts.get('client')})" \
+               f"{' (production)' if result.facts.get('production') else ''}"
 
 
 @register_matcher
@@ -76,27 +143,139 @@ class DatabaseTruncateMatcher(BaseMatcher):
     OPERATION = "db.truncate"
     DOMAIN = "db"
     DESCRIPTION = "Empties a table (SQL TRUNCATE sent to a database client)"
-    APPLIES_TO = (KIND_SHELL,)
+    APPLIES_TO = (KIND_SHELL, KIND_MCP)
     DEFAULT_ACTION = "ask"
     DEFAULT_ALERT = "critical"
-    FACTS = ("table", "client")
+    FACTS = ("table", "client", "channel", "production")
 
     def match(self, call: ToolCall) -> MatchResult | None:
-        for command in call.commands:
-            if command.command_name not in _CLIENTS:
-                continue
-            for text in _sql_texts(command):
-                found = _TRUNCATE.search(text)
-                if found:
-                    table = found.group(1).strip("`\"[]")
-                    return self.hit(
-                        target=table,
-                        evidence=found.group(0).strip().lstrip(";").strip(),
-                        command=command,
-                        table=table,
-                        client=command.command_name,
-                    )
+        for text, client, channel, command in _sql_sources(call):
+            found = _TRUNCATE.search(text)
+            if found:
+                table = found.group(1).strip("`\"[]")
+                return self.hit(
+                    target=table,
+                    evidence=found.group(0).strip().lstrip(";").strip(),
+                    command=command,
+                    table=table,
+                    client=client,
+                    channel=channel,
+                    production=bool(command is not None and targets_production(command, call)),
+                )
         return None
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        return f"empty table {result.facts.get('table')}" \
+               f"{' (production)' if result.facts.get('production') else ''}"
+
+
+# One SQL statement at a time: split on `;` (good enough for statements sent
+# from a command line; a `;` inside a string literal only splits a statement
+# further, which can hide a WHERE but never invent one).
+_STATEMENTS = re.compile(r";")
+_DELETE_ALL = re.compile(r"^\s*delete\s+from\s+([`\"\[]?[\w.$]+[`\"\]]?)\s*(?:as\s+\w+\s*)?$", re.IGNORECASE | re.DOTALL)
+_UPDATE_ALL = re.compile(r"^\s*update\s+([`\"\[]?[\w.$]+[`\"\]]?)\s+set\s+(?:(?!\bwhere\b).)*$", re.IGNORECASE | re.DOTALL)
+_REDIS_FLUSH = frozenset({"flushall", "flushdb"})
+_MONGO_DELETE_ALL = re.compile(r"\.(?:deleteMany|remove)\s*\(\s*\{\s*\}\s*\)")
+
+
+def _bulk_statement(text: str) -> tuple[str, str] | None:
+    """(statement, table) for a DELETE or UPDATE with no WHERE, or a delete-everything call."""
+    if _MONGO_DELETE_ALL.search(text):
+        return "delete", "collection"
+    for statement in _STATEMENTS.split(text):
+        cleaned = re.sub(r"--[^\n]*", "", statement).strip()
+        found = _DELETE_ALL.match(cleaned)
+        if found:
+            return "delete", found.group(1).strip("`\"[]")
+        found = _UPDATE_ALL.match(cleaned)
+        if found:
+            return "update", found.group(1).strip("`\"[]")
+    return None
+
+
+@register_matcher
+class BulkDeleteMatcher(BaseMatcher):
+    OPERATION = "db.bulk_delete"
+    DOMAIN = "db"
+    DESCRIPTION = "Deletes or overwrites every row in one statement (no WHERE)"
+    APPLIES_TO = (KIND_SHELL, KIND_MCP)
+    DEFAULT_ACTION = "ask"
+    DEFAULT_ALERT = "warn"
+    # statement: delete (DELETE FROM t, deleteMany({})), update (UPDATE t SET
+    # ... with no WHERE) or flush (redis FLUSHALL / FLUSHDB). table: the table.
+    FACTS = ("statement", "table", "client", "channel", "production")
+
+    def match(self, call: ToolCall) -> MatchResult | None:
+        for command in self.commands_named(call, ("redis-cli",)):
+            flush = next((a for a in command.subcommand_path if a.lower() in _REDIS_FLUSH), None)
+            if flush:
+                return self.hit(target=flush.upper(), command=command, statement="flush", table=None,
+                                client="redis-cli", channel="client", production=targets_production(command, call))
+        for text, client, channel, command in _sql_sources(call):
+            if client == "redis-cli" and any(w.lower() in _REDIS_FLUSH for w in text.split()):
+                return self.hit(target="FLUSH", command=command, statement="flush", table=None, client=client,
+                                channel=channel, production=bool(command is not None and targets_production(command, call)))
+            found = _bulk_statement(text)
+            if found:
+                statement, table = found
+                return self.hit(target=table, evidence=text[:200], command=command, statement=statement, table=table,
+                                client=client, channel=channel,
+                                production=bool(command is not None and targets_production(command, call)))
+        return None
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        facts = result.facts
+        if facts.get("statement") == "flush":
+            return "delete every key (redis)"
+        verb = "delete every row of" if facts.get("statement") == "delete" else "overwrite every row of"
+        return f"{verb} {facts.get('table')}{' (production)' if facts.get('production') else ''}"
+
+
+# A statement that changes data or schema, at the start of a statement.
+_WRITE = re.compile(
+    r"(?:^|;|\()\s*(insert\s+into|update\s+[`\"\[]?[\w.$]+[`\"\]]?\s+set|delete\s+from|merge\s+into|upsert|"
+    r"replace\s+into|alter\s+(?:table|database|schema|index|view|user|role|type|sequence)|"
+    r"create\s+(?:or\s+replace\s+)?(?:unique\s+)?(?:table|index|schema|view|database|function|procedure|trigger|"
+    r"extension|policy|role|user|type|sequence|materialized\s+view)|drop\s+\w+|truncate\s+|grant\s+|revoke\s+|"
+    r"rename\s+table|comment\s+on|copy\s+[\w.\"]+\s+from)",
+    re.IGNORECASE | re.MULTILINE,
+)
+_ROLLED_BACK = re.compile(r"(?:^|;)\s*rollback\s*;?\s*$", re.IGNORECASE)
+
+
+@register_matcher
+class DatabaseWriteMatcher(BaseMatcher):
+    OPERATION = "db.write"
+    DOMAIN = "db"
+    DESCRIPTION = "Changes data or schema in a database (INSERT, UPDATE, DELETE, DDL)"
+    APPLIES_TO = (KIND_SHELL, KIND_MCP)
+    DEFAULT_ACTION = "allow"
+    DEFAULT_ALERT = "warn"
+    # statement: the first changing statement's verb (insert, update, delete,
+    # create, alter, drop, grant...). channel: as for db.drop. production: the
+    # client, container, pod or host named is a production one. rolled_back:
+    # the SQL ends in ROLLBACK, a rehearsal that keeps nothing.
+    FACTS = ("statement", "client", "channel", "production", "rolled_back")
+
+    def match(self, call: ToolCall) -> MatchResult | None:
+        for text, client, channel, command in _sql_sources(call):
+            found = _WRITE.search(text)
+            if found:
+                statement = found.group(1).split()[0].lower()
+                return self.hit(target=client, evidence=found.group(0).strip(" ;(")[:120], command=command,
+                                statement=statement, client=client, channel=channel,
+                                production=bool(command is not None and targets_production(command, call)),
+                                rolled_back=bool(_ROLLED_BACK.search(text.strip())))
+        return None
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        facts = result.facts
+        where = " in a production database" if facts.get("production") else ""
+        return f"run SQL {str(facts.get('statement', '')).upper()}{where} ({facts.get('client')})"
 
 
 @register_matcher
@@ -228,6 +407,11 @@ class MigrationMatcher(BaseMatcher):
     # up (apply), down (revert), reset (drop and rebuild - destroys data) or
     # push (sync the schema directly, without migration files).
     FACTS = ("tool", "direction")
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        words = {"up": "apply", "down": "revert", "reset": "reset", "push": "push"}
+        return f"{words.get(result.facts.get('direction'), 'run')} database migrations ({result.facts.get('tool')})"
 
     def match(self, call: ToolCall) -> MatchResult | None:
         for command in call.commands:

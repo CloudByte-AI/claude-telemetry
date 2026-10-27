@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 
-from src.guardrails.matchers.base import BaseMatcher, MatchResult
+from src.guardrails.matchers.base import BaseMatcher, MatchResult, remote_runs
 from src.guardrails.registry import register_matcher
 from src.guardrails.toolcall import KIND_SHELL, ToolCall
 
@@ -30,21 +30,51 @@ class CredentialReadMatcher(BaseMatcher):
     APPLIES_TO = (KIND_SHELL,)
     DEFAULT_ACTION = "ask"
     DEFAULT_ALERT = "warn"
-    FACTS = ("provider",)
+    # provider: the tool that prints it (aws, az, kubectl, git...), or
+    # `environment` for a dump of every environment variable. scope: one
+    # (a named secret or token) or all (every variable at once). filtered: the
+    # dump is piped through a filter (grep, findstr, Select-String), so only
+    # matching variables are printed.
+    FACTS = ("provider", "scope", "filtered")
 
     # command name -> token runs whose purpose is to emit a secret
     _SECRET_COMMANDS: dict[str, tuple[tuple[str, ...], ...]] = {
         "aws": (("sts", "get-session-token"), ("secretsmanager", "get-secret-value"),
-                ("ssm", "get-parameter"), ("ecr", "get-login-password")),
+                ("ssm", "get-parameter"), ("ecr", "get-login-password"), ("ssm", "get-parameters"),
+                ("ssm", "get-parameters-by-path"), ("sts", "assume-role"), ("sts", "get-federation-token"),
+                ("sts", "assume-role-with-web-identity"), ("sts", "assume-role-with-saml"),
+                ("configure", "export-credentials"), ("kms", "decrypt"), ("iam", "create-access-key"),
+                ("ecr-public", "get-login-password"), ("ecr", "get-authorization-token"),
+                ("codeartifact", "get-authorization-token"), ("rds", "generate-db-auth-token"),
+                ("sso", "get-role-credentials"), ("lambda", "get-function-configuration")),
         "gcloud": (("auth", "print-access-token"), ("auth", "print-identity-token"),
-                   ("secrets", "versions", "access")),
-        "az": (("account", "get-access-token"), ("keyvault", "secret", "show")),
-        "kubectl": (("get", "secret"), ("get", "secrets")),
+                   ("secrets", "versions", "access"), ("auth", "application-default", "print-access-token")),
+        "az": (("account", "get-access-token"), ("keyvault", "secret", "show"), ("keyvault", "secret", "download"),
+               ("storage", "account", "keys", "list"), ("storage", "account", "show-connection-string"),
+               ("storage", "account", "generate-sas"), ("storage", "container", "generate-sas"),
+               ("storage", "blob", "generate-sas"), ("acr", "credential", "show"), ("redis", "list-keys"),
+               ("redisenterprise", "database", "list-keys"), ("cosmosdb", "keys", "list"),
+               ("webapp", "config", "appsettings", "list"), ("functionapp", "config", "appsettings", "list"),
+               ("webapp", "deployment", "list-publishing-credentials"),
+               ("webapp", "deployment", "list-publishing-profiles"), ("containerapp", "secret", "show"),
+               ("containerapp", "secret", "list"), ("cognitiveservices", "account", "keys", "list"),
+               ("search", "admin-key", "show"), ("appconfig", "credential", "list"),
+               ("servicebus", "namespace", "authorization-rule", "keys", "list"),
+               ("eventhubs", "namespace", "authorization-rule", "keys", "list")),
+        "kubectl": (("get", "secret"), ("get", "secrets"), ("config", "view"), ("create", "token")),
         "vault": (("read",), ("kv", "get")),
-        "doppler": (("secrets", "download"),),
+        "doppler": (("secrets", "download"), ("secrets", "get")),
         "op": (("read",), ("item", "get")),
-        "gh": (("auth", "token"),),
-        "heroku": (("config",),),
+        "gh": (("auth", "token"), ("auth", "status")),
+        "heroku": (("config",), ("config:get",), ("auth:token",)),
+        "supabase": (("projects", "api-keys"),),
+        "vercel": (("env", "pull"),),
+        "railway": (("variables",),),
+        "bw": (("get",),),
+        "infisical": (("secrets",), ("export",)),
+        "git": (("credential", "fill"),),
+        "docker": (("inspect",),),
+        "podman": (("inspect",),),
     }
     # `docker login` stores a credential (its own operation) but prints none.
 
@@ -58,13 +88,30 @@ class CredentialReadMatcher(BaseMatcher):
         "doppler": frozenset({"-p", "--project", "-c", "--config", "--token"}),
         "gh": frozenset({"-R", "--repo", "--hostname"}),
         "heroku": frozenset(),
+        "supabase": frozenset({"--workdir", "--profile"}),
+        "vercel": frozenset({"--cwd", "--scope", "--token", "-t", "-A", "--local-config"}),
+        "railway": frozenset(),
+        "bw": frozenset({"--session"}),
+        "infisical": frozenset({"--domain", "--token"}),
+        "git": frozenset({"-C", "-c", "--git-dir", "--work-tree"}),
+        "docker": frozenset({"-H", "--host", "--context", "--config"}),
+        "podman": frozenset({"--url", "--connection"}),
     }
     # `kubectl get secret` alone lists names, types and key counts; only an
     # output format prints the (base64) values.
     _QUIET_OUTPUTS = frozenset({"name", "wide"})
+    # A `--query` (aws, az) that selects none of these prints names or ids, not a secret.
+    _VALUE_WORDS = re.compile(
+        r"value|key|password|secret|token|connection|credential|sas|primary|secondary|env|data|string|plaintext",
+        re.IGNORECASE)
+    # aws configure get <name>: only these names are secrets.
+    _SECRET_SETTING = re.compile(r"secret|session_token|access_key", re.IGNORECASE)
 
     def match(self, call: ToolCall) -> MatchResult | None:
         for command in call.commands:
+            if command.command_name == "aws" and self._aws_configure_get(command):
+                return self.hit(target="aws configure get", command=command, provider="aws",
+                                scope="one", filtered=False)
             runs = self._SECRET_COMMANDS.get(command.command_name)
             if not runs:
                 continue
@@ -76,14 +123,93 @@ class CredentialReadMatcher(BaseMatcher):
                          else self.has_token_run(path, run))
                 if not found:
                     continue
-                if command.command_name == "kubectl" and not self._prints_values(command):
+                if not self._prints(command, run):
                     continue
                 return self.hit(
                     target=f"{command.command_name} {' '.join(run)}",
                     command=command,
                     provider=command.command_name,
+                    scope="one",
+                    filtered=False,
                 )
+        for run in remote_runs(call):
+            for inner in run.commands:
+                if self._dumps_environment(inner) or inner.command_name == "printenv":
+                    return self.hit(target=f"{run.wrapper.command_name} exec {inner.command_name}",
+                                    command=run.wrapper, provider=run.wrapper.command_name,
+                                    scope="all" if not inner.subcommand_path else "one",
+                                    filtered=self._filtered(run.commands, inner) or self._filtered(call.commands,
+                                                                                                    run.wrapper))
+        for command in call.commands:
+            if self._dumps_environment(command):
+                return self.hit(target="environment", command=command, provider="environment", scope="all",
+                                filtered=self._filtered(call.commands, command))
         return None
+
+    def _prints(self, command, run) -> bool:
+        """Whether this run, with these options, prints the secret rather than a name or an id."""
+        name = command.command_name
+        argv = command.argv
+        if name == "kubectl":
+            if run == ("config", "view"):
+                return bool({"--raw", "--flatten"} & set(argv))
+            if run == ("create", "token"):
+                return True
+            return self._prints_values(command)
+        if name == "gh" and run == ("auth", "status"):
+            return bool({"--show-token", "-t"} & set(argv))
+        if name in ("docker", "podman"):
+            template = self._value(argv, ("-f", "--format"))
+            return bool(template and re.search(r"\.Config\.Env|\.Env\b", template))
+        if run == ("containerapp", "secret", "list"):
+            return "--show-values" in argv
+        if name in ("aws", "az"):
+            query = self._value(argv, ("--query",))
+            if query is not None and not self._VALUE_WORDS.search(query):
+                return False
+        return True
+
+    @staticmethod
+    def _value(argv, names: tuple[str, ...]) -> str | None:
+        for i, token in enumerate(argv):
+            option, eq, value = token.partition("=")
+            if option in names:
+                return value if eq else (argv[i + 1] if i + 1 < len(argv) else None)
+        return None
+
+    def _aws_configure_get(self, command) -> bool:
+        path = self.operands_from_subcommand(command, frozenset({"--profile", "--region"}))
+        return self.starts_with_run(path, ("configure", "get")) and len(path) > 2 \
+            and bool(self._SECRET_SETTING.search(path[2]))
+
+    @staticmethod
+    def _dumps_environment(command) -> bool:
+        """`env`, `printenv`, `export -p`, `Get-ChildItem env:` with nothing narrowing them."""
+        name = command.command_name.lower()
+        operands = command.subcommand_path
+        if name in ("env", "printenv") and not operands and not command.flags - {"-0", "--null"}:
+            return True
+        if name in ("export", "declare") and not operands and command.flags & {"-p", "-x"}:
+            return True
+        if name in ("get-childitem", "gci", "dir", "ls") and len(operands) == 1 \
+                and operands[0].lower().rstrip("\\/") in ("env:", "env:*"):
+            return True
+        return False
+
+    @staticmethod
+    def _filtered(commands, command) -> bool:
+        """Whether a later command in the same pipeline filters or cuts what this one prints."""
+        name = command.command_name
+        return any(name in later.piped_from and later.command_name.lower() in (
+            "grep", "egrep", "rg", "findstr", "select-string", "sls", "awk", "sed", "head", "where-object",
+            "cut", "sort", "wc") for later in commands)
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        facts = result.facts
+        if facts.get("provider") == "environment":
+            return "print environment variables" + (" (filtered)" if facts.get("filtered") else " (all of them)")
+        return f"print a secret ({result.target})"
 
     # Formats that print what an expression selects. They print secret values
     # only when it selects the data (`{.data.password}`), not names or types
@@ -182,6 +308,12 @@ class AuditDisableMatcher(BaseMatcher):
     # area: shell_history, audit or system_log. technique: unset, disable,
     # clear or stop. Reading a history setting (`echo $HISTFILE`) is not this.
     FACTS = ("area", "technique")
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        area = {"shell_history": "shell history", "audit": "auditing", "system_log": "system logs"}
+        verb = {"unset": "turn off", "disable": "turn off", "clear": "clear", "stop": "stop"}
+        return f"{verb.get(result.facts.get('technique'), 'turn off')} {area.get(result.facts.get('area'), 'logging')}"
 
     def match(self, call: ToolCall) -> MatchResult | None:
         for command in call.commands:

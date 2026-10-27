@@ -1,35 +1,45 @@
 {
   "taxonomy_version": 1,
   "generated_from": "src/guardrails/registry.py - DO NOT HAND-EDIT",
-  "operation_count": 74,
-  "implemented_count": 31,
-  "reserved_count": 43,
+  "operation_count": 80,
+  "implemented_count": 46,
+  "reserved_count": 34,
   "operations": [
     {
       "operation": "db.bulk_delete",
       "domain": "db",
-      "description": "Deletes many rows in one statement",
+      "description": "Deletes or overwrites every row in one statement (no WHERE)",
       "applies_to": [
-        "shell"
+        "shell",
+        "mcp"
       ],
       "default_action": "ask",
       "default_alert": "warn",
-      "implemented": false,
-      "facts": []
+      "implemented": true,
+      "facts": [
+        "channel",
+        "client",
+        "production",
+        "statement",
+        "table"
+      ]
     },
     {
       "operation": "db.drop",
       "domain": "db",
       "description": "Drops a database, schema, table or collection",
       "applies_to": [
-        "shell"
+        "shell",
+        "mcp"
       ],
       "default_action": "ask",
       "default_alert": "critical",
       "implemented": true,
       "facts": [
+        "channel",
         "client",
-        "object_type"
+        "object_type",
+        "production"
       ]
     },
     {
@@ -79,14 +89,36 @@
       "domain": "db",
       "description": "Empties a table (SQL TRUNCATE sent to a database client)",
       "applies_to": [
-        "shell"
+        "shell",
+        "mcp"
       ],
       "default_action": "ask",
       "default_alert": "critical",
       "implemented": true,
       "facts": [
+        "channel",
         "client",
+        "production",
         "table"
+      ]
+    },
+    {
+      "operation": "db.write",
+      "domain": "db",
+      "description": "Changes data or schema in a database (INSERT, UPDATE, DELETE, DDL)",
+      "applies_to": [
+        "shell",
+        "mcp"
+      ],
+      "default_action": "allow",
+      "default_alert": "warn",
+      "implemented": true,
+      "facts": [
+        "channel",
+        "client",
+        "production",
+        "rolled_back",
+        "statement"
       ]
     },
     {
@@ -98,8 +130,12 @@
       ],
       "default_action": "allow",
       "default_alert": "warn",
-      "implemented": false,
-      "facts": []
+      "implemented": true,
+      "facts": [
+        "ci_tool",
+        "production",
+        "workflow"
+      ]
     },
     {
       "operation": "devflow.dependency.unpinned",
@@ -112,6 +148,22 @@
       "default_alert": "info",
       "implemented": false,
       "facts": []
+    },
+    {
+      "operation": "devflow.deploy",
+      "domain": "devflow",
+      "description": "Deploys, reconfigures or restarts a live service or its infrastructure",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "allow",
+      "default_alert": "warn",
+      "implemented": true,
+      "facts": [
+        "auto_approved",
+        "deploy_tool",
+        "production"
+      ]
     },
     {
       "operation": "devflow.lockfile.bypass",
@@ -137,6 +189,7 @@
       "implemented": true,
       "facts": [
         "artifact",
+        "artifact_kind",
         "publisher"
       ]
     },
@@ -220,8 +273,13 @@
       ],
       "default_action": "allow",
       "default_alert": "info",
-      "implemented": false,
-      "facts": []
+      "implemented": true,
+      "facts": [
+        "all_instances",
+        "by_name",
+        "pattern",
+        "program"
+      ]
     },
     {
       "operation": "exec.remote",
@@ -230,10 +288,14 @@
       "applies_to": [
         "shell"
       ],
-      "default_action": "ask",
+      "default_action": "allow",
       "default_alert": "warn",
-      "implemented": false,
-      "facts": []
+      "implemented": true,
+      "facts": [
+        "channel",
+        "production",
+        "remote_host"
+      ]
     },
     {
       "operation": "exec.scheduled",
@@ -261,6 +323,24 @@
       "default_alert": "warn",
       "implemented": false,
       "facts": []
+    },
+    {
+      "operation": "fs.control_file",
+      "domain": "fs",
+      "description": "Changes a file that controls the agent, the CI pipeline or git hooks",
+      "applies_to": [
+        "shell",
+        "write",
+        "edit",
+        "delete"
+      ],
+      "default_action": "allow",
+      "default_alert": "warn",
+      "implemented": true,
+      "facts": [
+        "file_role",
+        "scope"
+      ]
     },
     {
       "operation": "fs.copy",
@@ -410,6 +490,22 @@
       "facts": []
     },
     {
+      "operation": "infra.cloud.create",
+      "domain": "infra",
+      "description": "Creates a cloud resource that is billed while it runs",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "allow",
+      "default_alert": "warn",
+      "implemented": true,
+      "facts": [
+        "production",
+        "provider",
+        "resource"
+      ]
+    },
+    {
       "operation": "infra.cloud.delete",
       "domain": "infra",
       "description": "Deletes a cloud resource",
@@ -418,8 +514,13 @@
       ],
       "default_action": "ask",
       "default_alert": "critical",
-      "implemented": false,
-      "facts": []
+      "implemented": true,
+      "facts": [
+        "production",
+        "provider",
+        "resource",
+        "service"
+      ]
     },
     {
       "operation": "infra.dns.change",
@@ -430,8 +531,12 @@
       ],
       "default_action": "ask",
       "default_alert": "warn",
-      "implemented": false,
-      "facts": []
+      "implemented": true,
+      "facts": [
+        "action",
+        "production",
+        "provider"
+      ]
     },
     {
       "operation": "infra.docker.privileged",
@@ -469,8 +574,30 @@
       ],
       "default_action": "ask",
       "default_alert": "critical",
-      "implemented": false,
-      "facts": []
+      "implemented": true,
+      "facts": [
+        "action",
+        "production",
+        "provider"
+      ]
+    },
+    {
+      "operation": "infra.k8s.change",
+      "domain": "infra",
+      "description": "Changes live Kubernetes resources, or which cluster later commands use",
+      "applies_to": [
+        "shell"
+      ],
+      "default_action": "allow",
+      "default_alert": "warn",
+      "implemented": true,
+      "facts": [
+        "context",
+        "namespace",
+        "production",
+        "resource",
+        "verb"
+      ]
     },
     {
       "operation": "infra.k8s.delete",
@@ -680,10 +807,13 @@
       "applies_to": [
         "shell"
       ],
-      "default_action": "ask",
+      "default_action": "allow",
       "default_alert": "warn",
-      "implemented": false,
-      "facts": []
+      "implemented": true,
+      "facts": [
+        "direction",
+        "tunnel_tool"
+      ]
     },
     {
       "operation": "net.upload",
@@ -765,7 +895,9 @@
       "default_alert": "warn",
       "implemented": true,
       "facts": [
-        "provider"
+        "filtered",
+        "provider",
+        "scope"
       ]
     },
     {
@@ -793,8 +925,13 @@
       ],
       "default_action": "ask",
       "default_alert": "critical",
-      "implemented": false,
-      "facts": []
+      "implemented": true,
+      "facts": [
+        "action",
+        "open_to_world",
+        "production",
+        "provider"
+      ]
     },
     {
       "operation": "sec.key.generate",
@@ -968,6 +1105,32 @@
       "implemented": true,
       "facts": [
         "operation_kind"
+      ]
+    },
+    {
+      "operation": "vcs.push",
+      "domain": "vcs",
+      "description": "Pushes commits to a remote, or merges into a remote branch",
+      "applies_to": [
+        "shell",
+        "mcp"
+      ],
+      "default_action": "allow",
+      "default_alert": "info",
+      "implemented": true,
+      "facts": [
+        "admin",
+        "all_refs",
+        "branch",
+        "branch_implicit",
+        "delete",
+        "dry_run",
+        "force",
+        "refspec_count",
+        "remote",
+        "set_upstream",
+        "tags",
+        "via"
       ]
     },
     {

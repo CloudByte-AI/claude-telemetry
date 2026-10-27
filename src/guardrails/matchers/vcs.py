@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import re
 
-from src.guardrails.matchers.base import BaseMatcher, MatchResult
+from src.guardrails.matchers.base import BaseMatcher, MatchResult, asks_for_help
 from src.guardrails.registry import register_matcher
-from src.guardrails.toolcall import KIND_SHELL, ToolCall
+from src.guardrails.toolcall import KIND_MCP, KIND_SHELL, ToolCall
 
 _GIT = frozenset({"git", "hub", "gh"})
 _FORCE_FLAGS = frozenset({"-f", "--force", "--force-with-lease", "--force-if-includes"})
@@ -36,6 +36,16 @@ class ForcePushMatcher(BaseMatcher):
     DEFAULT_ACTION = "ask"
     DEFAULT_ALERT = "critical"
     FACTS = ("with_lease", "remote")
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        remote = result.facts.get("remote") or "the remote"
+        lease = " (with lease)" if result.facts.get("with_lease") else ""
+        branch = None
+        if result.command is not None:
+            sub = cls.operands_from_subcommand(result.command, _GIT_VALUE_OPTIONS)
+            branch = next((b for b in (_destination(r) for r in sub[2:]) if b), None)
+        return f"force-push to {branch} on {remote}{lease}" if branch else f"force-push to {remote}{lease}"
 
     def match(self, call: ToolCall) -> MatchResult | None:
         for command in self.commands_named(call, _GIT):
@@ -61,6 +71,139 @@ class ForcePushMatcher(BaseMatcher):
         return None
 
 
+# `git push` options that take a value, whose value is not a remote or refspec.
+_PUSH_VALUE_OPTIONS = frozenset({"-o", "--push-option", "--repo", "--receive-pack", "--exec"})
+# Tools on a git-hosting MCP server that change a branch on the remote.
+_MCP_PUSH_TOOLS = frozenset({
+    "merge_pull_request", "merge_pr", "merge_merge_request", "push_files", "create_or_update_file",
+})
+
+
+def _destination(refspec: str) -> str | None:
+    """The branch a refspec writes: `src:dst` -> dst, `+main` -> main, `refs/heads/x` -> x."""
+    ref = refspec.lstrip("+")
+    if ":" in ref:
+        ref = ref.rsplit(":", 1)[1]
+    if not ref or ref == "HEAD":
+        return None
+    return ref.removeprefix("refs/heads/")
+
+
+@register_matcher
+class PushMatcher(BaseMatcher):
+    OPERATION = "vcs.push"
+    DOMAIN = "vcs"
+    DESCRIPTION = "Pushes commits to a remote, or merges into a remote branch"
+    APPLIES_TO = (KIND_SHELL, KIND_MCP)
+    DEFAULT_ACTION = "allow"
+    DEFAULT_ALERT = "info"
+    # Every push, force and delete pushes included, so one rule can cover "any
+    # push to main"; vcs.force_push and vcs.branch.delete still fire as well.
+    # branch: the destination of the first refspec; branch_implicit: no branch
+    # is named, so git pushes the current one (or a merge goes to the PR's
+    # base). via: push, pr_merge (gh pr merge, glab mr merge) or mcp.
+    FACTS = ("remote", "branch", "branch_implicit", "refspec_count", "set_upstream", "tags",
+             "all_refs", "force", "delete", "dry_run", "via", "admin")
+
+    def match(self, call: ToolCall) -> MatchResult | None:
+        if call.mcp_tool:
+            if call.mcp_tool.lower() in _MCP_PUSH_TOOLS:
+                return self.hit(target=call.tool_name, evidence=call.tool_name, remote=None, branch=None,
+                                branch_implicit=True, refspec_count=0, set_upstream=False, tags=False,
+                                all_refs=False, force=False, delete=False, dry_run=False, via="mcp", admin=False)
+            return None
+        for command in self.commands_named(call, _GIT):
+            if command.command_name == "gh":
+                found = self._pr_merge(command)
+                if found:
+                    return found
+                continue
+            sub = self.operands_from_subcommand(command, _GIT_VALUE_OPTIONS)
+            if not self.starts_with_run(sub, ("push",)):
+                continue
+            positional = self._positional(command, sub[1:])
+            remote = positional[0] if positional else None
+            refspecs = positional[1:]
+            lowered = {f.lower() for f in command.flags}
+            branch = next((b for b in (_destination(r) for r in refspecs) if b), None)
+            tags = bool({"--tags", "--follow-tags"} & lowered) or any(r.startswith("refs/tags/") for r in refspecs)
+            delete = "--delete" in lowered or "-d" in command.flags or any(
+                r.startswith(":") and len(r) > 1 for r in refspecs)
+            if delete and branch is None and refspecs:
+                branch = refspecs[-1].lstrip(":")
+            return self.hit(
+                target=branch or remote,
+                command=command,
+                remote=remote,
+                branch=branch,
+                branch_implicit=branch is None and not tags,
+                refspec_count=len(refspecs),
+                set_upstream=bool({"-u", "--set-upstream"} & lowered),
+                tags=tags,
+                all_refs=bool({"--all", "--mirror", "--branches"} & lowered),
+                force=bool(lowered & _FORCE_FLAGS) or any(r.startswith("+") and len(r) > 1 for r in refspecs),
+                delete=delete,
+                dry_run=bool({"-n", "--dry-run"} & lowered),
+                via="push",
+                admin=False,
+            )
+        for command in self.commands_named(call, ("glab",)):
+            found = self._pr_merge(command)
+            if found:
+                return found
+        return None
+
+    @staticmethod
+    def _positional(command, operands) -> list[str]:
+        """Remote and refspecs: the operands after `push`, minus the values of push's own options."""
+        values: list[str] = []
+        argv = command.argv
+        for i, token in enumerate(argv):
+            if token in _PUSH_VALUE_OPTIONS and i + 1 < len(argv):
+                values.append(argv[i + 1])
+        positional = list(operands)
+        for value in values:
+            if value in positional:
+                positional.remove(value)
+        return positional
+
+    def _pr_merge(self, command) -> MatchResult | None:
+        """`gh pr merge 12`, `glab mr merge 7`: the remote merges into the base branch."""
+        sub = self.operands_from_subcommand(command, _GIT_VALUE_OPTIONS)
+        noun = "pr" if command.command_name == "gh" else "mr"
+        if not self.starts_with_run(sub, (noun, "merge")):
+            return None
+        lowered = {f.lower() for f in command.flags}
+        if asks_for_help(command):
+            return None
+        number = sub[2] if len(sub) > 2 else None
+        return self.hit(target=number or "pull request", command=command, remote=None, branch=None,
+                        branch_implicit=True, refspec_count=0, set_upstream=False, tags=False, all_refs=False,
+                        force=False, delete=False, dry_run=False, via="pr_merge", admin="--admin" in lowered)
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        facts = result.facts
+        via = facts.get("via")
+        if via == "pr_merge":
+            number = result.target if result.target and result.target != "pull request" else ""
+            return f"merge pull request {number}".rstrip() + (" (bypassing branch protection)" if facts.get("admin") else "")
+        if via == "mcp":
+            return f"merge or push through {str(result.target or 'an MCP tool').rsplit('__', 1)[-1]}"
+        remote = facts.get("remote") or "the remote"
+        branch = facts.get("branch")
+        if facts.get("delete"):
+            return f"delete branch {branch} on {remote}" if branch else f"delete a branch on {remote}"
+        verb = "force-push" if facts.get("force") else "push"
+        if facts.get("all_refs"):
+            return f"{verb} every branch to {remote}"
+        if facts.get("tags") and not branch:
+            return f"{verb} tags to {remote}"
+        if branch:
+            return f"{verb} to {branch} on {remote}"
+        return f"{verb} the current branch to {remote}"
+
+
 @register_matcher
 class HistoryRewriteMatcher(BaseMatcher):
     OPERATION = "vcs.history.rewrite"
@@ -70,6 +213,10 @@ class HistoryRewriteMatcher(BaseMatcher):
     DEFAULT_ACTION = "ask"
     DEFAULT_ALERT = "warn"
     FACTS = ("operation_kind",)
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        return f"rewrite git history (git {result.facts.get('operation_kind')})"
 
     # (subcommand, whether a flag is also required to make it destructive).
     # `restore --staged` only unstages, so it is not here; `--source` throws
@@ -115,6 +262,11 @@ class BranchDeleteMatcher(BaseMatcher):
     DEFAULT_ALERT = "warn"
     FACTS = ("remote", "branch")
 
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        branch = result.facts.get("branch") or "a branch"
+        return f"delete branch {branch}" + (" on the remote" if result.facts.get("remote") else "")
+
     def match(self, call: ToolCall) -> MatchResult | None:
         for command in self.commands_named(call, _GIT):
             lowered = {f.lower() for f in command.flags}
@@ -152,6 +304,12 @@ class CleanMatcher(BaseMatcher):
     # scope: `untracked` (git clean) or `changes` (checkout/restore over local
     # edits). ignored: git clean -x/-X also removes ignored files (.env, builds).
     FACTS = ("scope", "ignored")
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        if result.facts.get("scope") == "untracked":
+            return "delete untracked files" + (" including ignored ones" if result.facts.get("ignored") else "")
+        return f"discard uncommitted changes in {result.target or 'the working tree'}"
 
     def match(self, call: ToolCall) -> MatchResult | None:
         for command in self.commands_named(call, ("git",)):

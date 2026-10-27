@@ -8,7 +8,7 @@ seconds.
 
 from __future__ import annotations
 
-from src.guardrails.matchers.base import BaseMatcher, MatchResult
+from src.guardrails.matchers.base import BaseMatcher, MatchResult, asks_for_help, targets_production
 from src.guardrails.registry import register_matcher
 from src.guardrails.toolcall import KIND_SHELL, ToolCall
 
@@ -22,6 +22,11 @@ class TerraformDestroyMatcher(BaseMatcher):
     DEFAULT_ACTION = "ask"
     DEFAULT_ALERT = "critical"
     FACTS = ("tool", "auto_approved")
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        auto = " without confirmation" if result.facts.get("auto_approved") else ""
+        return f"destroy infrastructure ({result.facts.get('tool')}){auto}"
 
     _TOOLS = frozenset({"terraform", "tofu", "terragrunt", "pulumi", "cdk", "cdktf"})
 
@@ -60,6 +65,13 @@ class KubernetesDeleteMatcher(BaseMatcher):
     DEFAULT_ALERT = "critical"
     FACTS = ("resource", "namespace", "all_resources")
 
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        facts = result.facts
+        what = f"every {facts.get('resource')}" if facts.get("all_resources") else (facts.get("resource") or "resources")
+        where = f" in namespace {facts['namespace']}" if facts.get("namespace") else ""
+        return f"delete {what}{where} (Kubernetes)"
+
     _TOOLS = frozenset({"kubectl", "oc", "helm", "k9s", "kubectl.exe"})
     # Global options that take a value, ahead of the subcommand: `kubectl -n prod delete`.
     _VALUE_OPTIONS = frozenset({
@@ -96,6 +108,100 @@ class KubernetesDeleteMatcher(BaseMatcher):
                 all_resources="--all" in lowered,
             )
         return None
+
+
+@register_matcher
+class KubernetesChangeMatcher(BaseMatcher):
+    OPERATION = "infra.k8s.change"
+    DOMAIN = "infra"
+    DESCRIPTION = "Changes live Kubernetes resources, or which cluster later commands use"
+    APPLIES_TO = (KIND_SHELL,)
+    DEFAULT_ACTION = "allow"
+    DEFAULT_ALERT = "warn"
+    # verb: apply, create, replace, patch, edit, scale, autoscale, set, rollout,
+    # annotate, label, cordon, uncordon, drain, taint, expose, run, install,
+    # upgrade, rollback, sync, use-context, set-context. resource: what it
+    # changes. context / namespace: as given. production: names a production
+    # target (`use-context prod` makes every later command a production one).
+    FACTS = ("verb", "resource", "namespace", "context", "production")
+
+    _KUBE = frozenset({"kubectl", "oc"})
+    _VALUE_OPTIONS = KubernetesDeleteMatcher._VALUE_OPTIONS
+    _VERBS = frozenset({
+        "apply", "create", "replace", "patch", "edit", "scale", "autoscale", "annotate", "label",
+        "cordon", "uncordon", "drain", "taint", "expose", "run",
+    })
+    _SET = frozenset({"image", "env", "resources", "selector", "serviceaccount", "subject"})
+    _ROLLOUT = frozenset({"restart", "undo", "pause", "resume"})
+    _CONFIG = frozenset({"use-context", "use", "set-context"})
+    _HELM = frozenset({"install", "upgrade", "rollback"})
+    _ARGOCD = frozenset({"sync", "rollback", "set", "patch"})
+
+    def match(self, call: ToolCall) -> MatchResult | None:
+        for command in self.commands_named(call, self._KUBE | {"helm", "argocd"}):
+            found = self._verb(command)
+            if not found:
+                continue
+            verb, resource = found
+            argv = command.argv
+            lowered = {t.lower() for t in argv}
+            # A dry run, a diff or help changes nothing; `--dry-run=none` does.
+            if any(t.startswith("--dry-run") and t != "--dry-run=none" for t in lowered) or asks_for_help(command):
+                continue
+            if verb == "set" and "--list" in lowered:
+                continue
+            context = self._option(argv, ("--context", "--kube-context"))
+            if verb in ("use-context", "set-context"):
+                context = resource
+            return self.hit(target=resource or verb, command=command, verb=verb, resource=resource,
+                            namespace=self._option(argv, ("-n", "--namespace")), context=context,
+                            production=targets_production(command, call))
+        return None
+
+    def _verb(self, command) -> tuple[str, str | None] | None:
+        name = command.command_name
+        sub = self.operands_from_subcommand(command, self._VALUE_OPTIONS)
+        if not sub:
+            return None
+        first, second = sub[0], (sub[1] if len(sub) > 1 else None)
+        if name in self._KUBE:
+            if first in self._VERBS:
+                # `apply -f deploy.yaml` / `replace -f -`: the manifest is what changes.
+                manifest = self._option(command.argv, ("-f", "--filename", "-k", "--kustomize"))
+                if manifest is not None and (second is None or second == manifest or second == "-"):
+                    return first, "a manifest from input" if manifest == "-" else manifest
+                return first, second
+            if first == "set" and second in self._SET:
+                return "set", sub[2] if len(sub) > 2 else second
+            if first == "rollout" and second in self._ROLLOUT:
+                return "rollout", sub[2] if len(sub) > 2 else None
+            if first == "config" and second in self._CONFIG:
+                return ("use-context" if second == "use" else second), (sub[2] if len(sub) > 2 else None)
+            return None
+        if name == "helm" and first in self._HELM:
+            return first, second
+        if name == "argocd" and first == "app" and second in self._ARGOCD:
+            return second, sub[2] if len(sub) > 2 else None
+        return None
+
+    @staticmethod
+    def _option(argv, names: tuple[str, ...]) -> str | None:
+        for i, token in enumerate(argv):
+            option, eq, value = token.partition("=")
+            if option in names:
+                return value if eq else (argv[i + 1] if i + 1 < len(argv) else None)
+        return None
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        facts = result.facts
+        verb = facts.get("verb")
+        prod = " (production)" if facts.get("production") else ""
+        if verb in ("use-context", "set-context"):
+            return f"make {facts.get('context') or 'another cluster'} the default cluster{prod}"
+        where = f" on {facts['context']}" if facts.get("context") else ""
+        what = f" {facts['resource']}" if facts.get("resource") else ""
+        return f"{verb}{what}{where}{prod}"
 
 
 @register_matcher

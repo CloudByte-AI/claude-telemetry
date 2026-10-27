@@ -19,6 +19,7 @@ from src.guardrails.toolcall import (
     KIND_READ,
     KIND_SHELL,
     KIND_WRITE,
+    WRITE_KINDS,
     ToolCall,
     resolve_path,
 )
@@ -38,6 +39,8 @@ _SENSITIVE_BASENAMES = frozenset({
 })
 _SENSITIVE_SUFFIXES = (
     ".pem", ".key", ".pfx", ".p12", ".jks", ".keystore", ".asc", ".ppk",
+    # Terraform variable files hold provider credentials (`prod.tfvars`).
+    ".tfvars", ".tfvars.json",
 )
 # `.env.production`, `.env.local`... A service-account KEY is a JSON file
 # (`service-account-prod.json`); `ServiceAccountController.ts` and a Helm
@@ -260,6 +263,11 @@ class RecursiveDeleteMatcher(BaseMatcher):
     # in), is build or dependency output - node_modules, dist, build, .next...
     FACTS = ("recursive", "forced", "target_count", "disposable")
 
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        target = result.target or "a folder"
+        return f"delete {target} and everything in it" if result.facts.get("recursive") else f"force-delete {target}"
+
     def match(self, call: ToolCall) -> MatchResult | None:
         # (command, targets, recursive, forced) for every forced or recursive delete.
         deletes = [
@@ -311,6 +319,105 @@ class SensitiveFileMatcher(BaseMatcher):
                 # The command is attached so `is_destructive` reads THAT one.
                 return self.hit(target=path, evidence=evidence, command=command, sensitive_path=path)
         return None
+
+
+# Files that control the agent itself, the CI pipeline or git's hooks.
+# kind -> (paths relative to any folder, as `/`-joined lowercase suffixes or
+# folder prefixes ending in `/`).
+_CONTROL_FILES: dict[str, tuple[str, ...]] = {
+    "agent_config": (
+        ".claude/settings.json", ".claude/settings.local.json", ".claude/hooks/", ".claude.json",
+        ".mcp.json", ".cursor/hooks.json", ".cursor/mcp.json", ".cursor/cli.json", ".cursor/hooks/",
+    ),
+    "ci_pipeline": (
+        ".github/workflows/", ".gitlab-ci.yml", ".gitlab-ci.yaml", "jenkinsfile", "azure-pipelines.yml",
+        "azure-pipelines.yaml", "bitbucket-pipelines.yml", ".circleci/", ".buildkite/",
+    ),
+    "git_hook": (".git/hooks/", ".husky/", ".pre-commit-config.yaml", "lefthook.yml", "lefthook.yaml"),
+}
+# Shell commands that change the files they name (PowerShell's Remove-Item,
+# Copy-Item and Move-Item already resolve to rm, cp and mv).
+_CHANGING_COMMANDS = frozenset({
+    "rm", "rmdir", "unlink", "del", "mv", "cp", "tee", "touch", "truncate", "ln", "install",
+    "set-content", "add-content", "out-file", "new-item", "clear-content",
+})
+_CONTROL_KIND_WORDS = {"agent_config": "agent settings", "ci_pipeline": "CI pipeline", "git_hook": "git hook"}
+
+
+def _control_kind(path: str) -> str | None:
+    """The kind of control file `path` is, or None."""
+    normalised = "/" + str(path).replace("\\", "/").lower().lstrip("/")
+    for kind, shapes in _CONTROL_FILES.items():
+        for shape in shapes:
+            if shape.endswith("/"):
+                if f"/{shape}" in normalised + "/":
+                    return kind
+            elif normalised.endswith(f"/{shape}"):
+                return kind
+    return None
+
+
+def _control_scope(path: str) -> str:
+    """`home` for the user's own config (`~/.claude/...`), else `project`."""
+    from src.common.paths import get_home_dir
+
+    home = str(get_home_dir()).replace("\\", "/").rstrip("/").lower()
+    normalised = str(path).replace("\\", "/").lower()
+    if normalised.startswith(home + "/"):
+        rest = normalised[len(home) + 1:]
+        if rest.startswith((".claude/", ".cursor/")) or rest in (".claude.json", ".mcp.json"):
+            return "home"
+    return "project"
+
+
+def _changed_paths(call: ToolCall) -> list[tuple[str, object]]:
+    """(resolved_path, command) for every file this call writes, edits or deletes."""
+    if call.kind in WRITE_KINDS:
+        return [(path, None) for path in call.file_paths]
+    found: list[tuple[str, object]] = []
+    for command in call.commands:
+        targets = list(command.redirects)
+        name = command.command_name.lower()
+        operands = [o for o in command.subcommand_path if not o.startswith("-") and _looks_like_path(o)]
+        if name in ("cp", "mv", "install", "ln"):
+            targets += operands[-1:]
+        elif name in _CHANGING_COMMANDS:
+            targets += operands
+        elif name == "sed" and ({"-i", "--in-place"} & command.flags or any(a.startswith("-i") for a in command.argv)):
+            targets += operands[1:]
+        for target in targets:
+            resolved = resolve_path(target, call.cwd)
+            if resolved:
+                found.append((resolved, command))
+    return found
+
+
+@register_matcher
+class ControlFileMatcher(BaseMatcher):
+    OPERATION = "fs.control_file"
+    DOMAIN = "fs"
+    DESCRIPTION = "Changes a file that controls the agent, the CI pipeline or git hooks"
+    APPLIES_TO = (KIND_SHELL, KIND_WRITE, KIND_EDIT, KIND_DELETE)
+    DEFAULT_ACTION = "allow"
+    DEFAULT_ALERT = "warn"
+    # file_role: agent_config (the agent's settings, hooks and MCP servers),
+    # ci_pipeline (workflow files) or git_hook. scope: home (the user's own
+    # ~/.claude or ~/.cursor) or project (a repository's copy).
+    FACTS = ("file_role", "scope")
+
+    def match(self, call: ToolCall) -> MatchResult | None:
+        for path, command in _changed_paths(call):
+            kind = _control_kind(path)
+            if kind:
+                return self.hit(target=path, evidence=command.raw if command else path, command=command,
+                                file_role=kind, scope=_control_scope(path))
+        return None
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        words = _CONTROL_KIND_WORDS.get(result.facts.get("file_role"), "control file")
+        name = posixpath.basename(str(result.target or "").replace("\\", "/"))
+        return f"change {words} {name}".rstrip()
 
 
 @register_matcher

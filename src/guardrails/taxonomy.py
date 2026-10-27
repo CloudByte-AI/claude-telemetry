@@ -50,7 +50,7 @@ def build() -> dict:
 
 def write(path: Path | None = None) -> Path:
     target = path or TAXONOMY_PATH
-    target.write_text(json.dumps(build(), indent=2) + "\n", encoding="utf-8")
+    target.write_text(json.dumps(build(), indent=2) + "\n", encoding="utf-8", newline="\n")
     return target
 
 

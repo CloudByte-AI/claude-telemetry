@@ -19,7 +19,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Iterable, Sequence
 
-from src.guardrails.parser import Command
+from src.guardrails.parser import POSIX, Command, parse_chain
 from src.guardrails.toolcall import ToolCall
 
 # Cap on stored evidence. A matched fragment can contain a secret, so evidence
@@ -42,6 +42,8 @@ _PRIVATE = re.compile(
 _BARE_URL = re.compile(r"^(localhost|\d{1,3}(?:\.\d{1,3}){3}|\[[0-9a-fA-F:]+\]|[\w-]+(?:\.[\w-]+)*\.[A-Za-z]{2,})(?::\d+)?(?:/|$)")
 _SCHEME_URL = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*://(?:[^@/\s]*@)?(\[[^\]]+\]|[^/:?#\s]+)")
 _VAR_REF = re.compile(r"^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?")
+# A word that is one variable reference and nothing else: `$NS`, `${CTX}`, `"$OPTS"`.
+_ONLY_VARIABLE = re.compile(r"^[\"']?\$\{?[A-Za-z_][A-Za-z0-9_]*\}?[\"']?$")
 
 
 def url_host(operand: str, chain_text: str = "") -> str | None:
@@ -73,6 +75,176 @@ def network_of(host: str | None) -> str:
     if _PRIVATE.match(host):
         return "private"
     return "public"
+
+
+# -- production targets -------------------------------------------------------
+#
+# Whether a command names a production target, read from the words that name
+# one: a context, profile, namespace, resource group, project, host or a
+# workflow input. Words with spaces are scripts or messages, not names, so they
+# are skipped. `nonprod`, `preprod` and `product` are not production.
+_PRODUCTION_WORDS = frozenset({"prod", "production", "prd"})
+_NOT_PRODUCTION_PREFIXES = ("non", "pre", "not")
+# English words that end in "production" but name no environment.
+_PRODUCTION_LOOKALIKES = frozenset({"reproduction", "coproduction", "postproduction", "overproduction",
+                                    "underproduction"})
+_NAME_SEGMENTS = re.compile(r"[a-z0-9]+")
+# Environment variables that select where later commands in the chain go:
+# `export AWS_PROFILE=prod-admin; aws ...`, `NODE_ENV=production node x`.
+_TARGET_VARIABLES = re.compile(
+    r"(?:^|[\s;&|(])(?:export\s+)?(?:AWS_PROFILE|AWS_DEFAULT_PROFILE|KUBECONFIG|KUBE_CONTEXT|"
+    r"CLOUDSDK_CORE_PROJECT|AZURE_SUBSCRIPTION_ID|ARM_SUBSCRIPTION_ID|NODE_ENV|RAILS_ENV|APP_ENV|"
+    r"ENVIRONMENT|ENV|STAGE|ASPNETCORE_ENVIRONMENT|DEPLOY_ENV)=[\"']?([^\s;&|\"']+)"
+)
+
+
+def names_production(word: str) -> bool:
+    """`shop-prod`, `prod`, `env=production`, `shopprod`, `shopproduction` yes; `nonprod`, `products` no."""
+    for segment in _NAME_SEGMENTS.findall(word.lower()):
+        if segment in _PRODUCTION_WORDS:
+            return True
+        if (segment.endswith(("prod", "production")) and not segment.startswith(_NOT_PRODUCTION_PREFIXES)
+                and segment not in _PRODUCTION_LOOKALIKES):
+            return True
+    return False
+
+
+def targets_production(command: Command, call: ToolCall | None = None) -> bool:
+    """
+    Whether this command, as written, names a production target: any of its
+    own words (`--context prod`, `-g app-rg-prod`, `user@prod-db`,
+    `-f env=prod`), or a target variable assigned earlier in the same call.
+    A name heuristic: it reads names, it cannot know what an alias points at.
+    """
+    for token in command.argv:
+        if len(token) > 200 or any(ch.isspace() for ch in token):
+            continue
+        if names_production(token):
+            return True
+        # `CTX=shop-prod; kubectl --context "$CTX" ...`: the value assigned in this call.
+        variable = _VAR_REF.match(token.strip("'\""))
+        if variable and call is not None and call.command:
+            assigned = re.search(rf"(?:^|[\s;&|(]){re.escape(variable.group(1))}=(\"[^\"]*\"|'[^']*'|[^\s;&|]+)",
+                                 call.command)
+            if assigned and names_production(assigned.group(1).strip("'\"")):
+                return True
+    if call is not None and call.command:
+        for value in _TARGET_VARIABLES.findall(call.command):
+            if names_production(value):
+                return True
+    return False
+
+
+def asks_for_help(command: Command) -> bool:
+    """
+    `--help` or `-h` as written, before any `--`. Case matters (`-H` is curl's
+    header and docker's host), and what follows `--` belongs to the command run
+    inside (`kubectl run x -- mysql -h db`).
+    """
+    for token in command.argv:
+        if token == "--":
+            return False
+        if token in ("--help", "-h"):
+            return True
+    return False
+
+
+# -- commands run somewhere else ----------------------------------------------
+#
+# `docker exec db psql -c "..."`, `kubectl exec pod -- psql ...` and
+# `ssh host "psql ..."` run their command in a container or on another machine.
+# The shell parser deliberately does not report those inner commands as this
+# machine's commands; matchers that need them (the database matchers, remote
+# execution) ask for them here.
+_CONTAINER_TOOLS = frozenset({"docker", "podman", "nerdctl"})
+_CONTAINER_EXEC_VALUE_OPTIONS = frozenset({
+    "-e", "--env", "--env-file", "-u", "--user", "-w", "--workdir", "--detach-keys",
+})
+_KUBE_TOOLS = frozenset({"kubectl", "oc"})
+SSH_VALUE_OPTIONS = frozenset({
+    "-b", "-c", "-D", "-E", "-e", "-F", "-I", "-i", "-J", "-L", "-l", "-m", "-O", "-o", "-p",
+    "-Q", "-R", "-S", "-W", "-w", "-B",
+})
+
+
+@dataclass(frozen=True)
+class RemoteRun:
+    """A command another place runs: where (`channel`), the wrapper, and what it runs."""
+
+    channel: str                 # docker_exec | kubectl_exec | ssh
+    wrapper: Command
+    commands: tuple[Command, ...]
+
+
+def _parse_words(words: Sequence[str], stdin: str = "") -> tuple[Command, ...]:
+    """Re-parse argv words as a command line; a here-document fed to the wrapper feeds the first command."""
+    if not words:
+        return ()
+    line = " ".join(_quote(word) for word in words)
+    commands = parse_chain(line, POSIX)
+    if stdin and commands and not commands[0].stdin:
+        from dataclasses import replace
+        commands = (replace(commands[0], stdin=stdin),) + commands[1:]
+    return commands
+
+
+def _quote(word: str) -> str:
+    if word and all(ch.isalnum() or ch in "-_./:=@,%+" for ch in word):
+        return word
+    return "'" + word.replace("'", "'\"'\"'") + "'"
+
+
+# The last call's answer: several matchers ask about the same call in a row.
+_LAST_REMOTE: list = [None, []]
+
+
+def remote_runs(call: ToolCall) -> list[RemoteRun]:
+    """Every command this call runs inside a container or on another machine, by wrapper."""
+    if _LAST_REMOTE[0] is call:
+        return _LAST_REMOTE[1]
+    runs = _remote_runs(call)
+    _LAST_REMOTE[0], _LAST_REMOTE[1] = call, runs
+    return runs
+
+
+def _remote_runs(call: ToolCall) -> list[RemoteRun]:
+    runs: list[RemoteRun] = []
+    for command in call.commands:
+        name = command.command_name
+        argv = command.argv
+        if name in _CONTAINER_TOOLS:
+            start = _exec_start(argv)
+            if start is None:
+                continue
+            i = start
+            while i < len(argv) and argv[i].startswith("-"):
+                option = argv[i].partition("=")[0]
+                i += 2 if option in _CONTAINER_EXEC_VALUE_OPTIONS and "=" not in argv[i] else 1
+            inner = argv[i + 1:]          # argv[i] is the container
+            if inner:
+                runs.append(RemoteRun("docker_exec", command, _parse_words(inner, command.stdin)))
+        elif name in _KUBE_TOOLS and "exec" in command.subcommand_path[:4] and "--" in argv:
+            inner = argv[argv.index("--") + 1:]
+            if inner:
+                runs.append(RemoteRun("kubectl_exec", command, _parse_words(inner, command.stdin)))
+        elif name == "ssh":
+            operands = BaseMatcher.operands_from_subcommand(command, SSH_VALUE_OPTIONS)
+            if len(operands) > 1:
+                text = " ".join(operands[1:])
+                runs.append(RemoteRun("ssh", command, parse_chain(text, POSIX)))
+            elif operands and command.stdin:
+                runs.append(RemoteRun("ssh", command, parse_chain(command.stdin, POSIX)))
+    return runs
+
+
+def _exec_start(argv: Sequence[str]) -> int | None:
+    """Index after `exec` in `docker exec`, `docker container exec`, `docker compose exec`."""
+    for i, token in enumerate(argv[:3]):
+        if token == "exec":
+            return i + 1
+        if not (token in ("container", "compose") or token.startswith("-")):
+            return None
+    return None
 
 
 @dataclass(frozen=True)
@@ -126,6 +298,15 @@ class BaseMatcher(ABC):
     def match(self, call: ToolCall) -> MatchResult | None:
         """Return a MatchResult if this operation is present, else None."""
         ...
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        """
+        What the call does, in a few plain words built from the hit's target and
+        facts (`push to main on origin`), for notifications. None means the
+        notification shows the command as written.
+        """
+        return None
 
     # ── helpers available to every matcher ────────────────────────────────
 
@@ -203,7 +384,13 @@ class BaseMatcher(ABC):
                 i += 2
                 continue
             i += 1
-        return tuple(command.subcommand_path[skipped:])
+        operands = tuple(command.subcommand_path[skipped:])
+        # `kubectl $NS exec pod`, `git $R log`: a variable holding global
+        # options sits where the subcommand goes. A leading word that is only
+        # a variable is skipped when more words follow it.
+        while len(operands) > 1 and _ONLY_VARIABLE.match(operands[0]):
+            operands = operands[1:]
+        return operands
 
     @staticmethod
     def starts_with_run(path: Sequence[str], run: Sequence[str]) -> bool:

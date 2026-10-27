@@ -8,7 +8,9 @@ notification is shown, and nothing here can change it.
     ask, prompt shown          Approval needed: <what>      (Claude Code)
     ask, no prompt possible    Ran without review: <what>   (Cursor)
 
-followed by the rule's reason. Only critical and warn rules notify; an `info`
+<what> is the detecting matcher's own summary of the call (`push to main on
+origin`) when it has one, else the call as written (describe), followed by
+the rule's reason. Only critical and warn rules notify; an `info`
 rule and an `allow` never do, whatever the settings say.
 
 Settings live in ~/.cloudbyte/guardrails/guardrails_notifications.yaml:
@@ -151,7 +153,7 @@ def build_notice(decision: Decision, call: ToolCall, tag: str | None = None) -> 
         level=level,
         title=f"{MESSAGE_PREFIX}{_TITLE_SEPARATOR}{word}",
         emphasis=MESSAGE_PREFIX,
-        text=f"{headline(decision)}: {describe(call)}",
+        text=f"{headline(decision)}: {decision.summary or describe(call)}",
         detail=decision.reason_text,
         icon=icon if icon.is_file() else None,
         tag=tag,

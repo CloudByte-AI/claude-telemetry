@@ -55,6 +55,18 @@ tables:
         decision: deny, alert: critical,
         reason: "Encoded or obfuscated execution is blocked. Run the command in plain form." }
 
+    # Deleting cloud resources whose names say production.
+    - { id: cb.infra.cloud-delete-production,
+        operation: infra.cloud.delete, production: true,
+        decision: deny, alert: critical,
+        reason: "Deleting production cloud resources is blocked. Ask the user to run it themselves." }
+
+    # Every row of a table at once, usually a missing WHERE clause.
+    - { id: cb.db.bulk-delete,
+        operation: db.bulk_delete,
+        decision: deny, alert: critical,
+        reason: "Deleting or updating every row is blocked. Add a WHERE clause that names the rows." }
+
     # ── ask tier ─────────────────────────────────────────────────────────
     - { id: cb.fs.cleanup-node-modules,
         operation: fs.delete.recursive, disposable: true, target_path: {contains: "node_modules"},
@@ -64,11 +76,8 @@ tables:
         decision: ask, alert: warn,
         reason: "Recursive delete - review the target before approving" }
 
-    # --force-with-lease refuses when the remote moved, so it is the safe form
-    # and is allowed above the broader force-push ask.
-    - { id: cb.vcs.force-push-with-lease,
-        operation: vcs.force_push, with_lease: true,
-        decision: allow, alert: info, reason: "Force-push with lease is safe" }
+    # Every force push asks, --force-with-lease included: it is the safer form,
+    # but it still replaces what is on the remote, and no push goes unasked here.
     - { id: cb.vcs.force-push,
         operation: vcs.force_push,
         decision: ask, alert: critical,
@@ -118,6 +127,54 @@ tables:
         operation: fs.sensitive, kind: shell,
         decision: ask, alert: warn, reason: "This touches a credential or key file" }
 
+    - { id: cb.vcs.push-dry-run,
+        operation: vcs.push, dry_run: true,
+        decision: allow, alert: info, reason: "A dry run pushes nothing" }
+    - { id: cb.vcs.push,
+        operation: vcs.push,
+        decision: ask, alert: warn, reason: "This pushes commits to a remote - confirm the branch" }
+
+    - { id: cb.devflow.deploy,
+        operation: devflow.deploy,
+        decision: ask, alert: warn, reason: "This deploys or reconfigures a running service" }
+    - { id: cb.devflow.ci-trigger,
+        operation: devflow.ci.trigger,
+        decision: ask, alert: warn, reason: "This starts a CI or deploy pipeline" }
+    - { id: cb.exec.remote,
+        operation: exec.remote,
+        decision: ask, alert: warn, reason: "This runs a command on another machine" }
+    - { id: cb.infra.k8s-change,
+        operation: infra.k8s.change,
+        decision: ask, alert: warn, reason: "This changes live cluster resources" }
+    - { id: cb.infra.cloud-create,
+        operation: infra.cloud.create,
+        decision: ask, alert: warn, reason: "This creates billable cloud resources" }
+    - { id: cb.infra.cloud-delete,
+        operation: infra.cloud.delete,
+        decision: ask, alert: critical, reason: "This deletes cloud resources" }
+    - { id: cb.infra.iam-change,
+        operation: infra.iam.change,
+        decision: ask, alert: critical, reason: "This changes who can access cloud resources" }
+    - { id: cb.sec.firewall-change,
+        operation: sec.firewall.change,
+        decision: ask, alert: warn, reason: "This opens or changes a firewall rule" }
+    - { id: cb.infra.dns-change,
+        operation: infra.dns.change,
+        decision: ask, alert: warn, reason: "This changes DNS records" }
+
+    - { id: cb.db.write-production,
+        operation: db.write, production: true,
+        decision: ask, alert: critical, reason: "This changes data in a production database" }
+
+    - { id: cb.exec.kill-by-name,
+        operation: exec.process.kill, by_name: true,
+        decision: ask, alert: warn, reason: "This ends every process of a program" }
+
+    # Agent settings, CI pipeline files and git hooks, changed from the shell.
+    - { id: cb.fs.control-file-shell,
+        operation: fs.control_file,
+        decision: ask, alert: warn, reason: "This changes a file that controls the agent, CI or git" }
+
     - { id: cb.bash.default,
         decision: allow, alert: info, reason: "Default allow" }
 
@@ -135,6 +192,9 @@ tables:
     - { id: cb.fs.file-delete,
         operation: fs.delete, kind: delete,
         decision: ask, alert: warn, reason: "File deletion" }
+    - { id: cb.fs.control-file,
+        operation: fs.control_file,
+        decision: ask, alert: warn, reason: "This changes a file that controls the agent, CI or git" }
     - { id: cb.file.default,
         decision: allow, alert: info, reason: "Default allow" }
 
@@ -142,6 +202,9 @@ tables:
     - { id: cb.mcp.delete,
         operation: mcp.delete,
         decision: ask, alert: warn, reason: "This MCP tool deletes data" }
+    - { id: cb.vcs.push-mcp,
+        operation: vcs.push,
+        decision: ask, alert: warn, reason: "This pushes or merges commits on a remote - confirm the branch" }
     - { id: cb.mcp.write,
         operation: mcp.write,
         decision: ask, alert: info, reason: "This MCP tool writes data" }
