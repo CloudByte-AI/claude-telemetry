@@ -102,6 +102,9 @@ class Decision:
     target: str | None = None           # resolved path / host / mcp tool
     evidence: str | None = None         # the exact fragment that matched
     command_name: str | None = None     # tool family: aws | git | rm
+    # What the call does in a few words (`push to main on origin`), from the
+    # matcher's own facts; None when the matcher has no phrase for it.
+    summary: str | None = None
 
     # bookkeeping
     requires_audit: bool = False

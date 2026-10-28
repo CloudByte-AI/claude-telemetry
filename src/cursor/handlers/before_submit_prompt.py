@@ -86,9 +86,13 @@ def _run_security_scan(
     session_id: str,
     cwd: str | None,
     workspace_roots: list | None = None,
+    prompt_id: str | None = None,
 ) -> dict | None:
     """
     Run the security scan on the prompt text.
+
+    prompt_id is the turn's generation_id: a blocked prompt is never stored,
+    so its security event carries it to say which turn it was.
 
     Returns a Cursor hook output dict with {"continue": false, "user_message": "..."}
     if the prompt should be blocked, or None if the prompt is clean / scanning
@@ -156,6 +160,7 @@ def _run_security_scan(
             blocked=True,
             masked_text=masked_text,
             platform="cursor",
+            prompt_id=prompt_id,
             config=sec_cfg,
             session_root=(roots[0] if roots else cwd),
         )
@@ -245,7 +250,7 @@ def handle_before_submit_prompt() -> None:
         # If the scan detects secrets, block immediately. The raw secret is
         # never written to USER_PROMPT. write_finding() logs the masked version
         # to SECURITY_SCAN_EVENT. Failures always fail open.
-        block_response = _run_security_scan(prompt_text, session_id, cwd, workspace_roots)
+        block_response = _run_security_scan(prompt_text, session_id, cwd, workspace_roots, prompt_id=prompt_id)
         if block_response is not None:
             debug(f"Prompt blocked by security scan - session_id={session_id}")
             print(json.dumps(block_response))

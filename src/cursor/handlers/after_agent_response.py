@@ -49,9 +49,13 @@ def _scan_response_for_secrets(
     response_text: str,
     session_id: str | None,
     workspace_roots: list | None = None,
+    prompt_id: str | None = None,
 ) -> None:
     """
     Scan the agent response text for secrets when scope == 'both'.
+
+    prompt_id is the turn's generation_id - the USER_PROMPT and RESPONSE rows'
+    prompt_id - so a finding links to the prompt the response answered.
 
     Log-only - afterAgentResponse has no output fields so findings cannot
     be shown to the user from this hook. Findings are written to
@@ -118,6 +122,7 @@ def _scan_response_for_secrets(
             blocked=False,
             masked_text=masked_text,
             platform="cursor",
+            prompt_id=prompt_id,
             config=sec_cfg,
             session_root=(roots[0] if roots else None),
         )
@@ -221,7 +226,9 @@ def handle_after_agent_response() -> None:
         # are recorded in SECURITY_SCAN_EVENT for the dashboard. Failures
         # always fail open.
         if response_text:
-            _scan_response_for_secrets(response_text, session_id, hook_data.get("workspace_roots"))
+            _scan_response_for_secrets(
+                response_text, session_id, hook_data.get("workspace_roots"), prompt_id=prompt_id,
+            )
 
     except Exception as e:
         debug(f"ERROR - {e}")

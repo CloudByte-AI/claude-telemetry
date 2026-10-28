@@ -9,7 +9,8 @@ visible and has almost no legitimate use in an agent session.
 
 from __future__ import annotations
 
-from src.guardrails.matchers.base import BaseMatcher, MatchResult
+from src.guardrails.matchers.base import (SSH_VALUE_OPTIONS, BaseMatcher, MatchResult, option_of, summary_value,
+                                          targets_production)
 from src.guardrails.registry import register_matcher
 from src.guardrails.toolcall import KIND_SHELL, ToolCall
 
@@ -96,6 +97,11 @@ class PrivilegeEscalationMatcher(BaseMatcher):
     DEFAULT_ALERT = "warn"
     FACTS = ("escalator", "wrapped_command")
 
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        wrapped = result.facts.get("wrapped_command")
+        return f"run {wrapped} as administrator" if wrapped else "run a command as administrator"
+
     def match(self, call: ToolCall) -> MatchResult | None:
         # PowerShell: `Start-Process <program> -Verb RunAs` starts it elevated.
         for command in call.commands:
@@ -171,6 +177,13 @@ class EncodedExecutionMatcher(BaseMatcher):
     DEFAULT_ACTION = "ask"
     DEFAULT_ALERT = "critical"
     FACTS = ("technique", "decoder")
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        if result.facts.get("technique") == "powershell_encodedcommand":
+            return "run an encoded PowerShell command"
+        decoder = result.facts.get("decoder")
+        return f"run code decoded by {decoder}" if decoder else "run encoded code"
 
     # PowerShell's own flag for exactly this, including its accepted prefixes.
     _ENCODED_FLAGS = frozenset({
@@ -266,6 +279,10 @@ def _schedule(command) -> tuple[str, str] | None:
     return None
 
 
+_SCHEDULER_LABELS = {"schtasks": "Task Scheduler", "powershell": "Task Scheduler", "at": "at",
+                     "systemd": "systemd timer", "launchd": "launchd"}
+
+
 def _value_of(command, flag: str) -> str | None:
     argv = command.argv
     return argv[argv.index(flag) + 1] if flag in argv and argv.index(flag) + 1 < len(argv) else None
@@ -284,6 +301,22 @@ class ScheduledExecutionMatcher(BaseMatcher):
     # (crontab -l, atq, schtasks /query) is not this operation.
     FACTS = ("scheduler", "action")
 
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        scheduler, action = result.facts.get("scheduler"), result.facts.get("action")
+        if scheduler == "cron":
+            # crontab replaces or removes the user's whole table, never one job.
+            if action == "remove":
+                return "remove all cron jobs"
+            if action == "modify":
+                return "edit the cron jobs"
+            source = next((o for o in (result.command.subcommand_path if result.command else ()) if o != "-"), None)
+            return f"replace all cron jobs with {summary_value(source)}" if source else "replace all cron jobs"
+        verb = {"modify": "change", "install": "install"}.get(str(action), str(action))
+        name = summary_value(option_of(result.command, "/tn", "//tn", "-taskname", "-name"))
+        label = _SCHEDULER_LABELS.get(str(scheduler), str(scheduler))
+        return f"{verb} scheduled task {name} ({label})" if name else f"{verb} a scheduled task ({label})"
+
     def match(self, call: ToolCall) -> MatchResult | None:
         for command in call.commands:
             found = _schedule(command)
@@ -291,3 +324,231 @@ class ScheduledExecutionMatcher(BaseMatcher):
                 scheduler, action = found
                 return self.hit(target=scheduler, command=command, scheduler=scheduler, action=action)
         return None
+
+
+# Options that take a value, ahead of the subcommand, per remote-shell tool.
+_KUBE_VALUE_OPTIONS = frozenset({
+    "-n", "--namespace", "--context", "--kubeconfig", "--cluster", "--user", "-s", "--server",
+    "--token", "--as", "--as-group", "--request-timeout",
+})
+_CLOUD_VALUE_OPTIONS = frozenset({
+    "--profile", "--region", "--output", "--endpoint-url", "--query", "--color", "--ca-bundle",
+    "--subscription", "-o", "--project", "--zone", "--account", "--configuration",
+})
+_WINDOWS_REMOTING = frozenset({"invoke-command", "icm", "enter-pssession", "etsn", "new-pssession", "nsn"})
+
+
+def _remote_channel(command) -> tuple[str, str | None] | None:
+    """(channel, host or target) when this command runs a command on another machine or in a pod."""
+    name = command.command_name.lower()
+    argv = command.argv
+    if name == "ssh":
+        operands = BaseMatcher.operands_from_subcommand(command, SSH_VALUE_OPTIONS)
+        # `ssh host` alone opens an interactive shell; with a command or a
+        # script on its input it runs one there. -N forwards ports only.
+        if operands and (len(operands) > 1 or command.stdin) and "-N" not in command.flags:
+            return "ssh", operands[0].rsplit("@", 1)[-1]
+        return None
+    if name in ("kubectl", "oc"):
+        sub = BaseMatcher.operands_from_subcommand(command, _KUBE_VALUE_OPTIONS)
+        if sub and sub[0] in ("exec", "cp", "debug", "attach", "rsh", "rsync"):
+            return f"kubectl_{sub[0]}", _kube_target(argv, sub[0])
+        return None
+    if name == "aws":
+        sub = BaseMatcher.operands_from_subcommand(command, _CLOUD_VALUE_OPTIONS)
+        if BaseMatcher.starts_with_run(sub, ("ssm", "send-command")):
+            return "aws_ssm", _flag_value(argv, ("--instance-ids", "--instance-id", "--targets"))
+        if BaseMatcher.starts_with_run(sub, ("ssm", "start-session")) and "portforwarding" not in " ".join(argv).lower():
+            return "aws_ssm", _flag_value(argv, ("--target",))
+        if BaseMatcher.starts_with_run(sub, ("ecs", "execute-command")):
+            return "aws_ecs_exec", _flag_value(argv, ("--task",))
+        return None
+    if name == "az":
+        sub = BaseMatcher.operands_from_subcommand(command, _CLOUD_VALUE_OPTIONS)
+        if BaseMatcher.starts_with_run(sub, ("vm", "run-command")) and len(sub) > 2 and sub[2] in ("invoke", "create"):
+            return "az_run_command", _flag_value(argv, ("--name", "-n"))
+        for run in (("containerapp", "exec"), ("webapp", "ssh"), ("ssh", "vm"), ("ssh", "arc")):
+            if BaseMatcher.starts_with_run(sub, run):
+                return "az_" + run[0], _flag_value(argv, ("--name", "-n"))
+        return None
+    if name == "gcloud":
+        sub = BaseMatcher.operands_from_subcommand(command, _CLOUD_VALUE_OPTIONS)
+        if BaseMatcher.starts_with_run(sub, ("compute", "ssh")):
+            return "gcloud_ssh", sub[2] if len(sub) > 2 else None
+        return None
+    if name == "heroku" and command.subcommand_path[:1] == ("run",):
+        return "heroku_run", _flag_value(argv, ("-a", "--app"))
+    if name in ("fly", "flyctl") and command.subcommand_path[:2] == ("ssh", "console"):
+        return "fly_ssh", _flag_value(argv, ("-a", "--app"))
+    if name in _WINDOWS_REMOTING:
+        if name in ("invoke-command", "icm") and not ({"-computername", "-cn", "-session", "-hostname",
+                                                      "-vmname", "-containerid"} & {f.lower() for f in command.flags}):
+            return None   # without a target, Invoke-Command runs locally
+        return "powershell_remoting", _flag_value(argv, ("-ComputerName", "-HostName", "-cn"), case_insensitive=True)
+    if name in ("psexec", "psexec64", "paexec"):
+        return "psexec", next((a.lstrip("\\") for a in argv if a.startswith("\\\\")), None)
+    if name == "winrs":
+        return "winrs", next((a.partition(":")[2] for a in argv if a.lower().startswith(("-r:", "/r:"))), None)
+    return None
+
+
+# Options of `kubectl exec` / `cp` / `debug` that take a value, after the subcommand.
+_KUBE_EXEC_VALUE_OPTIONS = _KUBE_VALUE_OPTIONS | {"-c", "--container", "--image", "--target", "-f", "--filename",
+                                                  "--pod-running-timeout", "--retries"}
+
+
+def _kube_target(argv, subcommand: str) -> str | None:
+    """The pod (or first path) a `kubectl exec` / `cp` names, past its options and their values."""
+    if subcommand not in argv:
+        return None
+    i = argv.index(subcommand) + 1
+    while i < len(argv):
+        token = argv[i]
+        if token == "--":
+            return None
+        if token.startswith("-"):
+            i += 2 if token in _KUBE_EXEC_VALUE_OPTIONS and "=" not in token else 1
+            continue
+        return token
+    return None
+
+
+def _flag_value(argv, names: tuple[str, ...], case_insensitive: bool = False) -> str | None:
+    """The value of the first of `names` in argv (`--name x` or `--name=x`)."""
+    wanted = {n.lower() for n in names} if case_insensitive else set(names)
+    for i, token in enumerate(argv):
+        option, eq, value = token.partition("=")
+        key = option.lower() if case_insensitive else option
+        if key in wanted:
+            if eq:
+                return value
+            if i + 1 < len(argv):
+                return argv[i + 1]
+    return None
+
+
+@register_matcher
+class RemoteExecutionMatcher(BaseMatcher):
+    OPERATION = "exec.remote"
+    DOMAIN = "exec"
+    DESCRIPTION = "Executes a command on a remote host"
+    APPLIES_TO = (KIND_SHELL,)
+    DEFAULT_ACTION = "allow"
+    DEFAULT_ALERT = "warn"
+    # channel: ssh, kubectl_exec (also cp, debug, attach, rsh), aws_ssm,
+    # aws_ecs_exec, az_run_command, az_containerapp, az_webapp, az_ssh,
+    # gcloud_ssh, heroku_run, fly_ssh, powershell_remoting, psexec, winrs.
+    # A local container (`docker exec`) is this machine, so it is not one.
+    # remote_host: the machine, pod or instance named. production: the command names
+    # a production target (context, profile, host, resource group).
+    FACTS = ("channel", "remote_host", "production")
+
+    def match(self, call: ToolCall) -> MatchResult | None:
+        for command in call.commands:
+            found = _remote_channel(command)
+            if found:
+                channel, host = found
+                return self.hit(target=host or channel, command=command, channel=channel, remote_host=host,
+                                production=targets_production(command, call))
+        return None
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        host = result.facts.get("remote_host")
+        where = f"on {host}" if host else "on another machine"
+        if str(result.facts.get("channel", "")).startswith("kubectl_"):
+            where = f"in pod {host}" if host else "in a pod"
+        prod = " (production)" if result.facts.get("production") else ""
+        return f"run a command {where}{prod}"
+
+
+# Programs a by-name kill most often takes down whole: every Node, Python or
+# Java process on the machine, not just the one the agent started.
+_RUNTIMES = frozenset({
+    "node", "python", "python3", "pythonw", "java", "javaw", "dotnet", "ruby", "php", "bun", "deno",
+    "code", "chrome", "msedge", "firefox", "bash", "powershell", "pwsh", "cmd", "claude", "cursor",
+    "explorer", "docker", "wsl",
+})
+
+
+# pkill / killall options that take a value (a signal, a parent id, a user...).
+_KILL_VALUE_OPTIONS = frozenset({
+    "-P", "--parent", "-g", "--pgroup", "-G", "--group", "-s", "--session", "-t", "--terminal", "-u", "--euid",
+    "-U", "--uid", "--signal", "-F", "--pidfile", "--ns", "--nslist", "-o", "--older-than", "-y", "--younger-than",
+})
+
+
+def _kill_operands(argv) -> list[str]:
+    """pkill / killall operands: the names or patterns, without option values."""
+    operands: list[str] = []
+    i = 0
+    while i < len(argv):
+        token = argv[i]
+        if token.startswith("-"):
+            i += 2 if token in _KILL_VALUE_OPTIONS else 1
+            continue
+        operands.append(token)
+        i += 1
+    return operands
+
+
+def _kill_target(command) -> tuple[str, str | None] | None:
+    """(method, program) when this command ends processes. method: pid, name or pattern."""
+    name = command.command_name.lower()
+    argv = command.argv
+    if name == "taskkill":
+        image = _flag_value(argv, ("/im", "//im", "-im"), case_insensitive=True)
+        return ("name", image) if image else ("pid", None)
+    if name == "kill":
+        program = _flag_value(argv, ("-name", "-processname"), case_insensitive=True)
+        return ("name", program) if program else ("pid", None)
+    if name in ("pkill", "killall"):
+        operands = _kill_operands(argv)
+        if not operands:
+            return "pid", None          # `pkill -P 123`: the children of one process
+        # `pkill -f "next dev"` matches the whole command line: a narrow pattern.
+        method = "pattern" if name == "pkill" and {"-f", "--full"} & command.flags else "name"
+        return method, operands[-1]
+    if name == "fuser" and "-k" in command.flags:
+        return "pid", None
+    if name in ("kill-port", "killport"):
+        return "pid", None
+    return None
+
+
+@register_matcher
+class ProcessKillMatcher(BaseMatcher):
+    OPERATION = "exec.process.kill"
+    DOMAIN = "exec"
+    DESCRIPTION = "Terminates a running process"
+    APPLIES_TO = (KIND_SHELL,)
+    DEFAULT_ACTION = "allow"
+    DEFAULT_ALERT = "info"
+    # by_name: processes chosen by program name (taskkill /IM, pkill, killall,
+    # Stop-Process -Name), which ends every process of that program, not one
+    # process id. pattern: chosen by a command-line pattern (pkill -f), which
+    # is usually one program the agent started. program: the name or pattern
+    # given. all_instances: a by-name kill of a common runtime (node, python,
+    # java, a browser, a shell), which also ends the user's other programs.
+    FACTS = ("by_name", "pattern", "program", "all_instances")
+
+    def match(self, call: ToolCall) -> MatchResult | None:
+        for command in call.commands:
+            found = _kill_target(command)
+            if found is None:
+                continue
+            method, program = found
+            by_name = method == "name"
+            # `Stop-Process -Name python3,python` names several programs.
+            names = {n.strip().lower().removesuffix(".exe") for n in (program or "").strip("\"'").split(",")}
+            return self.hit(target=program or command.command_name, command=command, by_name=by_name,
+                            pattern=method == "pattern", program=program,
+                            all_instances=by_name and bool(names & _RUNTIMES))
+        return None
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        if not result.facts.get("by_name"):
+            return None
+        program = result.facts.get("program") or "a program"
+        return f"end every {program} process" if result.facts.get("all_instances") else f"end processes named {program}"

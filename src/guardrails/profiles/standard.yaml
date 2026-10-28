@@ -6,10 +6,11 @@
 # replaced on plugin update.
 #
 # Posture: DETECT BROADLY, ENFORCE NARROWLY.
-# Every implemented matcher runs on every governed call, but only four
-# operations are enforced here, all as `ask`, never `deny`: a false `deny`
-# breaks someone's work, a false `ask` costs seconds. Deny rules live in
-# strict.yaml.
+# Every implemented matcher runs on every governed call, but only actions that
+# are hard to undo, reach other people, or touch production are enforced here,
+# all as `ask`, never `deny`: a false `deny` breaks someone's work, a false
+# `ask` costs seconds. Everyday work (builds, installs, commits, local edits)
+# never asks. Deny rules live in strict.yaml.
 #
 # Rules are evaluated TOP TO BOTTOM, first match wins, per table. Each table
 # MUST end with a row carrying no conditions - the explicit default.
@@ -84,6 +85,101 @@ tables:
         operation: fs.sensitive, kind: shell, is_destructive: true,
         decision: ask, alert: warn,
         reason: "This touches a credential or key file" }
+    # Before the push rows: `git add .env && git push` must not pass as a push.
+    - { id: cb.vcs.stage-credential,
+        operation: vcs.commit, stages_sensitive: true,
+        decision: ask, alert: critical,
+        reason: "This stages a credential or key file for a commit - its secrets would enter the history" }
+
+    # 5. Sharing work: a push or merge reaches other people and CI.
+    - { id: cb.vcs.push-dry-run,
+        operation: vcs.push, dry_run: true,
+        decision: allow, alert: info, reason: "A dry run pushes nothing" }
+    - { id: cb.vcs.push,
+        operation: vcs.push,
+        decision: ask, alert: warn,
+        reason: "This pushes commits to a remote - confirm the branch" }
+    # Staging every change (`git add -A`, `git add .`, `commit -a`) is how
+    # unrelated or teammates' files end up in a commit.
+    - { id: cb.vcs.stage-all,
+        operation: vcs.commit, stages_all: true,
+        decision: ask, alert: warn,
+        reason: "This stages every changed file - check nothing unrelated is included" }
+
+    # 6. Changes to live systems. The `production` rows read target names
+    #    (`--context prod`, `-g app-rg-prod`, `user@prod-db`); a target whose
+    #    name does not say production is not covered by them.
+    - { id: cb.devflow.deploy,
+        operation: devflow.deploy,
+        decision: ask, alert: warn,
+        reason: "This deploys or reconfigures a running service" }
+    - { id: cb.devflow.ci-trigger-production,
+        operation: devflow.ci.trigger, production: true,
+        decision: ask, alert: warn,
+        reason: "This starts a production pipeline" }
+    - { id: cb.exec.remote-production,
+        operation: exec.remote, production: true,
+        decision: ask, alert: warn,
+        reason: "This runs a command on a production machine" }
+    - { id: cb.infra.k8s-change-production,
+        operation: infra.k8s.change, production: true,
+        decision: ask, alert: warn,
+        reason: "This changes a production cluster" }
+    - { id: cb.infra.cloud-create-production,
+        operation: infra.cloud.create, production: true,
+        decision: ask, alert: warn,
+        reason: "This creates billable resources in production" }
+
+    # 7. Cloud deletes, access and network changes, any provider.
+    - { id: cb.infra.cloud-delete,
+        operation: infra.cloud.delete,
+        decision: ask, alert: critical,
+        reason: "This deletes cloud resources" }
+    - { id: cb.infra.iam-change,
+        operation: infra.iam.change,
+        decision: ask, alert: critical,
+        reason: "This changes who can access cloud resources" }
+    - { id: cb.sec.firewall-change,
+        operation: sec.firewall.change,
+        decision: ask, alert: warn,
+        reason: "This opens or changes a firewall rule" }
+    - { id: cb.infra.dns-change,
+        operation: infra.dns.change,
+        decision: ask, alert: warn,
+        reason: "This changes DNS records" }
+
+    # 8. Data: every row of a table, or any change to a production database.
+    - { id: cb.db.bulk-delete,
+        operation: db.bulk_delete,
+        decision: ask, alert: critical,
+        reason: "This deletes or updates every row of a table" }
+    - { id: cb.db.write-production,
+        operation: db.write, production: true,
+        decision: ask, alert: critical,
+        reason: "This changes data in a production database" }
+    - { id: cb.db.query-production,
+        operation: db.query, production: true,
+        decision: ask, alert: warn,
+        reason: "This queries a production database" }
+
+    # 9. Printing every environment variable exposes every secret in it. A
+    #    filtered look (`env | grep AWS_`) is a presence check and does not ask.
+    - { id: cb.sec.environment-dump,
+        operation: sec.credential.read, provider: environment, scope: all, filtered: false,
+        decision: ask, alert: warn,
+        reason: "This prints every environment variable" }
+
+    # 10. Ending a program by name ends all its processes, not one.
+    - { id: cb.exec.kill-by-name,
+        operation: exec.process.kill, by_name: true,
+        decision: ask, alert: warn,
+        reason: "This ends every process of a program" }
+
+    # 11. The agent changing its own settings, hooks or MCP servers.
+    - { id: cb.fs.agent-config-shell,
+        operation: fs.control_file, file_role: agent_config,
+        decision: ask, alert: warn,
+        reason: "This changes the agent's own settings" }
 
     - { id: cb.bash.default,
         decision: allow, alert: info, reason: "Default allow" }
@@ -107,16 +203,46 @@ tables:
         decision: allow, alert: info, audit: true,
         reason: "Read of a sensitive file - recorded" }
 
+    # 11 (continued). The same files through Write / Edit / Delete.
+    - { id: cb.fs.agent-config,
+        operation: fs.control_file, file_role: agent_config,
+        decision: ask, alert: warn,
+        reason: "This changes the agent's own settings" }
+
+    # 12. A script the agent writes and runs later: its content is checked when
+    #     it is written, for what this preset asks about when run directly.
+    - { id: cb.fs.script-risky,
+        operation: fs.script.write, risky: true,
+        decision: ask, alert: warn,
+        reason: "This script runs risky operations - review it before it is saved" }
+    - { id: cb.fs.script-production,
+        operation: fs.script.write, production: true,
+        decision: ask, alert: warn,
+        reason: "This script acts on production - review it before it is saved" }
+
     - { id: cb.file.default,
         decision: allow, alert: info, reason: "Default allow" }
 
   # ── MCP tools ───────────────────────────────────────────────────────────
   mcp:
+    # A whole-table write sent through a database MCP tool. The production rows
+    # of the bash table have no MCP copy: an MCP call names no host to judge.
+    - { id: cb.db.bulk-delete-mcp,
+        operation: db.bulk_delete,
+        decision: ask, alert: critical,
+        reason: "This deletes or updates every row of a table" }
+
     # 4. An MCP tool whose name says it deletes something.
     - { id: cb.mcp.delete,
         operation: mcp.delete,
         decision: ask, alert: warn,
         reason: "This MCP tool deletes data" }
+
+    # 5 (continued). Push and merge tools of git-hosting MCP servers.
+    - { id: cb.vcs.push-mcp,
+        operation: vcs.push,
+        decision: ask, alert: warn,
+        reason: "This pushes or merges commits on a remote - confirm the branch" }
 
     - { id: cb.mcp.default,
         decision: allow, alert: info, reason: "Default allow" }

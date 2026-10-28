@@ -1,9 +1,11 @@
 # Guardrails - MINIMAL preset
 #
-# Denies nothing, and asks about exactly two operations: the ones where being
-# wrong costs most and the prompt is rare enough to still be read. Everything
-# else is detected and allowed. Start here if you want the audit trail without
-# any change to how the agent behaves day to day.
+# Denies nothing, and asks only where being wrong costs most and the prompt is
+# rare enough to still be read: tearing down infrastructure, publishing a
+# package, deleting production cloud resources, and changing every row or
+# production data in a database. Everything else is detected and allowed.
+# Start here if you want the audit trail without any change to how the agent
+# behaves day to day.
 #
 # On Cursor, `ask` does not stop anything: Cursor shows no approval prompt for
 # it, so the call runs and is recorded as not_prompted. Only `deny` blocks there.
@@ -37,6 +39,22 @@ tables:
         decision: ask, alert: critical,
         reason: "This publishes to a package registry and cannot be undone" }
 
+    # Production cloud resources, read from their names, are gone for good.
+    - { id: cb.infra.cloud-delete-production,
+        operation: infra.cloud.delete, production: true,
+        decision: ask, alert: critical,
+        reason: "This deletes production cloud resources" }
+
+    # Every row of a table at once, usually a missing WHERE clause.
+    - { id: cb.db.bulk-delete,
+        operation: db.bulk_delete,
+        decision: ask, alert: critical,
+        reason: "This deletes or updates every row of a table" }
+    - { id: cb.db.write-production,
+        operation: db.write, production: true,
+        decision: ask, alert: critical,
+        reason: "This changes data in a production database" }
+
     - { id: cb.bash.default,
         decision: allow, alert: info, reason: "Default allow" }
 
@@ -45,6 +63,12 @@ tables:
         decision: allow, alert: info, reason: "Default allow" }
 
   mcp:
+    # A whole-table write sent through a database MCP tool. The production row
+    # of the bash table has no MCP copy: an MCP call names no host to judge.
+    - { id: cb.db.bulk-delete-mcp,
+        operation: db.bulk_delete,
+        decision: ask, alert: critical,
+        reason: "This deletes or updates every row of a table" }
     - { id: cb.mcp.default,
         decision: allow, alert: info, reason: "Default allow" }
 

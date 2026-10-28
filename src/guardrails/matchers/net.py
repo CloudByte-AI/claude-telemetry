@@ -161,6 +161,11 @@ class DownloadAndExecuteMatcher(BaseMatcher):
     DEFAULT_ALERT = "critical"
     FACTS = ("fetcher", "host", "technique")
 
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        host = result.facts.get("host")
+        return f"run code downloaded from {host}" if host else "run downloaded code"
+
     def match(self, call: ToolCall) -> MatchResult | None:
         commands = list(call.commands)
         fetchers = [c for c in commands if c.command_name in _FETCHERS]
@@ -255,6 +260,11 @@ class UploadMatcher(BaseMatcher):
     # network: `public`, or `private` for a LAN address. Sending to this
     # machine itself (localhost, 127.0.0.1) is not an upload and never fires.
     FACTS = ("host", "method", "network")
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        host = result.facts.get("host")
+        return f"send data to {host}" if host else "send data off this machine"
 
     _COPIERS = frozenset({"scp", "rsync"})
     _INTERACTIVE = frozenset({"sftp", "ftp"})
@@ -360,3 +370,68 @@ class WebSearchMatcher(BaseMatcher):
         # The query is the evidence; it is capped and masked before it reaches
         # an audit row.
         return self.hit(target="web_search", evidence=str(query))
+
+
+# ssh forwarding options: local (-L), remote (-R, exposes a local port on the
+# far side) and dynamic (-D, a SOCKS proxy).
+_SSH_FORWARDS = {"-L": "local", "-R": "remote", "-D": "dynamic"}
+# Tools that publish a local port on a public address.
+_PUBLIC_TUNNELS = frozenset({"ngrok", "cloudflared", "lt", "localtunnel", "localhost.run", "bore", "pagekite"})
+
+
+def _tunnel(command: Command) -> tuple[str, str] | None:
+    """(tool, direction) when this command opens a tunnel or a port forward."""
+    name = command.command_name.lower()
+    argv = command.argv
+    if name == "ssh":
+        for flag, direction in _SSH_FORWARDS.items():
+            if flag in command.flags:
+                return "ssh", direction
+        return None
+    if name in ("kubectl", "oc") and "port-forward" in command.subcommand_path[:6]:
+        return name, "local"
+    if name == "aws" and "start-session" in argv and any("portforwarding" in a.lower() for a in argv):
+        return "aws_ssm", "local"
+    if name == "gcloud" and "start-iap-tunnel" in argv:
+        return "gcloud", "local"
+    if name == "az" and command.subcommand_path[:3] == ("network", "bastion", "tunnel"):
+        return "az", "local"
+    if name in _PUBLIC_TUNNELS:
+        if name == "cloudflared" and "tunnel" not in argv:
+            return None
+        if name == "ngrok" and command.subcommand_path[:1] in (("config",), ("version",), ("help",), ("update",)):
+            return None
+        return name, "public"
+    if name == "tailscale" and command.subcommand_path[:1] in (("funnel",), ("serve",)):
+        return "tailscale", "public" if command.subcommand_path[0] == "funnel" else "private"
+    return None
+
+
+@register_matcher
+class TunnelMatcher(BaseMatcher):
+    OPERATION = "net.tunnel"
+    DOMAIN = "net"
+    DESCRIPTION = "Opens a tunnel or port forward"
+    APPLIES_TO = (KIND_SHELL,)
+    DEFAULT_ACTION = "allow"
+    DEFAULT_ALERT = "warn"
+    # tunnel_tool: ssh, kubectl, oc, aws_ssm, gcloud, az, ngrok, cloudflared,
+    # tailscale... direction: local (reach a remote port from here), remote
+    # (expose a local port on the far side), dynamic (a proxy), public (put a
+    # local port on the internet) or private (the tailnet only).
+    FACTS = ("tunnel_tool", "direction")
+
+    def match(self, call: ToolCall) -> MatchResult | None:
+        for command in call.commands:
+            found = _tunnel(command)
+            if found:
+                tool, direction = found
+                return self.hit(target=tool, command=command, tunnel_tool=tool, direction=direction)
+        return None
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        direction = result.facts.get("direction")
+        if direction == "public":
+            return f"put a local port on the internet ({result.facts.get('tunnel_tool')})"
+        return f"open a {direction} port forward ({result.facts.get('tunnel_tool')})"

@@ -780,5 +780,22 @@ def _decision(rule: Rule, frame: Frame, call: ToolCall) -> Decision:
         target=target,
         evidence=(evidence or "")[:256] or None,
         command_name=command_name,
+        summary=_summary(match),
         requires_audit=rule.audit,
     )
+
+
+def _summary(match: MatchResult | None) -> str | None:
+    """The detecting matcher's plain-words summary of its hit, or None. Never raises."""
+    if match is None:
+        return None
+    from src.guardrails.registry import MatcherRegistry
+
+    matcher_cls = MatcherRegistry.get(match.operation)
+    if matcher_cls is None:
+        return None
+    try:
+        text = matcher_cls.summary(match)
+    except Exception:
+        return None
+    return text or None

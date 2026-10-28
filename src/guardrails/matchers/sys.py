@@ -46,6 +46,8 @@ class PackageInstallMatcher(BaseMatcher):
     }
 
     _GLOBAL_FLAGS = frozenset({"-g", "--global", "--user", "--system"})
+    # Managers that install for the whole machine, never into a project.
+    _SYSTEM_MANAGERS = frozenset({"apt", "apt-get", "yum", "dnf", "brew", "choco", "winget", "scoop"})
 
     def match(self, call: ToolCall) -> MatchResult | None:
         for command in call.commands:
@@ -64,7 +66,7 @@ class PackageInstallMatcher(BaseMatcher):
                     target=packages[0] if packages else command.command_name,
                     command=command,
                     manager=command.command_name,
-                    is_global=bool(lowered & self._GLOBAL_FLAGS),
+                    is_global=bool(lowered & self._GLOBAL_FLAGS) or command.command_name in self._SYSTEM_MANAGERS,
                     package_count=len(packages),
                 )
         return None

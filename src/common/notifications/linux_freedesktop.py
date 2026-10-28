@@ -36,7 +36,35 @@ SENDERS = ("notify-send", "gdbus")
 
 
 def available() -> bool:
-    return _sender() is not None and has_session_bus()
+    return _sender() is not None and has_session_bus() and has_notification_service()
+
+
+SERVICE = "org.freedesktop.Notifications"
+
+
+def has_notification_service() -> bool:
+    """
+    Whether something on the session bus shows notifications, running or
+    started on demand. A bus with no such service (WSL, a headless session)
+    would accept the call and show nothing. Asked through gdbus; when only
+    notify-send is installed the question cannot be asked, so it counts as yes.
+    """
+    gdbus = shutil.which("gdbus")
+    if gdbus is None:
+        return True
+    for method in ("ListNames", "ListActivatableNames"):
+        try:
+            result = subprocess.run(
+                [gdbus, "call", "--session", "--dest", "org.freedesktop.DBus",
+                 "--object-path", "/org/freedesktop/DBus", "--method", f"org.freedesktop.DBus.{method}"],
+                stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3)
+        except Exception:
+            return True       # the bus could not be asked: do not stand in the way
+        if result.returncode != 0:
+            return True
+        if f"'{SERVICE}'" in result.stdout:
+            return True
+    return False
 
 
 def show(notice: Notice) -> bool:

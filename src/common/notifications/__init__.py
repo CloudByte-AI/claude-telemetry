@@ -5,9 +5,12 @@ Desktop notifications - one small API, one backend per operating system.
     show(notice)        # True once handed to the OS; never raises
 
     win32    windows_toast.py       Windows toast notifications
-    darwin   macos_osascript.py     AppleScript's `display notification`
+    darwin   macos_osascript.py     an AppleScript dialog with the app's icon (the
+                                    default), or `display notification`
     linux    linux_freedesktop.py   the freedesktop.org notification spec
                                     (notify-send, or gdbus when it is missing)
+    WSL      wsl_windows_toast.py   a Windows toast, through Windows PowerShell:
+                                    WSL has no notification service of its own
 
 `supported()` is False on an OS with no backend, or on Linux with no desktop
 bus; `show()` then returns False and does nothing, so callers need no OS check.
@@ -27,6 +30,13 @@ from pathlib import Path
 CRITICAL = "critical"
 WARN = "warn"
 LEVELS = (CRITICAL, WARN)
+
+# How macOS shows a notice. A dialog needs no permission and carries the app's
+# icon; a notification from a script appears under Script Editor's name and
+# icon, and only once the user has allowed Script Editor to notify.
+MAC_DIALOG = "dialog"
+MAC_NOTIFICATION = "notification"
+MAC_STYLES = (MAC_DIALOG, MAC_NOTIFICATION)
 
 # The sender name, where the OS lets an app choose one (Windows, Linux).
 APP_NAME = "CloudByte-AI"
@@ -56,6 +66,8 @@ class Notice:
     # list instead of stacking under it, where the OS supports that.
     tag: str | None = None
     group: str | None = None
+    # macOS only: MAC_DIALOG or MAC_NOTIFICATION. Other systems ignore it.
+    mac_style: str = MAC_DIALOG
 
     @property
     def sticky(self) -> bool:
@@ -72,6 +84,12 @@ def supported() -> bool:
         return bool(backend.available())
     except Exception:
         return False
+
+
+def backend_name() -> str | None:
+    """The backend this machine uses (`windows_toast`, `macos_osascript`, ...), or None. Never raises."""
+    backend = _backend()
+    return backend.__name__.rsplit(".", 1)[-1] if backend is not None else None
 
 
 def show(notice: Notice) -> bool:
@@ -130,11 +148,44 @@ def _unprintable(ch: str) -> bool:
     return code < 0x20 or 0x7F <= code < 0xA0 or 0xD800 <= code <= 0xDFFF
 
 
+def running_in_wsl() -> bool:
+    """Whether this is Linux running under Windows (WSL). Never raises."""
+    if not sys.platform.startswith("linux"):
+        return False
+    try:
+        import os
+        if os.environ.get("WSL_DISTRO_NAME"):
+            return True
+        return "microsoft" in Path("/proc/sys/kernel/osrelease").read_text(encoding="utf-8").lower()
+    except Exception:
+        return False
+
+
 def _backend():
     """This OS's backend module, or None. Never raises."""
     module_path = _BACKENDS.get(sys.platform)
+    if running_in_wsl():
+        # A Windows toast when Windows is reachable; the Linux backend otherwise.
+        wsl = _import(WSL_BACKEND)
+        if wsl is not None and _safe_available(wsl):
+            return wsl
     if module_path is None:
         return None
+    return _import(module_path)
+
+
+WSL_BACKEND = "src.common.notifications.wsl_windows_toast"
+
+
+def _safe_available(backend) -> bool:
+    try:
+        return bool(backend.available())
+    except Exception:
+        return False
+
+
+def _import(module_path: str):
+    """A backend module, or None when it cannot be imported. Never raises."""
     try:
         import importlib
         return importlib.import_module(module_path)
