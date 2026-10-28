@@ -11,8 +11,17 @@ operation - flag position must not decide whether a guardrail fires.
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 
-from src.guardrails.matchers.base import BaseMatcher, MatchResult, asks_for_help, option_of, summary_value
+from src.guardrails.matchers.base import (
+    BaseMatcher,
+    MatchResult,
+    asks_for_help,
+    is_sensitive_path,
+    option_of,
+    summary_path,
+    summary_value,
+)
 from src.guardrails.registry import register_matcher
 from src.guardrails.toolcall import KIND_MCP, KIND_SHELL, ToolCall
 
@@ -447,7 +456,9 @@ class CommitMatcher(BaseMatcher):
     # included, not chosen files (`git add -A`, `git add .`, `git commit -a`),
     # which is how unrelated or teammates' files end up in a commit. amend:
     # `commit --amend`. no_verify: the commit skips the repository's hooks.
-    FACTS = ("action", "stages_all", "amend", "no_verify")
+    # stages_sensitive: `git add` names a credential or key file (`.env`,
+    # `id_rsa`, `*.pem`), so its secrets are about to enter the history.
+    FACTS = ("action", "stages_all", "amend", "no_verify", "stages_sensitive")
 
     def match(self, call: ToolCall) -> MatchResult | None:
         hits = []
@@ -465,25 +476,35 @@ class CommitMatcher(BaseMatcher):
                 chosen = [o for o in paths if o not in _STAGE_ALL_PATHS]
                 stages_all = (bool(flags & _STAGE_ALL_FLAGS) and not chosen) \
                     or any(o in _STAGE_ALL_PATHS for o in paths)
-                hits.append(self.hit(target="all changes" if stages_all else (sub[1] if len(sub) > 1 else None),
+                sensitive = next((o for o in chosen if is_sensitive_path(o)), None)
+                hits.append(self.hit(target=sensitive or ("all changes" if stages_all else (sub[1] if len(sub) > 1 else None)),
                                      command=command, action="stage", stages_all=stages_all, amend=False,
-                                     no_verify=False))
+                                     no_verify=False, stages_sensitive=sensitive is not None))
             elif self.starts_with_run(sub, ("commit",)):
                 if "--dry-run" in flags:
                     continue
                 hits.append(self.hit(target="commit", command=command, action="commit",
                                      stages_all=bool(flags & {"-a", "--all"}), amend="--amend" in flags,
-                                     no_verify=bool(flags & {"-n", "--no-verify"})))
+                                     no_verify=bool(flags & {"-n", "--no-verify"}), stages_sensitive=False))
         if not hits:
             return None
-        # One call can stage and commit (`git add -A && git commit -m x`): report
-        # the step that takes in every change, if any, so a rule on it fires.
-        return next((h for h in hits if h.facts["stages_all"]), hits[-1])
+        # One call can stage and commit (`git add .env && git commit -m x`): report
+        # the step that matters most (a credential file, then every change), and
+        # carry both facts for the whole call, so a rule on either fires.
+        reported = next((h for h in hits if h.facts["stages_sensitive"]),
+                        next((h for h in hits if h.facts["stages_all"]), hits[-1]))
+        return replace(reported, facts={
+            **reported.facts,
+            "stages_all": any(h.facts["stages_all"] for h in hits),
+            "stages_sensitive": any(h.facts["stages_sensitive"] for h in hits),
+        })
 
     @classmethod
     def summary(cls, result: MatchResult) -> str | None:
         facts = result.facts
         if facts.get("action") == "stage":
+            if facts.get("stages_sensitive") and result.target:
+                return f"stage the credential file {summary_path(result.target)}"
             if facts.get("stages_all"):
                 return "stage every changed file"
             files = [o for o in cls.operands_from_subcommand(result.command, _GIT_VALUE_OPTIONS)[1:]

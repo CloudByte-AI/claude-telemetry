@@ -11,7 +11,7 @@ from __future__ import annotations
 import posixpath
 import re
 
-from src.guardrails.matchers.base import BaseMatcher, MatchResult, summary_path, summary_value
+from src.guardrails.matchers.base import BaseMatcher, MatchResult, is_sensitive_path, summary_path, summary_value
 from src.guardrails.registry import register_matcher
 from src.guardrails.toolcall import (
     KIND_DELETE,
@@ -27,32 +27,6 @@ from src.guardrails.toolcall import (
 # Commands that remove things, in either dialect (PowerShell's Remove-Item and
 # its aliases already normalise to `rm` in the parser).
 _DELETE_COMMANDS = frozenset({"rm", "rmdir", "shred", "srm", "unlink", "wipe"})
-
-# Filename shapes that carry credentials or keys. Matched on the basename or on
-# a path segment, never as a bare substring: `environment.ts` must not look like
-# a `.env`.
-_SENSITIVE_BASENAMES = frozenset({
-    ".env", ".npmrc", ".pypirc", ".netrc", ".git-credentials", ".htpasswd",
-    "credentials", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
-    "known_hosts", "authorized_keys", "secrets.yaml", "secrets.yml",
-    "secrets.json", "terraform.tfvars", ".dockercfg", "kubeconfig",
-})
-_SENSITIVE_SUFFIXES = (
-    ".pem", ".key", ".pfx", ".p12", ".jks", ".keystore", ".asc", ".ppk",
-    # Terraform variable files hold provider credentials (`prod.tfvars`).
-    ".tfvars", ".tfvars.json",
-)
-# `.env.production`, `.env.local`... A service-account KEY is a JSON file
-# (`service-account-prod.json`); `ServiceAccountController.ts` and a Helm
-# `serviceaccount.yaml` template hold no secret.
-_ENV_PREFIX = ".env."
-_SERVICE_ACCOUNT_PREFIXES = ("service-account", "serviceaccount", "service_account")
-# Committed templates that document a secret file's shape, never its values.
-_TEMPLATE_SUFFIXES = (".example", ".sample", ".template", ".dist", ".defaults", ".default", ".tmpl", ".tpl")
-# Directory segments whose contents are sensitive regardless of filename.
-_SENSITIVE_DIRS = frozenset({".ssh", ".aws", ".gnupg", ".kube", ".docker", ".azure"})
-# The public half of a key pair carries no secret (`~/.ssh/id_ed25519.pub`).
-_PUBLIC_SUFFIXES = (".pub",)
 
 # Shell commands whose operands are text, not files (`echo ".env" >> .gitignore`
 # writes .gitignore; its redirect is still checked).
@@ -104,27 +78,6 @@ _INDEX = re.compile(r"\[(?:-?\d+|\*)\]")
 
 def _looks_like_path(operand: str) -> bool:
     return not ("://" in operand or _NOT_A_PATH.intersection(operand) or _INDEX.search(operand))
-
-
-def _is_sensitive_path(path: str | None) -> bool:
-    if not path:
-        return False
-    normalised = str(path).replace("\\", "/").rstrip("/")
-    # A glob is judged by what it can match: `.env*` covers `.env`, `*.pem` a key.
-    basename = posixpath.basename(normalised).lower().replace("*", "").replace("?", "")
-    segments = {segment.lower() for segment in normalised.split("/")}
-
-    if basename.endswith(_TEMPLATE_SUFFIXES) or basename.endswith(_PUBLIC_SUFFIXES):
-        return False
-    if basename in _SENSITIVE_BASENAMES:
-        return True
-    if basename.endswith(_SENSITIVE_SUFFIXES):
-        return True
-    if basename.startswith(_ENV_PREFIX):
-        return True
-    if basename.startswith(_SERVICE_ACCOUNT_PREFIXES) and basename.endswith(".json"):
-        return True
-    return bool(segments & _SENSITIVE_DIRS)
 
 
 def _file_operands(command) -> list[str]:
@@ -327,7 +280,7 @@ class SensitiveFileMatcher(BaseMatcher):
 
     def match(self, call: ToolCall) -> MatchResult | None:
         for path, evidence, command in _candidate_paths(call):
-            if _is_sensitive_path(path):
+            if is_sensitive_path(path):
                 # `kind` distinguishes read from write, so ONE matcher serves
                 # both and the rule decides which it cares about:
                 #   { operation: fs.sensitive, kind: write, decision: ask }

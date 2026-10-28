@@ -85,6 +85,11 @@ tables:
         operation: fs.sensitive, kind: shell, is_destructive: true,
         decision: ask, alert: warn,
         reason: "This touches a credential or key file" }
+    # Before the push rows: `git add .env && git push` must not pass as a push.
+    - { id: cb.vcs.stage-credential,
+        operation: vcs.commit, stages_sensitive: true,
+        decision: ask, alert: critical,
+        reason: "This stages a credential or key file for a commit - its secrets would enter the history" }
 
     # 5. Sharing work: a push or merge reaches other people and CI.
     - { id: cb.vcs.push-dry-run,
@@ -220,6 +225,13 @@ tables:
 
   # ── MCP tools ───────────────────────────────────────────────────────────
   mcp:
+    # A whole-table write sent through a database MCP tool. The production rows
+    # of the bash table have no MCP copy: an MCP call names no host to judge.
+    - { id: cb.db.bulk-delete-mcp,
+        operation: db.bulk_delete,
+        decision: ask, alert: critical,
+        reason: "This deletes or updates every row of a table" }
+
     # 4. An MCP tool whose name says it deletes something.
     - { id: cb.mcp.delete,
         operation: mcp.delete,

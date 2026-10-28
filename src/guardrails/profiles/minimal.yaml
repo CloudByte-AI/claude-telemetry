@@ -63,6 +63,12 @@ tables:
         decision: allow, alert: info, reason: "Default allow" }
 
   mcp:
+    # A whole-table write sent through a database MCP tool. The production row
+    # of the bash table has no MCP copy: an MCP call names no host to judge.
+    - { id: cb.db.bulk-delete-mcp,
+        operation: db.bulk_delete,
+        decision: ask, alert: critical,
+        reason: "This deletes or updates every row of a table" }
     - { id: cb.mcp.default,
         decision: allow, alert: info, reason: "Default allow" }
 

@@ -14,6 +14,7 @@ and audit rows, so renaming one is a breaking change.
 
 from __future__ import annotations
 
+import posixpath
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -30,6 +31,32 @@ MAX_EVIDENCE = 256
 # Programs that run code they read on standard input (see reads_code_from_stdin).
 STDIN_SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
 STDIN_INTERPRETERS = frozenset({"python", "python3", "py", "node", "ruby", "perl", "php"})
+
+# Filename shapes that carry credentials or keys. Matched on the basename or on
+# a path segment, never as a bare substring: `environment.ts` must not look like
+# a `.env`.
+_SENSITIVE_BASENAMES = frozenset({
+    ".env", ".npmrc", ".pypirc", ".netrc", ".git-credentials", ".htpasswd",
+    "credentials", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
+    "known_hosts", "authorized_keys", "secrets.yaml", "secrets.yml",
+    "secrets.json", "terraform.tfvars", ".dockercfg", "kubeconfig",
+})
+_SENSITIVE_SUFFIXES = (
+    ".pem", ".key", ".pfx", ".p12", ".jks", ".keystore", ".asc", ".ppk",
+    # Terraform variable files hold provider credentials (`prod.tfvars`).
+    ".tfvars", ".tfvars.json",
+)
+# `.env.production`, `.env.local`... A service-account KEY is a JSON file
+# (`service-account-prod.json`); `ServiceAccountController.ts` and a Helm
+# `serviceaccount.yaml` template hold no secret.
+_ENV_PREFIX = ".env."
+_SERVICE_ACCOUNT_PREFIXES = ("service-account", "serviceaccount", "service_account")
+# Committed templates that document a secret file's shape, never its values.
+_TEMPLATE_SUFFIXES = (".example", ".sample", ".template", ".dist", ".defaults", ".default", ".tmpl", ".tpl")
+# Directory segments whose contents are sensitive regardless of filename.
+_SENSITIVE_DIRS = frozenset({".ssh", ".aws", ".gnupg", ".kube", ".docker", ".azure"})
+# The public half of a key pair carries no secret (`~/.ssh/id_ed25519.pub`).
+_PUBLIC_SUFFIXES = (".pub",)
 
 # Hosts that are this machine. Loopback only: a LAN address is another machine.
 _LOOPBACK = re.compile(r"^(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|::1|\[::1\]|host\.docker\.internal)$", re.I)
@@ -136,6 +163,32 @@ def targets_production(command: Command, call: ToolCall | None = None) -> bool:
 
 
 SUMMARY_VALUE_MAX = 40
+
+
+def is_sensitive_path(path: str | None) -> bool:
+    """
+    True when `path` names a credential or key file (`.env`, `id_rsa`, `*.pem`,
+    `~/.aws/...`). Templates (`.env.example`) and public keys are not. Shared by
+    every matcher that judges a path, so they agree on what a credential file is.
+    """
+    if not path:
+        return False
+    normalised = str(path).replace("\\", "/").rstrip("/")
+    # A glob is judged by what it can match: `.env*` covers `.env`, `*.pem` a key.
+    basename = posixpath.basename(normalised).lower().replace("*", "").replace("?", "")
+    segments = {segment.lower() for segment in normalised.split("/")}
+
+    if basename.endswith(_TEMPLATE_SUFFIXES) or basename.endswith(_PUBLIC_SUFFIXES):
+        return False
+    if basename in _SENSITIVE_BASENAMES:
+        return True
+    if basename.endswith(_SENSITIVE_SUFFIXES):
+        return True
+    if basename.startswith(_ENV_PREFIX):
+        return True
+    if basename.startswith(_SERVICE_ACCOUNT_PREFIXES) and basename.endswith(".json"):
+        return True
+    return bool(segments & _SENSITIVE_DIRS)
 
 
 def summary_value(value: str | None) -> str | None:

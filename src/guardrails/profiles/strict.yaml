@@ -66,6 +66,11 @@ tables:
         operation: db.bulk_delete,
         decision: deny, alert: critical,
         reason: "Deleting or updating every row is blocked. Add a WHERE clause that names the rows." }
+    # A committed secret stays in the history after the file is deleted.
+    - { id: cb.vcs.stage-credential,
+        operation: vcs.commit, stages_sensitive: true,
+        decision: deny, alert: critical,
+        reason: "Committing a credential or key file is blocked. Keep secrets out of the repository and add the file to .gitignore." }
 
     # ── ask tier ─────────────────────────────────────────────────────────
     - { id: cb.fs.cleanup-node-modules,
@@ -209,6 +214,16 @@ tables:
         decision: allow, alert: info, reason: "Default allow" }
 
   mcp:
+    # Whole-table writes and drops sent through a database MCP tool. The
+    # production rows of the bash table have no MCP copy: an MCP call names no
+    # host to judge.
+    - { id: cb.db.bulk-delete-mcp,
+        operation: db.bulk_delete,
+        decision: deny, alert: critical,
+        reason: "Deleting or updating every row is blocked. Add a WHERE clause that names the rows." }
+    - { id: cb.db.drop-mcp,
+        operation: db.drop,
+        decision: ask, alert: critical, reason: "This drops a database object" }
     - { id: cb.mcp.delete,
         operation: mcp.delete,
         decision: ask, alert: warn, reason: "This MCP tool deletes data" }

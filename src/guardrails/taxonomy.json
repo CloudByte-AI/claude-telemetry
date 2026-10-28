@@ -1101,7 +1101,8 @@
         "action",
         "amend",
         "no_verify",
-        "stages_all"
+        "stages_all",
+        "stages_sensitive"
       ]
     },
     {
