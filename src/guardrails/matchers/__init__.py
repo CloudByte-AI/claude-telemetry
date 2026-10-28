@@ -8,6 +8,7 @@ and rejects duplicates.
 """
 
 from src.guardrails.matchers import (  # noqa: F401
+    cloud,
     db,
     devflow,
     exec,
@@ -15,6 +16,7 @@ from src.guardrails.matchers import (  # noqa: F401
     infra,
     mcp,
     net,
+    script,
     sec,
     sys,
     vcs,
@@ -25,6 +27,6 @@ from src.guardrails.matchers import (  # noqa: F401
 from src.guardrails.matchers import reserved  # noqa: F401
 
 __all__ = [
-    "db", "devflow", "exec", "fs", "infra", "mcp", "net", "sec", "sys", "vcs",
+    "cloud", "db", "devflow", "exec", "fs", "infra", "mcp", "net", "sec", "sys", "vcs",
     "reserved",
 ]

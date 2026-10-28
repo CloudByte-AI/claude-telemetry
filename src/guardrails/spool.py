@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -104,9 +105,12 @@ def append_event(decision, call) -> bool:
         directory.mkdir(parents=True, exist_ok=True)
         row = _row(decision, call)
 
-        # Timestamp first so a plain name sort is chronological; the event id
+        # Timestamp first so a plain name sort is chronological. The wall clock
+        # can tick as coarsely as 15.6 ms (Windows), so a system-wide
+        # high-resolution counter orders events within one tick; the event id
         # makes the name unique across processes writing in the same instant.
-        stem = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%f')}-{row['event_id']}"
+        stem = (f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%f')}-{time.perf_counter_ns():020d}"
+                f"-{row['event_id']}")
         final = directory / f"{stem}{EVENT_SUFFIX}"
         temporary = directory / f"{stem}{TEMP_SUFFIX}"
 

@@ -569,6 +569,8 @@ def stop() -> None:
                         _sec_result = scan_text(_response_text, _sec_cfg.response_config)
                         if _sec_result.findings:
                             _masked_response = _mask_response(_response_text, _sec_result.findings)
+                            # The response's own prompt: the same id its RESPONSE
+                            # row was just written with.
                             write_finding(
                                 session_id=session_id,
                                 scan_target="response",
@@ -576,6 +578,7 @@ def stop() -> None:
                                 blocked=False,
                                 masked_text=_masked_response,
                                 platform="claude_code",
+                                prompt_id=last_effective_prompt_id,
                                 config=_sec_cfg,
                                 session_root=os.environ.get("CLAUDE_PROJECT_DIR") or cwd,
                             )

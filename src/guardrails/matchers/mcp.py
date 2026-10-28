@@ -38,12 +38,13 @@ _READ_VERBS = frozenset({
 
 def _verb_in(tool: str | None, verbs: tuple[str, ...]) -> str | None:
     """
-    The verb found in a tool name, matched on whole name segments so that
-    `undelete_file` does not read as a delete.
+    The verb found in a tool name, matched on whole name words so that
+    `undelete_file` does not read as a delete. camelCase names split into
+    words too: `createJiraIssue` is create, jira, issue.
     """
     if not tool:
         return None
-    segments = tool.replace("-", "_").lower().split("_")
+    segments = _name_words(tool)
     if segments and segments[0] in _READ_VERBS:
         return None
     for verb in verbs:
@@ -73,6 +74,10 @@ class McpWriteMatcher(BaseMatcher):
             mcp_server=call.mcp_server,
         )
 
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        return _mcp_summary(result)
+
 
 @register_matcher
 class McpDeleteMatcher(BaseMatcher):
@@ -94,6 +99,21 @@ class McpDeleteMatcher(BaseMatcher):
             verb=verb,
             mcp_server=call.mcp_server,
         )
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        return _mcp_summary(result)
+
+
+def _mcp_summary(result: MatchResult) -> str | None:
+    """`create_issue (github MCP)`."""
+    server = (result.facts.get("mcp_server") or "").removeprefix("mcp__").removesuffix("__")
+    tool = str(result.target or "")
+    if tool.startswith("mcp__"):
+        tool = tool.rsplit("__", 1)[-1]
+    if not tool:
+        return None
+    return f"{tool} ({server} MCP)" if server else f"{tool} (MCP)"
 
 
 # Words that name a credential on their own, and two-word names. A bare

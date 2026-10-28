@@ -11,7 +11,7 @@ from __future__ import annotations
 import posixpath
 import re
 
-from src.guardrails.matchers.base import BaseMatcher, MatchResult
+from src.guardrails.matchers.base import BaseMatcher, MatchResult, is_sensitive_path, summary_path, summary_value
 from src.guardrails.registry import register_matcher
 from src.guardrails.toolcall import (
     KIND_DELETE,
@@ -19,6 +19,7 @@ from src.guardrails.toolcall import (
     KIND_READ,
     KIND_SHELL,
     KIND_WRITE,
+    WRITE_KINDS,
     ToolCall,
     resolve_path,
 )
@@ -26,30 +27,6 @@ from src.guardrails.toolcall import (
 # Commands that remove things, in either dialect (PowerShell's Remove-Item and
 # its aliases already normalise to `rm` in the parser).
 _DELETE_COMMANDS = frozenset({"rm", "rmdir", "shred", "srm", "unlink", "wipe"})
-
-# Filename shapes that carry credentials or keys. Matched on the basename or on
-# a path segment, never as a bare substring: `environment.ts` must not look like
-# a `.env`.
-_SENSITIVE_BASENAMES = frozenset({
-    ".env", ".npmrc", ".pypirc", ".netrc", ".git-credentials", ".htpasswd",
-    "credentials", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
-    "known_hosts", "authorized_keys", "secrets.yaml", "secrets.yml",
-    "secrets.json", "terraform.tfvars", ".dockercfg", "kubeconfig",
-})
-_SENSITIVE_SUFFIXES = (
-    ".pem", ".key", ".pfx", ".p12", ".jks", ".keystore", ".asc", ".ppk",
-)
-# `.env.production`, `.env.local`... A service-account KEY is a JSON file
-# (`service-account-prod.json`); `ServiceAccountController.ts` and a Helm
-# `serviceaccount.yaml` template hold no secret.
-_ENV_PREFIX = ".env."
-_SERVICE_ACCOUNT_PREFIXES = ("service-account", "serviceaccount", "service_account")
-# Committed templates that document a secret file's shape, never its values.
-_TEMPLATE_SUFFIXES = (".example", ".sample", ".template", ".dist", ".defaults", ".default", ".tmpl", ".tpl")
-# Directory segments whose contents are sensitive regardless of filename.
-_SENSITIVE_DIRS = frozenset({".ssh", ".aws", ".gnupg", ".kube", ".docker", ".azure"})
-# The public half of a key pair carries no secret (`~/.ssh/id_ed25519.pub`).
-_PUBLIC_SUFFIXES = (".pub",)
 
 # Shell commands whose operands are text, not files (`echo ".env" >> .gitignore`
 # writes .gitignore; its redirect is still checked).
@@ -101,27 +78,6 @@ _INDEX = re.compile(r"\[(?:-?\d+|\*)\]")
 
 def _looks_like_path(operand: str) -> bool:
     return not ("://" in operand or _NOT_A_PATH.intersection(operand) or _INDEX.search(operand))
-
-
-def _is_sensitive_path(path: str | None) -> bool:
-    if not path:
-        return False
-    normalised = str(path).replace("\\", "/").rstrip("/")
-    # A glob is judged by what it can match: `.env*` covers `.env`, `*.pem` a key.
-    basename = posixpath.basename(normalised).lower().replace("*", "").replace("?", "")
-    segments = {segment.lower() for segment in normalised.split("/")}
-
-    if basename.endswith(_TEMPLATE_SUFFIXES) or basename.endswith(_PUBLIC_SUFFIXES):
-        return False
-    if basename in _SENSITIVE_BASENAMES:
-        return True
-    if basename.endswith(_SENSITIVE_SUFFIXES):
-        return True
-    if basename.startswith(_ENV_PREFIX):
-        return True
-    if basename.startswith(_SERVICE_ACCOUNT_PREFIXES) and basename.endswith(".json"):
-        return True
-    return bool(segments & _SENSITIVE_DIRS)
 
 
 def _file_operands(command) -> list[str]:
@@ -247,6 +203,10 @@ class DeleteMatcher(BaseMatcher):
                 return self.hit(target=resolve_path(found[0][0], call.cwd), command=command)
         return None
 
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        return f"delete {summary_path(result.target)}" if result.target else None
+
 
 @register_matcher
 class RecursiveDeleteMatcher(BaseMatcher):
@@ -259,6 +219,11 @@ class RecursiveDeleteMatcher(BaseMatcher):
     # disposable: every target, as written (not the folder the session runs
     # in), is build or dependency output - node_modules, dist, build, .next...
     FACTS = ("recursive", "forced", "target_count", "disposable")
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        target = summary_path(result.target) or "a folder"
+        return f"delete {target} and everything in it" if result.facts.get("recursive") else f"force-delete {target}"
 
     def match(self, call: ToolCall) -> MatchResult | None:
         # (command, targets, recursive, forced) for every forced or recursive delete.
@@ -292,6 +257,17 @@ class RecursiveDeleteMatcher(BaseMatcher):
         return None
 
 
+# How a shell command touches a credential file, for summaries.
+_SENSITIVE_VERBS = (
+    ("read", frozenset({"cat", "type", "get-content", "gc", "less", "more", "head", "tail", "bat", "grep",
+                        "source", ".", "strings", "xxd", "od"})),
+    ("delete", frozenset({"rm", "del", "erase", "remove-item", "unlink", "shred"})),
+    ("copy", frozenset({"cp", "copy", "copy-item", "scp", "rsync"})),
+    ("move", frozenset({"mv", "move", "move-item", "rename-item"})),
+    ("upload", frozenset({"curl", "wget", "http", "invoke-webrequest", "invoke-restmethod"})),
+)
+
+
 @register_matcher
 class SensitiveFileMatcher(BaseMatcher):
     OPERATION = "fs.sensitive"
@@ -304,13 +280,126 @@ class SensitiveFileMatcher(BaseMatcher):
 
     def match(self, call: ToolCall) -> MatchResult | None:
         for path, evidence, command in _candidate_paths(call):
-            if _is_sensitive_path(path):
+            if is_sensitive_path(path):
                 # `kind` distinguishes read from write, so ONE matcher serves
                 # both and the rule decides which it cares about:
                 #   { operation: fs.sensitive, kind: write, decision: ask }
                 # The command is attached so `is_destructive` reads THAT one.
                 return self.hit(target=path, evidence=evidence, command=command, sensitive_path=path)
         return None
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        # File tools (Read, Write, Edit) are already described by their own name and path.
+        if result.command is None:
+            return None
+        name = summary_value(posixpath.basename(str(result.target or "").replace("\\", "/"))) or "a credential file"
+        command_name = result.command.command_name.lower()
+        verb = next((v for v, names in _SENSITIVE_VERBS if command_name in names), None)
+        if command_name in ("sed", "perl") and any(f.startswith("-i") for f in result.command.flags):
+            verb = "change"
+        if verb is None:
+            verb = "change" if result.command.is_destructive else "use"
+        return f"{verb} credential file {name}"
+
+
+# Files that control the agent itself, the CI pipeline or git's hooks.
+# kind -> (paths relative to any folder, as `/`-joined lowercase suffixes or
+# folder prefixes ending in `/`).
+_CONTROL_FILES: dict[str, tuple[str, ...]] = {
+    "agent_config": (
+        ".claude/settings.json", ".claude/settings.local.json", ".claude/hooks/", ".claude.json",
+        ".mcp.json", ".cursor/hooks.json", ".cursor/mcp.json", ".cursor/cli.json", ".cursor/hooks/",
+    ),
+    "ci_pipeline": (
+        ".github/workflows/", ".gitlab-ci.yml", ".gitlab-ci.yaml", "jenkinsfile", "azure-pipelines.yml",
+        "azure-pipelines.yaml", "bitbucket-pipelines.yml", ".circleci/", ".buildkite/",
+    ),
+    "git_hook": (".git/hooks/", ".husky/", ".pre-commit-config.yaml", "lefthook.yml", "lefthook.yaml"),
+}
+# Shell commands that change the files they name (PowerShell's Remove-Item,
+# Copy-Item and Move-Item already resolve to rm, cp and mv).
+_CHANGING_COMMANDS = frozenset({
+    "rm", "rmdir", "unlink", "del", "mv", "cp", "tee", "touch", "truncate", "ln", "install",
+    "set-content", "add-content", "out-file", "new-item", "clear-content",
+})
+_CONTROL_KIND_WORDS = {"agent_config": "agent settings", "ci_pipeline": "CI pipeline", "git_hook": "git hook"}
+
+
+def _control_kind(path: str) -> str | None:
+    """The kind of control file `path` is, or None."""
+    normalised = "/" + str(path).replace("\\", "/").lower().lstrip("/")
+    for kind, shapes in _CONTROL_FILES.items():
+        for shape in shapes:
+            if shape.endswith("/"):
+                if f"/{shape}" in normalised + "/":
+                    return kind
+            elif normalised.endswith(f"/{shape}"):
+                return kind
+    return None
+
+
+def _control_scope(path: str) -> str:
+    """`home` for the user's own config (`~/.claude/...`), else `project`."""
+    from src.common.paths import get_home_dir
+
+    home = str(get_home_dir()).replace("\\", "/").rstrip("/").lower()
+    normalised = str(path).replace("\\", "/").lower()
+    if normalised.startswith(home + "/"):
+        rest = normalised[len(home) + 1:]
+        if rest.startswith((".claude/", ".cursor/")) or rest in (".claude.json", ".mcp.json"):
+            return "home"
+    return "project"
+
+
+def _changed_paths(call: ToolCall) -> list[tuple[str, object]]:
+    """(resolved_path, command) for every file this call writes, edits or deletes."""
+    if call.kind in WRITE_KINDS:
+        return [(path, None) for path in call.file_paths]
+    found: list[tuple[str, object]] = []
+    for command in call.commands:
+        targets = list(command.redirects)
+        name = command.command_name.lower()
+        operands = [o for o in command.subcommand_path if not o.startswith("-") and _looks_like_path(o)]
+        if name in ("cp", "mv", "install", "ln"):
+            targets += operands[-1:]
+        elif name in _CHANGING_COMMANDS:
+            targets += operands
+        elif name == "sed" and ({"-i", "--in-place"} & command.flags or any(a.startswith("-i") for a in command.argv)):
+            targets += operands[1:]
+        for target in targets:
+            resolved = resolve_path(target, call.cwd)
+            if resolved:
+                found.append((resolved, command))
+    return found
+
+
+@register_matcher
+class ControlFileMatcher(BaseMatcher):
+    OPERATION = "fs.control_file"
+    DOMAIN = "fs"
+    DESCRIPTION = "Changes a file that controls the agent, the CI pipeline or git hooks"
+    APPLIES_TO = (KIND_SHELL, KIND_WRITE, KIND_EDIT, KIND_DELETE)
+    DEFAULT_ACTION = "allow"
+    DEFAULT_ALERT = "warn"
+    # file_role: agent_config (the agent's settings, hooks and MCP servers),
+    # ci_pipeline (workflow files) or git_hook. scope: home (the user's own
+    # ~/.claude or ~/.cursor) or project (a repository's copy).
+    FACTS = ("file_role", "scope")
+
+    def match(self, call: ToolCall) -> MatchResult | None:
+        for path, command in _changed_paths(call):
+            kind = _control_kind(path)
+            if kind:
+                return self.hit(target=path, evidence=command.raw if command else path, command=command,
+                                file_role=kind, scope=_control_scope(path))
+        return None
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        words = _CONTROL_KIND_WORDS.get(result.facts.get("file_role"), "control file")
+        name = posixpath.basename(str(result.target or "").replace("\\", "/"))
+        return f"change {words} {name}".rstrip()
 
 
 @register_matcher

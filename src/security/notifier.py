@@ -176,25 +176,26 @@ Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction Silent
 
 
 def _notify_macos(message: str) -> None:
-    safe_message = message.replace("\\", "\\\\").replace('"', '\\"')
-    script = (
-        f'display alert "CloudByte" message "{safe_message}" '
-        f"as warning giving up after {AUTO_CLOSE_SECONDS}"
-    )
-    subprocess.Popen(
-        ["osascript", "-e", script],
-        start_new_session=True,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    _show_shared(message)
 
 
 def _notify_linux(message: str) -> None:
-    subprocess.Popen(
-        ["notify-send", "-t", str(AUTO_CLOSE_SECONDS * 1000), "CloudByte - Prompt blocked", message],
-        start_new_session=True,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    _show_shared(message)
+
+
+def _show_shared(message: str) -> None:
+    """
+    macOS, Linux and WSL: the shared notification backends. On macOS that is a
+    dialog with the CloudByte icon (no permission needed); text travels as
+    arguments, never as script. On WSL it is a Windows toast.
+    """
+    from src.common import notifications
+    from src.common.notifications.windows_toast import APP_ICON
+
+    notifications.show(notifications.Notice(
+        level=notifications.CRITICAL,
+        title="CloudByte Security  " + chr(0xB7) + "  Prompt blocked",
+        text=_strip_emoji(message),
+        icon=APP_ICON if APP_ICON.is_file() else None,
+        mac_style=notifications.MAC_DIALOG,
+    ))

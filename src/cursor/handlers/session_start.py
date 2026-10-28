@@ -119,6 +119,14 @@ def handle_session_start() -> None:
         except Exception as e:
             logger.debug(f"Worker check failed: {e}")
 
+        # A plugin update does not reach a dashboard that is already running.
+        try:
+            from src.guardrails.health import restart_if_older
+            if restart_if_older():
+                logger.info("Restarted the dashboard: it was running an older plugin release")
+        except Exception as e:
+            logger.debug(f"Dashboard version check failed: {e}")
+
         try:
             from src.workers.llm_client import ensure_worker_running
             worker_started = ensure_worker_running()
