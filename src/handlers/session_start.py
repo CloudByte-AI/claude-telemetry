@@ -180,6 +180,14 @@ def handle_session_start():
         except Exception as e:
             logger.debug(f"Worker check failed: {e}")
 
+        # A plugin update does not reach a dashboard that is already running.
+        try:
+            from src.guardrails.health import restart_if_older
+            if restart_if_older():
+                logger.info("Restarted the dashboard: it was running an older plugin release")
+        except Exception as e:
+            logger.debug(f"Dashboard version check failed: {e}")
+
         # ── Guardrails transport health ──────────────────────────────────────
         # Only for the opt-in HTTP transport, where a stopped dashboard fails
         # open silently and a stale one enforces an old engine. The shipped

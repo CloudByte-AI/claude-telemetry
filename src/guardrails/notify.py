@@ -16,8 +16,11 @@ rule and an `allow` never do, whatever the settings say.
 Settings live in ~/.cloudbyte/guardrails/guardrails_notifications.yaml:
 
     show: critical_and_warn     # off | critical | critical_and_warn
+    mac_style: dialog           # macOS only: dialog | notification
 
-No file means the default, critical_and_warn. The same rule on the same call
+No file means the defaults, critical_and_warn and dialog. On macOS a dialog
+needs no permission and shows the CloudByte icon; a notification appears as
+Script Editor, and only once the user has allowed Script Editor to notify. The same rule on the same call
 within REPEAT_WINDOW_SECONDS is shown once.
 
 Platform-neutral: the icon is assets/notifications/<platform>-<level>.png, so
@@ -35,7 +38,7 @@ from pathlib import Path
 
 import src.common.notifications as notifications
 from src.common.paths import get_guardrails_dir
-from src.guardrails.decision import ASK, CRITICAL, DENY, MESSAGE_PREFIX, WARN, Decision
+from src.guardrails.decision import ASK, CRITICAL, DENY, WARN, Decision
 from src.guardrails.toolcall import (
     KIND_DELETE,
     KIND_EDIT,
@@ -73,6 +76,9 @@ _LEVELS = {
 }
 
 _TITLE_SEPARATOR = "  \u00b7  "    # a middle dot, spaced out
+# The feature, named as a product in the title; the agent-facing messages keep
+# decision.MESSAGE_PREFIX.
+NOTICE_PREFIX = "CloudByte Guardrails"
 
 _FILE_VERBS = {
     KIND_READ: "read",
@@ -121,7 +127,7 @@ def notify_decision(decision: Decision, call: ToolCall) -> bool:
             _log().info(f"guardrails notification skipped ({about}): the same alert was shown "
                         f"less than {REPEAT_WINDOW_SECONDS}s ago (key {key})")
             return False
-        if notifications.show(build_notice(decision, call, tag=key)):
+        if notifications.show(build_notice(decision, call, tag=key, mac_style=load_mac_style())):
             _log().info(f"guardrails notification handed to the OS ({about}, key {key})")
             return True
         _log().warning(f"guardrails notification not shown ({about}): the OS backend reported "
@@ -145,19 +151,21 @@ def wants_notification(decision: Decision) -> bool:
 
 # ── Wording ───────────────────────────────────────────────────────────────────
 
-def build_notice(decision: Decision, call: ToolCall, tag: str | None = None) -> notifications.Notice:
+def build_notice(decision: Decision, call: ToolCall, tag: str | None = None,
+                 mac_style: str = notifications.MAC_DIALOG) -> notifications.Notice:
     """The notification for one decision. Pure apart from checking the icon exists."""
     level, word = _LEVELS[decision.alert_level]
     icon = ICONS_DIR / f"{call.platform}-{decision.alert_level}.png"
     return notifications.Notice(
         level=level,
-        title=f"{MESSAGE_PREFIX}{_TITLE_SEPARATOR}{word}",
-        emphasis=MESSAGE_PREFIX,
+        title=f"{NOTICE_PREFIX}{_TITLE_SEPARATOR}{word}",
+        emphasis=NOTICE_PREFIX,
         text=f"{headline(decision)}: {decision.summary or describe(call)}",
         detail=decision.reason_text,
         icon=icon if icon.is_file() else None,
         tag=tag,
         group=GROUP,
+        mac_style=mac_style,
     )
 
 
@@ -224,6 +232,21 @@ def load_show_setting(path: Path | None = None) -> str:
     if raw is None:
         return DEFAULT_SHOW
     return parse_show(raw.get("show", DEFAULT_SHOW))
+
+
+def load_mac_style(path: Path | None = None) -> str:
+    """The `mac_style` setting (macOS only). A missing, unreadable or unknown value is dialog."""
+    try:
+        target = path or settings_path()
+        if not target.exists():
+            return notifications.MAC_DIALOG
+        from src.guardrails.config import read_yaml_mapping
+
+        raw = read_yaml_mapping(target, "guardrails notification settings") or {}
+        value = str(raw.get("mac_style", notifications.MAC_DIALOG)).strip().lower()
+        return value if value in notifications.MAC_STYLES else notifications.MAC_DIALOG
+    except Exception:
+        return notifications.MAC_DIALOG
 
 
 def parse_show(value) -> str:

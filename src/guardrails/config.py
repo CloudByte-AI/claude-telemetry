@@ -515,9 +515,12 @@ def profile_notes(raw: Any) -> list[str]:
       - a rule that can never fire, because a rule above it in the same table
         checks exactly the same thing and the first match wins.
       - a `cb.` id that is not one of the shipped rules.
+      - a field that names both a built-in call field and a fact of the rule's
+        operation: the rule reads the call field.
     """
     profile = raw if isinstance(raw, GuardrailsProfile) else parse_profile(raw, source="validation")
-    return _ask_notes(profile) + _unreachable_rule_notes(profile) + _builtin_prefix_notes(profile)
+    return (_ask_notes(profile) + _unreachable_rule_notes(profile) + _builtin_prefix_notes(profile)
+            + _shadowed_fact_notes(profile))
 
 
 def _ask_notes(profile: GuardrailsProfile) -> list[str]:
@@ -572,6 +575,39 @@ def _builtin_prefix_notes(profile: GuardrailsProfile) -> list[str]:
                     f"{rule.rule_id} uses the {BUILTIN_ID_PREFIX} prefix, which names the "
                     f"plugin's built-in rules, but it is not one of them. Give your own rules "
                     f"your own prefix, for example acme.prod-deploy."
+                )
+    return notes
+
+
+# A fact that always equals the call field of the same name: reading either gives the same value.
+_SAME_AS_CALL_FIELD = frozenset({"mcp_server"})
+
+
+def _shadowed_fact_notes(profile: GuardrailsProfile) -> list[str]:
+    """
+    A few released matchers report a fact under a built-in field's name (`tool`,
+    `host`, `flags`). A rule naming that field reads the call's own field, not
+    the fact, so `operation: db.dump, tool: pg_dump` compares against the tool
+    name (Bash) and never matches. Say so, with what the field really reads.
+    """
+    from src.guardrails.registry import MatcherRegistry
+    from src.guardrails.rules import KNOWN_FIELDS
+
+    notes = []
+    for table in profile.tables.values():
+        for rule in table.rules:
+            operations = {c.pattern for c in rule.constraints if c.field == "operation" and c.operator == "equals"}
+            if len(operations) != 1:
+                continue
+            operation = next(iter(operations))
+            matcher = MatcherRegistry.get(operation)
+            facts = set(getattr(matcher, "FACTS", ()) or ()) if matcher is not None else set()
+            fields = {c.field for c in rule.constraints} | {name for name, _ in rule.booleans}
+            for name in sorted(fields & facts & KNOWN_FIELDS - _SAME_AS_CALL_FIELD - {"operation"}):
+                notes.append(
+                    f"{rule.rule_id}: '{name}' reads the call's own {name}, not the {operation} fact of "
+                    f"the same name, so this condition may never match. Match on the command instead "
+                    f"(for example command_name or command)."
                 )
     return notes
 

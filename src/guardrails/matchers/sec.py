@@ -11,9 +11,45 @@ from __future__ import annotations
 
 import re
 
-from src.guardrails.matchers.base import BaseMatcher, MatchResult, remote_runs
+from src.guardrails.matchers.base import BaseMatcher, MatchResult, option_of, remote_runs, summary_value
 from src.guardrails.registry import register_matcher
 from src.guardrails.toolcall import KIND_SHELL, ToolCall
+
+# Where a secret is read from, for summaries.
+_SECRET_STORES = {"aws": "AWS", "az": "Azure", "gcloud": "Google Cloud", "kubectl": "Kubernetes",
+                  "oc": "OpenShift", "vault": "Vault", "doppler": "Doppler", "op": "1Password",
+                  "bw": "Bitwarden", "infisical": "Infisical"}
+# Options naming the secret itself (never one carrying a value).
+_SECRET_NAME_OPTIONS = ("--secret-id", "--secret", "--name", "--names", "--path")
+# kubectl options that take a value, skipped when finding the secret's name.
+_KUBE_VALUE_OPTIONS = frozenset({"-n", "--namespace", "-o", "--output", "-l", "--selector", "--context",
+                                 "--kubeconfig", "--field-selector", "--template"})
+
+
+def _secret_name(result: MatchResult) -> str | None:
+    """The secret a read names (`--secret-id prod/db`, `kubectl get secret db`), or None."""
+    command, provider = result.command, result.facts.get("provider")
+    if command is None or provider not in _SECRET_STORES:
+        return None
+    if provider in ("aws", "az", "gcloud"):
+        return summary_value(option_of(command, *_SECRET_NAME_OPTIONS))
+    argv = list(command.argv)
+    if provider in ("kubectl", "oc"):
+        start = next((i for i, token in enumerate(argv) if token.lower() in ("secret", "secrets")), None)
+        if start is None:
+            return None
+        skip = False
+        for token in argv[start + 1:]:
+            if skip:
+                skip = False
+                continue
+            if token.startswith("-"):
+                skip = "=" not in token and token.lower() in _KUBE_VALUE_OPTIONS
+                continue
+            return summary_value(token)
+        return None
+    operands = [token for token in argv if not token.startswith("-")]
+    return summary_value(operands[-1]) if len(operands) >= 2 else None
 
 
 # A secret's value fields in a kubectl output expression. Annotations count:
@@ -209,7 +245,15 @@ class CredentialReadMatcher(BaseMatcher):
         facts = result.facts
         if facts.get("provider") == "environment":
             return "print environment variables" + (" (filtered)" if facts.get("filtered") else " (all of them)")
-        return f"print a secret ({result.target})"
+        name = _secret_name(result)
+        if not name and str(result.target).endswith((" get secret", " get secrets")):
+            namespace = summary_value(option_of(result.command, "-n", "--namespace"))
+            return f"print every secret{f' in namespace {namespace}' if namespace else ''} (Kubernetes)"
+        if not name:
+            return f"print a secret ({result.target})"
+        vault = summary_value(option_of(result.command, "--vault-name"))
+        store = _SECRET_STORES.get(str(facts.get("provider")), str(facts.get("provider")))
+        return f"read secret {name}{f' from {vault}' if vault else ''} ({store})"
 
     # Formats that print what an expression selects. They print secret values
     # only when it selects the data (`{.data.password}`), not names or types

@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import re
 
-from src.guardrails.matchers.base import BaseMatcher, MatchResult, remote_runs, targets_production
+from src.guardrails.matchers.base import (BaseMatcher, MatchResult, option_of, remote_runs, summary_path,
+                                          summary_value, targets_production)
 from src.guardrails.registry import register_matcher
 from src.guardrails.toolcall import KIND_MCP, KIND_SHELL, ToolCall
 
@@ -98,6 +99,46 @@ def _sql_texts(command) -> list[str]:
     return texts
 
 
+# The object a statement acts on: `UPDATE orders SET`, `DELETE FROM orders`,
+# `INSERT INTO orders`, `DROP TABLE IF EXISTS orders`, `ALTER TABLE orders`.
+_STATEMENT_OBJECT = (r"\b{verb}\s+(?:(?:into|from|table|or|replace|if|not|exists|unique|index|view|schema|"
+                     r"database|collection|only)\s+)*"
+                     r"([`\"\[]?[\w$]+[`\"\]]?(?:\.[`\"\[]?[\w$]+[`\"\]]?)*)")
+# How each statement reads before its object: `INSERT into orders`, `DELETE from orders`.
+_STATEMENT_WORDS = {"insert": "INSERT into", "delete": "DELETE from", "merge": "MERGE into", "replace": "REPLACE into"}
+_NO_OBJECT_STATEMENTS = frozenset({"grant", "revoke", "copy", "upsert"})
+_NOT_OBJECT_NAMES = frozenset({"set", "select", "values", "where", "on", "to"})
+# Client options naming the database host (never a connection URL: it can hold a password).
+_HOST_OPTIONS = ("-h", "--host", "--hostname")
+
+
+def _statement_object(result: MatchResult, verb: str) -> str | None:
+    """The table (or other object) the SQL in the command that hit acts on; None when unclear."""
+    if not verb or verb in _NO_OBJECT_STATEMENTS or result.command is None:
+        return None
+    text = " ".join(result.command.argv)
+    found = re.search(_STATEMENT_OBJECT.format(verb=re.escape(verb)), text, re.IGNORECASE)
+    if not found:
+        return None
+    name = ".".join(part.strip("`\"[]") for part in found.group(1).split("."))
+    return None if name.lower() in _NOT_OBJECT_NAMES else summary_value(name)
+
+
+def _db_host(result: MatchResult) -> str | None:
+    """The host a database client run here was pointed at with a host option, else None."""
+    if result.facts.get("channel") != "client":
+        return None
+    names = _HOST_OPTIONS + (("-s", "--server") if result.facts.get("client") == "sqlcmd" else ())
+    return summary_value(option_of(result.command, *names))
+
+
+def _db_where(result: MatchResult, *extra: str) -> str:
+    """` (psql)`, ` (psql, production)`, plus any extra notes."""
+    parts = [str(result.facts.get("client") or ""), "production" if result.facts.get("production") else "", *extra]
+    parts = [part for part in parts if part]
+    return f" ({', '.join(parts)})" if parts else ""
+
+
 @register_matcher
 class DatabaseDropMatcher(BaseMatcher):
     OPERATION = "db.drop"
@@ -134,8 +175,11 @@ class DatabaseDropMatcher(BaseMatcher):
 
     @classmethod
     def summary(cls, result: MatchResult) -> str | None:
-        return f"drop a {result.facts.get('object_type')} ({result.facts.get('client')})" \
-               f"{' (production)' if result.facts.get('production') else ''}"
+        facts = result.facts
+        name = summary_value(result.target) if facts.get("channel") == "command" \
+            else _statement_object(result, "drop")
+        what = f"{facts.get('object_type')} {name}" if name else f"a {facts.get('object_type')}"
+        return f"drop {what}{_db_where(result)}"
 
 
 @register_matcher
@@ -273,9 +317,13 @@ class DatabaseWriteMatcher(BaseMatcher):
 
     @classmethod
     def summary(cls, result: MatchResult) -> str | None:
-        facts = result.facts
-        where = " in a production database" if facts.get("production") else ""
-        return f"run SQL {str(facts.get('statement', '')).upper()}{where} ({facts.get('client')})"
+        statement = str(result.facts.get("statement") or "")
+        table = _statement_object(result, statement)
+        text = f"{_STATEMENT_WORDS.get(statement, statement.upper())} {table}" if table \
+            else f"run SQL {statement.upper()}"
+        host = _db_host(result)
+        extra = ("rolled back",) if result.facts.get("rolled_back") else ()
+        return f"{text}{f' on {host}' if host else ''}{_db_where(result, *extra)}"
 
 
 @register_matcher
@@ -301,6 +349,22 @@ class DatabaseDumpMatcher(BaseMatcher):
                     destination=destination,
                 )
         return None
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        command = result.command
+        operands = command.subcommand_path if command is not None else ()
+        # sqlite3 takes the database file first (`sqlite3 app.db .dump`); the dump tools take it last.
+        positional = (operands[0] if result.facts.get("tool") == "sqlite3" else operands[-1]) if operands else None
+        database = summary_value(option_of(command, "-d", "--dbname", "--db", "--database")) \
+            or summary_value(positional)
+        destination = result.facts.get("destination")
+        if str(destination).lstrip("&") in ("1", "2") or str(destination).lower() in ("/dev/null", "nul"):
+            destination = None
+        destination = summary_path(destination) or summary_path(
+            option_of(command, "-f", "--file", "--out", "-o", "--result-file"))
+        text = f"export database {database}" if database else "export a database"
+        return f"{text}{f' to {destination}' if destination else ''} ({result.facts.get('tool')})"
 
 
 # Migration tools: name -> (whether the run may sit anywhere among the
@@ -420,3 +484,59 @@ class MigrationMatcher(BaseMatcher):
                 tool, direction = found
                 return self.hit(target=tool, command=command, tool=tool, direction=direction)
         return None
+
+
+
+# What a statement looks like, so option values (a host, a user, a database
+# name) are not one: SQL keywords at a statement start, psql meta-commands
+# (`\dt`), a mongo shell call (`db.users.find(...)`, never a host such as
+# `db.internal.example.com`), a redis command word.
+_SQL_STATEMENT = re.compile(
+    r"(?:^|;|\()\s*(?:select|with|show|describe|desc|explain|insert|update|delete|merge|upsert|replace|alter|"
+    r"create|drop|truncate|grant|revoke|copy|call|exec|execute|begin|values|table|pragma|use|set)\b"
+    r"|^\s*\\[a-z]+|\bdb\.[\w$]+(?:\.[\w$]+)*\s*\(",
+    re.IGNORECASE | re.MULTILINE,
+)
+_REDIS_COMMANDS = frozenset({
+    "get", "set", "mget", "mset", "del", "keys", "scan", "exists", "type", "ttl", "expire", "incr", "decr",
+    "hget", "hgetall", "hset", "hdel", "lrange", "lpush", "rpush", "smembers", "sadd", "zrange", "zadd",
+    "flushall", "flushdb", "info", "dbsize", "config", "client", "monitor", "eval", "publish", "xadd", "xrange",
+})
+
+
+def _is_statement(text: str, client: str) -> bool:
+    """Whether `text` given to `client` is a statement rather than an option value."""
+    if client == "redis-cli":
+        return text.strip().split(" ", 1)[0].lower() in _REDIS_COMMANDS
+    return bool(_SQL_STATEMENT.search(text))
+
+@register_matcher
+class DatabaseQueryMatcher(BaseMatcher):
+    OPERATION = "db.query"
+    DOMAIN = "db"
+    DESCRIPTION = "Sends a statement to a database, read or write"
+    APPLIES_TO = (KIND_SHELL, KIND_MCP)
+    DEFAULT_ACTION = "allow"
+    DEFAULT_ALERT = "info"
+    # Every statement a database client is given, reads included, by every
+    # channel db.write reads (a client here, in a container or pod, over ssh, an
+    # MCP SQL tool), so a rule can ask before anything touches a production
+    # database. statement_kind: write (what db.write detects) or read.
+    FACTS = ("statement_kind", "client", "channel", "production")
+
+    def match(self, call: ToolCall) -> MatchResult | None:
+        sources = [s for s in _sql_sources(call) if _is_statement(s[0], s[1])]
+        if not sources:
+            return None
+        writes = [s for s in sources if _WRITE.search(s[0])]
+        text, client, channel, command = (writes or sources)[0]
+        return self.hit(target=client, evidence=text.strip()[:120], command=command,
+                        statement_kind="write" if writes else "read", client=client, channel=channel,
+                        production=bool(command is not None and targets_production(command, call)))
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        kind = "change data" if result.facts.get("statement_kind") == "write" else "read data"
+        host = _db_host(result)
+        where = f" on {host}" if host else ""
+        return f"{kind}{where}{_db_where(result)}"

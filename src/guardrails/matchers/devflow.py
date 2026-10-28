@@ -7,7 +7,8 @@ cannot be truly unpublished, and the version number is burned either way.
 
 from __future__ import annotations
 
-from src.guardrails.matchers.base import BaseMatcher, MatchResult, asks_for_help, targets_production
+from src.guardrails.matchers.base import (BaseMatcher, MatchResult, asks_for_help, option_of, summary_value,
+                                          targets_production)
 from src.guardrails.registry import register_matcher
 from src.guardrails.toolcall import KIND_SHELL, ToolCall
 
@@ -129,6 +130,8 @@ class PublishMatcher(BaseMatcher):
             return f"push image {what} to a registry"
         if facts.get("artifact_kind") == "release":
             return f"publish release {what}"
+        if not facts.get("artifact"):
+            return f"publish this package with {facts.get('publisher')}"
         return f"publish {what} ({facts.get('publisher')})"
 
 
@@ -241,6 +244,11 @@ _VALUE_GLOBALS = frozenset({"--profile", "--region", "--output", "--query", "--s
                             "--account", "--config", "--chdir", "-chdir", "--cwd", "--stack", "-s", "--app", "-a"})
 _PREVIEWS = frozenset({"--dry-run", "--dryrun", "--preview", "--check", "--syntax-check",
                        "--list-hosts", "--list-tasks", "--list-tags", "--what-if", "--validate-only", "-destroy"})
+# Cloud CLIs whose deploy summary names the service acted on, and the options that name it.
+_CLOUD_DEPLOY_LABELS = {"aws": "AWS", "az": "Azure", "gcloud": "Google Cloud", "heroku": "Heroku",
+                        "supabase": "Supabase"}
+_DEPLOY_NAME_OPTIONS = ("--name", "-n", "--function-name", "--service", "--stack-name", "--environment-name",
+                        "--application-name", "--app", "-a", "--project-ref")
 _AUTO_APPROVE = frozenset({"-auto-approve", "--auto-approve", "--yes", "-y", "--skip-preview", "--no-confirm-changeset",
                            "--non-interactive", "--force"})
 
@@ -319,6 +327,16 @@ class DeployMatcher(BaseMatcher):
     @classmethod
     def summary(cls, result: MatchResult) -> str | None:
         facts = result.facts
-        prod = " to production" if facts.get("production") else ""
         auto = " without confirmation" if facts.get("auto_approved") else ""
-        return f"deploy with {facts.get('deploy_tool')}{prod}{auto}"
+        tool = str(facts.get("deploy_tool") or "")
+        if tool in _CLOUD_DEPLOY_LABELS and result.command is not None:
+            # `webapp restart shop-web (Azure)`: the cloud CLI's own words, and what they act on.
+            path = cls.operands_from_subcommand(result.command, _VALUE_GLOBALS)
+            run = next((r for r in _DEPLOYS[tool] if r and cls.starts_with_run(path, r)), None)
+            if run:
+                name = summary_value(option_of(result.command, *_DEPLOY_NAME_OPTIONS)) or (
+                    summary_value(path[len(run)]) if len(path) > len(run) else None)
+                where = ", ".join(p for p in (_CLOUD_DEPLOY_LABELS[tool], "production" if facts.get("production") else "") if p)
+                return f"{' '.join(run)}{f' {name}' if name else ''} ({where}){auto}"
+        prod = " to production" if facts.get("production") else ""
+        return f"deploy with {tool}{prod}{auto}"

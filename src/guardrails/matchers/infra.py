@@ -8,9 +8,69 @@ seconds.
 
 from __future__ import annotations
 
-from src.guardrails.matchers.base import BaseMatcher, MatchResult, asks_for_help, targets_production
+import re
+
+from src.guardrails.matchers.base import (BaseMatcher, MatchResult, asks_for_help, option_of, summary_path,
+                                          summary_value, targets_production)
 from src.guardrails.registry import register_matcher
 from src.guardrails.toolcall import KIND_SHELL, ToolCall
+
+
+# kubectl options that take a value, wherever they sit in the command.
+_KUBE_VALUE_OPTIONS = frozenset({
+    "-n", "--namespace", "--context", "--kubeconfig", "--cluster", "--user", "-s", "--server", "--token",
+    "-o", "--output", "-l", "--selector", "--field-selector", "-f", "--filename", "-k", "--kustomize",
+    "--clusterrole", "--role", "--serviceaccount", "--group", "--image", "--replicas", "--grace-period",
+    "--timeout", "-c", "--container", "--as", "--as-group", "--request-timeout", "--type", "--port",
+    "-p", "--patch", "--patch-file", "--overrides", "--env", "--labels", "--restart",
+})
+# What an object name looks like; shell leftovers (`2>&1`, `$VAR/x.json`) are not names.
+_OBJECT_NAME = re.compile(r"^[A-Za-z0-9][\w.:/@-]*$")
+_REDIRECT = re.compile(r"^\d*(?:[<>]{1,2}&?|&>)\S*$")
+
+
+def _cluster_label(context: str | None) -> str | None:
+    """A kube context for a summary: an EKS ARN (`arn:aws:eks:...:cluster/shop`) shows as its cluster name."""
+    if not context:
+        return None
+    if context.startswith("arn:") and "/" in context:
+        context = context.rsplit("/", 1)[-1]
+    return summary_value(context)
+
+
+def _object_names(result: MatchResult) -> str:
+    """` api` or ` api-0, api-1 and 2 more`: the objects named after the verb and kind, as a suffix."""
+    command = result.command
+    kind = result.facts.get("resource")
+    if command is None or not kind:
+        return ""
+    argv = list(command.argv)
+    if kind not in argv:
+        return ""
+    names: list[str] = []
+    skip = False
+    for token in argv[argv.index(kind) + 1:]:
+        if token == "--":
+            break
+        if skip:
+            skip = False
+            continue
+        if _REDIRECT.match(token):
+            # `2>&` `1`, `>` `out.log`: a redirect and its target are not objects.
+            skip = token.endswith((">", ">&", "<"))
+            continue
+        if token.startswith("-"):
+            skip = "=" not in token and token.lower() in _KUBE_VALUE_OPTIONS
+            continue
+        if "=" in token or not _OBJECT_NAME.match(token):
+            continue
+        value = summary_value(token)
+        if value:
+            names.append(value)
+    if not names:
+        return ""
+    more = f" and {len(names) - 2} more" if len(names) > 2 else ""
+    return f" {', '.join(names[:2])}{more}"
 
 
 @register_matcher
@@ -68,9 +128,13 @@ class KubernetesDeleteMatcher(BaseMatcher):
     @classmethod
     def summary(cls, result: MatchResult) -> str | None:
         facts = result.facts
-        what = f"every {facts.get('resource')}" if facts.get("all_resources") else (facts.get("resource") or "resources")
         where = f" in namespace {facts['namespace']}" if facts.get("namespace") else ""
-        return f"delete {what}{where} (Kubernetes)"
+        resource = facts.get("resource")
+        if result.command is not None and result.command.command_name == "helm":
+            return f"uninstall Helm release {resource}{where}" if resource else f"uninstall a Helm release{where}"
+        what = f"all {resource}" if facts.get("all_resources") else (resource or "resources")
+        names = "" if facts.get("all_resources") else _object_names(result)
+        return f"delete {what}{names}{where} (Kubernetes)"
 
     _TOOLS = frozenset({"kubectl", "oc", "helm", "k9s", "kubectl.exe"})
     # Global options that take a value, ahead of the subcommand: `kubectl -n prod delete`.
@@ -198,9 +262,25 @@ class KubernetesChangeMatcher(BaseMatcher):
         verb = facts.get("verb")
         prod = " (production)" if facts.get("production") else ""
         if verb in ("use-context", "set-context"):
-            return f"make {facts.get('context') or 'another cluster'} the default cluster{prod}"
-        where = f" on {facts['context']}" if facts.get("context") else ""
-        what = f" {facts['resource']}" if facts.get("resource") else ""
+            return f"make {_cluster_label(facts.get('context')) or 'another cluster'} the default cluster{prod}"
+        where = f" on {_cluster_label(facts['context'])}" if facts.get("context") else (
+            f" in namespace {facts['namespace']}" if facts.get("namespace") else "")
+        resource = facts.get("resource")
+        if result.command is not None and result.command.command_name == "helm":
+            return f"{verb} Helm release {resource}{where}{prod}" if resource else f"{verb} a Helm release{where}{prod}"
+        if verb in ("set", "rollout") and result.command is not None:
+            # `set image deployment/api`, `rollout restart deployment/api`: name the sub-action.
+            operands = cls.operands_from_subcommand(result.command, cls._VALUE_OPTIONS)
+            action = operands[1] if len(operands) > 1 else ""
+            joiner = " on" if verb == "set" else ""
+            return f"{verb} {action}{joiner} {resource or 'resources'}{where}{prod}".replace("  ", " ")
+        if verb == "run" and resource:
+            return f"run pod {summary_value(resource)}{where}{prod}"
+        what = f" {summary_path(resource)}" if resource else ""
+        # `create rolebinding ci-admin`: the object's own name follows its kind.
+        manifest = option_of(result.command, "-f", "--filename", "-k", "--kustomize")
+        if verb in cls._VERBS and resource and "/" not in resource and manifest is None:
+            what += _object_names(result)
         return f"{verb}{what}{where}{prod}"
 
 
@@ -213,6 +293,22 @@ class DockerPrivilegedMatcher(BaseMatcher):
     DEFAULT_ACTION = "ask"
     DEFAULT_ALERT = "warn"
     FACTS = ("technique", "flags")
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        technique = result.facts.get("technique")
+        if technique == "host_mount":
+            return f"run a container with {summary_value(result.target) or 'a host folder'} mounted"
+        if technique == "host_namespace":
+            target = str(result.target or "")
+            if target == "--cap-add":
+                return "run a container with extra kernel capabilities"
+            if target == "--device":
+                return "run a container with this machine's devices"
+            shared = {"--network": "network", "--net": "network", "--pid": "processes", "--ipc": "IPC",
+                      "--uts": "hostname", "--userns": "user namespace"}.get(target, "namespaces")
+            return f"run a container sharing this machine's {shared}"
+        return "run a privileged container (full access to this machine)"
 
     _TOOLS = frozenset({"docker", "podman", "nerdctl"})
     _VALUE_OPTIONS = frozenset({"-H", "--host", "--context", "--config", "-l", "--log-level"})

@@ -135,6 +135,57 @@ def targets_production(command: Command, call: ToolCall | None = None) -> bool:
     return False
 
 
+SUMMARY_VALUE_MAX = 40
+
+
+def summary_value(value: str | None) -> str | None:
+    """A value fit for a one-line summary: unquoted and cut to a readable length, or None."""
+    if not value:
+        return None
+    value = str(value).strip("'\"")
+    if not value:
+        return None
+    return value if len(value) <= SUMMARY_VALUE_MAX else value[:SUMMARY_VALUE_MAX - 3] + "..."
+
+
+SUMMARY_PATH_MAX = 48
+
+
+def summary_path(value: str | None) -> str | None:
+    """A path fit for a one-line summary: whole when short, else `.../` and its last segments."""
+    if not value:
+        return None
+    value = str(value).strip("'\"")
+    if len(value) <= SUMMARY_PATH_MAX:
+        return value or None
+    tail = value.replace("\\", "/")[-(SUMMARY_PATH_MAX - 4):]
+    if "/" in tail:
+        tail = tail[tail.index("/") + 1:] or tail
+    return f".../{tail}"
+
+
+def option_of(command: Command | None, *names: str) -> str | None:
+    """
+    The value given to the first of `names` (lowercase) on `command`, as
+    written (`--name x` or `--name=x`; option names match in any case, as
+    PowerShell's do), unquoted. None when no such option has a value.
+    """
+    if command is None:
+        return None
+    argv = command.argv
+    for name in names:
+        for index, token in enumerate(argv):
+            option, eq, value = token.partition("=")
+            if option.lower() != name:
+                continue
+            if not eq:
+                value = argv[index + 1] if index + 1 < len(argv) else ""
+            value = value.strip("'\"")
+            if value:
+                return value
+    return None
+
+
 def asks_for_help(command: Command) -> bool:
     """
     `--help` or `-h` as written, before any `--`. Case matters (`-H` is curl's

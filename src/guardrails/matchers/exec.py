@@ -9,7 +9,8 @@ visible and has almost no legitimate use in an agent session.
 
 from __future__ import annotations
 
-from src.guardrails.matchers.base import SSH_VALUE_OPTIONS, BaseMatcher, MatchResult, targets_production
+from src.guardrails.matchers.base import (SSH_VALUE_OPTIONS, BaseMatcher, MatchResult, option_of, summary_value,
+                                          targets_production)
 from src.guardrails.registry import register_matcher
 from src.guardrails.toolcall import KIND_SHELL, ToolCall
 
@@ -177,6 +178,13 @@ class EncodedExecutionMatcher(BaseMatcher):
     DEFAULT_ALERT = "critical"
     FACTS = ("technique", "decoder")
 
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        if result.facts.get("technique") == "powershell_encodedcommand":
+            return "run an encoded PowerShell command"
+        decoder = result.facts.get("decoder")
+        return f"run code decoded by {decoder}" if decoder else "run encoded code"
+
     # PowerShell's own flag for exactly this, including its accepted prefixes.
     _ENCODED_FLAGS = frozenset({
         "-encodedcommand", "-enc", "-e", "-ec", "-encoded",
@@ -271,6 +279,10 @@ def _schedule(command) -> tuple[str, str] | None:
     return None
 
 
+_SCHEDULER_LABELS = {"schtasks": "Task Scheduler", "powershell": "Task Scheduler", "at": "at",
+                     "systemd": "systemd timer", "launchd": "launchd"}
+
+
 def _value_of(command, flag: str) -> str | None:
     argv = command.argv
     return argv[argv.index(flag) + 1] if flag in argv and argv.index(flag) + 1 < len(argv) else None
@@ -291,7 +303,19 @@ class ScheduledExecutionMatcher(BaseMatcher):
 
     @classmethod
     def summary(cls, result: MatchResult) -> str | None:
-        return f"{result.facts.get('action')} a scheduled task ({result.facts.get('scheduler')})"
+        scheduler, action = result.facts.get("scheduler"), result.facts.get("action")
+        if scheduler == "cron":
+            # crontab replaces or removes the user's whole table, never one job.
+            if action == "remove":
+                return "remove all cron jobs"
+            if action == "modify":
+                return "edit the cron jobs"
+            source = next((o for o in (result.command.subcommand_path if result.command else ()) if o != "-"), None)
+            return f"replace all cron jobs with {summary_value(source)}" if source else "replace all cron jobs"
+        verb = {"modify": "change", "install": "install"}.get(str(action), str(action))
+        name = summary_value(option_of(result.command, "/tn", "//tn", "-taskname", "-name"))
+        label = _SCHEDULER_LABELS.get(str(scheduler), str(scheduler))
+        return f"{verb} scheduled task {name} ({label})" if name else f"{verb} a scheduled task ({label})"
 
     def match(self, call: ToolCall) -> MatchResult | None:
         for command in call.commands:

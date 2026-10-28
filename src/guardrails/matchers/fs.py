@@ -11,7 +11,7 @@ from __future__ import annotations
 import posixpath
 import re
 
-from src.guardrails.matchers.base import BaseMatcher, MatchResult
+from src.guardrails.matchers.base import BaseMatcher, MatchResult, summary_path, summary_value
 from src.guardrails.registry import register_matcher
 from src.guardrails.toolcall import (
     KIND_DELETE,
@@ -250,6 +250,10 @@ class DeleteMatcher(BaseMatcher):
                 return self.hit(target=resolve_path(found[0][0], call.cwd), command=command)
         return None
 
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        return f"delete {summary_path(result.target)}" if result.target else None
+
 
 @register_matcher
 class RecursiveDeleteMatcher(BaseMatcher):
@@ -265,7 +269,7 @@ class RecursiveDeleteMatcher(BaseMatcher):
 
     @classmethod
     def summary(cls, result: MatchResult) -> str | None:
-        target = result.target or "a folder"
+        target = summary_path(result.target) or "a folder"
         return f"delete {target} and everything in it" if result.facts.get("recursive") else f"force-delete {target}"
 
     def match(self, call: ToolCall) -> MatchResult | None:
@@ -300,6 +304,17 @@ class RecursiveDeleteMatcher(BaseMatcher):
         return None
 
 
+# How a shell command touches a credential file, for summaries.
+_SENSITIVE_VERBS = (
+    ("read", frozenset({"cat", "type", "get-content", "gc", "less", "more", "head", "tail", "bat", "grep",
+                        "source", ".", "strings", "xxd", "od"})),
+    ("delete", frozenset({"rm", "del", "erase", "remove-item", "unlink", "shred"})),
+    ("copy", frozenset({"cp", "copy", "copy-item", "scp", "rsync"})),
+    ("move", frozenset({"mv", "move", "move-item", "rename-item"})),
+    ("upload", frozenset({"curl", "wget", "http", "invoke-webrequest", "invoke-restmethod"})),
+)
+
+
 @register_matcher
 class SensitiveFileMatcher(BaseMatcher):
     OPERATION = "fs.sensitive"
@@ -319,6 +334,20 @@ class SensitiveFileMatcher(BaseMatcher):
                 # The command is attached so `is_destructive` reads THAT one.
                 return self.hit(target=path, evidence=evidence, command=command, sensitive_path=path)
         return None
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        # File tools (Read, Write, Edit) are already described by their own name and path.
+        if result.command is None:
+            return None
+        name = summary_value(posixpath.basename(str(result.target or "").replace("\\", "/"))) or "a credential file"
+        command_name = result.command.command_name.lower()
+        verb = next((v for v, names in _SENSITIVE_VERBS if command_name in names), None)
+        if command_name in ("sed", "perl") and any(f.startswith("-i") for f in result.command.flags):
+            verb = "change"
+        if verb is None:
+            verb = "change" if result.command.is_destructive else "use"
+        return f"{verb} credential file {name}"
 
 
 # Files that control the agent itself, the CI pipeline or git's hooks.

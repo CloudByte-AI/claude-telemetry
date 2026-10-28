@@ -94,6 +94,12 @@ tables:
         operation: vcs.push,
         decision: ask, alert: warn,
         reason: "This pushes commits to a remote - confirm the branch" }
+    # Staging every change (`git add -A`, `git add .`, `commit -a`) is how
+    # unrelated or teammates' files end up in a commit.
+    - { id: cb.vcs.stage-all,
+        operation: vcs.commit, stages_all: true,
+        decision: ask, alert: warn,
+        reason: "This stages every changed file - check nothing unrelated is included" }
 
     # 6. Changes to live systems. The `production` rows read target names
     #    (`--context prod`, `-g app-rg-prod`, `user@prod-db`); a target whose
@@ -146,6 +152,10 @@ tables:
         operation: db.write, production: true,
         decision: ask, alert: critical,
         reason: "This changes data in a production database" }
+    - { id: cb.db.query-production,
+        operation: db.query, production: true,
+        decision: ask, alert: warn,
+        reason: "This queries a production database" }
 
     # 9. Printing every environment variable exposes every secret in it. A
     #    filtered look (`env | grep AWS_`) is a presence check and does not ask.
@@ -193,6 +203,17 @@ tables:
         operation: fs.control_file, file_role: agent_config,
         decision: ask, alert: warn,
         reason: "This changes the agent's own settings" }
+
+    # 12. A script the agent writes and runs later: its content is checked when
+    #     it is written, for what this preset asks about when run directly.
+    - { id: cb.fs.script-risky,
+        operation: fs.script.write, risky: true,
+        decision: ask, alert: warn,
+        reason: "This script runs risky operations - review it before it is saved" }
+    - { id: cb.fs.script-production,
+        operation: fs.script.write, production: true,
+        decision: ask, alert: warn,
+        reason: "This script acts on production - review it before it is saved" }
 
     - { id: cb.file.default,
         decision: allow, alert: info, reason: "Default allow" }

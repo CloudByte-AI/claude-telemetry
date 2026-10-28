@@ -16,6 +16,7 @@ from src.guardrails.matchers import (  # noqa: F401
     infra,
     mcp,
     net,
+    script,
     sec,
     sys,
     vcs,

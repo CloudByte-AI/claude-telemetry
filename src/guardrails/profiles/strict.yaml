@@ -133,6 +133,9 @@ tables:
     - { id: cb.vcs.push,
         operation: vcs.push,
         decision: ask, alert: warn, reason: "This pushes commits to a remote - confirm the branch" }
+    - { id: cb.vcs.stage-all,
+        operation: vcs.commit, stages_all: true,
+        decision: ask, alert: warn, reason: "This stages every changed file - check nothing unrelated is included" }
 
     - { id: cb.devflow.deploy,
         operation: devflow.deploy,
@@ -165,6 +168,9 @@ tables:
     - { id: cb.db.write-production,
         operation: db.write, production: true,
         decision: ask, alert: critical, reason: "This changes data in a production database" }
+    - { id: cb.db.query-production,
+        operation: db.query, production: true,
+        decision: ask, alert: warn, reason: "This queries a production database" }
 
     - { id: cb.exec.kill-by-name,
         operation: exec.process.kill, by_name: true,
@@ -195,6 +201,10 @@ tables:
     - { id: cb.fs.control-file,
         operation: fs.control_file,
         decision: ask, alert: warn, reason: "This changes a file that controls the agent, CI or git" }
+    # A script the agent writes and runs later: any risky operation in it asks at write time.
+    - { id: cb.fs.script-write,
+        operation: fs.script.write,
+        decision: ask, alert: warn, reason: "This script runs risky operations - review it before it is saved" }
     - { id: cb.file.default,
         decision: allow, alert: info, reason: "Default allow" }
 

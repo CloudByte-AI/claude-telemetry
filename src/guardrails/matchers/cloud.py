@@ -15,7 +15,8 @@ from __future__ import annotations
 
 import re
 
-from src.guardrails.matchers.base import BaseMatcher, MatchResult, asks_for_help, targets_production
+from src.guardrails.matchers.base import (BaseMatcher, MatchResult, asks_for_help, option_of, summary_path,
+                                          summary_value, targets_production)
 from src.guardrails.registry import register_matcher
 from src.guardrails.toolcall import KIND_SHELL, ToolCall
 
@@ -61,10 +62,6 @@ def _production(command, call) -> bool:
     return targets_production(command, call)
 
 
-def _prod_suffix(result: MatchResult) -> str:
-    return " (production)" if result.facts.get("production") else ""
-
-
 _PROVIDER_NAMES = {"aws": "AWS", "az": "Azure", "gcloud": "Google Cloud", "doctl": "DigitalOcean",
                    "hcloud": "Hetzner", "kubernetes": "Kubernetes", "cloudflare": "Cloudflare"}
 
@@ -72,6 +69,25 @@ _PROVIDER_NAMES = {"aws": "AWS", "az": "Azure", "gcloud": "Google Cloud", "doctl
 def _provider(result: MatchResult) -> str:
     provider = str(result.facts.get("provider") or "")
     return _PROVIDER_NAMES.get(provider, provider)
+
+
+def _where(result: MatchResult) -> str:
+    """` (AWS)`, ` (AWS, production)`, or ` (production)` without a provider."""
+    parts = [part for part in (_provider(result), "production" if result.facts.get("production") else "")
+             if part]
+    return f" ({', '.join(parts)})" if parts else ""
+
+
+def _opt(result: MatchResult, *names: str) -> str | None:
+    """An option's value on the command that hit, cut to summary size."""
+    return summary_value(option_of(result.command, *names))
+
+
+def _tail(value: str | None) -> str | None:
+    """The last segment of an ARN or resource path (`arn:...:policy/ReadOnly` -> `ReadOnly`)."""
+    if not value:
+        return None
+    return summary_value(re.split(r"[/:]", value.rstrip("/"))[-1]) or summary_value(value)
 
 
 # -- deleting cloud resources -------------------------------------------------
@@ -197,8 +213,8 @@ class CloudDeleteMatcher(BaseMatcher):
     @classmethod
     def summary(cls, result: MatchResult) -> str | None:
         facts = result.facts
-        what = facts.get("resource") or f"{facts.get('service')} resources"
-        return f"delete {what} ({_provider(result)}){_prod_suffix(result)}"
+        what = summary_path(facts.get("resource")) or f"{facts.get('service')} resources"
+        return f"delete {what}{_where(result)}"
 
 
 # -- identity and access ------------------------------------------------------
@@ -299,8 +315,59 @@ class IamChangeMatcher(BaseMatcher):
     @classmethod
     def summary(cls, result: MatchResult) -> str | None:
         verbs = {"grant": "grant access", "revoke": "remove access", "change": "change access"}
-        return f"{verbs.get(result.facts.get('action'), 'change access')} ({_provider(result)})" \
-               f"{_prod_suffix(result)}"
+        text = _iam_detail(result) or verbs.get(result.facts.get("action"), "change access")
+        return f"{text}{_where(result)}"
+
+
+def _grant_text(action: str | None, who: str | None, what: str | None, on: str | None = None) -> str | None:
+    """`give ci-bot ReadOnly`, `remove ReadOnly from ci-bot`; None without both names."""
+    if not (who and what):
+        return None
+    where = f" on {on}" if on else ""
+    if action == "grant":
+        return f"give {who} {what}{where}"
+    if action == "revoke":
+        return f"remove {what} from {who}{where}"
+    return f"change {what} for {who}{where}"
+
+
+def _iam_detail(result: MatchResult) -> str | None:
+    """Who gets which access, read from the command that hit; None when it does not say."""
+    command = result.command
+    if command is None:
+        return None
+    provider, action = result.facts.get("provider"), result.facts.get("action")
+    if provider == "aws":
+        found = _aws(command)
+        aws_action = found[1] if found else ""
+        who = _opt(result, "--user-name", "--role-name", "--group-name", "--instance-profile-name") \
+            or _tail(option_of(result.command, "--principal-arn"))
+        policy = _tail(option_of(result.command, "--policy-arn")) or _opt(result, "--policy-name")
+        if aws_action == "create-access-key":
+            return f"create an access key for {who}" if who else "create an access key"
+        return _grant_text(action, who, policy) or (f"{aws_action.replace('-', ' ')} {who or ''}".strip() or None)
+    if provider == "az":
+        role = _opt(result, "--role")
+        who = _opt(result, "--assignee", "--assignee-object-id", "--object-id", "--upn", "--spn")
+        if role:
+            return _grant_text(action, who, f"role {role}") or f"{'remove' if action == 'revoke' else 'give'} role {role}"
+        if "keyvault" in _words(command):
+            vault = _opt(result, "--name", "-n")
+            return f"change access to key vault {vault}" if vault else None
+        return None
+    if provider == "gcloud":
+        words = _words(command)
+        binding = next((i for i, w in enumerate(words) if w.endswith("iam-policy-binding")), None)
+        resource = summary_value(words[binding + 1]) if binding is not None and binding + 1 < len(words) else None
+        return _grant_text(action, _opt(result, "--member"), _opt(result, "--role"), resource)
+    if provider == "kubernetes":
+        path = command.subcommand_path
+        if len(path) >= 3 and path[0] == "create":
+            role = _opt(result, "--clusterrole", "--role")
+            return f"create {path[1]} {summary_value(path[2])}" + (f" for role {role}" if role else "")
+        if len(path) >= 5 and path[:2] == ("adm", "policy"):
+            return _grant_text(action, summary_value(path[4]), f"role {summary_value(path[3])}")
+    return None
 
 
 # -- firewalls and network access ---------------------------------------------
@@ -421,11 +488,59 @@ class FirewallChangeMatcher(BaseMatcher):
     @classmethod
     def summary(cls, result: MatchResult) -> str | None:
         facts = result.facts
-        where = "this machine's firewall" if facts.get("provider") == "host" else f"a firewall rule ({_provider(result)})"
-        if facts.get("open_to_world"):
-            return f"open {where} to the whole internet{_prod_suffix(result)}"
+        port = _firewall_port(result)
         verb = {"open": "open", "close": "remove"}.get(facts.get("action"), "change")
-        return f"{verb} {where}{_prod_suffix(result)}"
+        if facts.get("provider") == "host":
+            if not port:
+                return f"{verb} this machine's firewall"
+            if verb == "open":
+                return f"open port {port} on this machine's firewall"
+            if verb == "remove":
+                return f"remove the rule for port {port} from this machine's firewall"
+            return f"change this machine's firewall rule for port {port}"
+        rule = _opt(result, "--group-id", "--group-name", "--nsg-name", "--server", "--name", "-n") \
+            or _firewall_rule_name(result)
+        what = f"port {port}" if port else "a firewall rule"
+        if verb == "remove" and port:
+            what = f"the rule for port {port}"
+        on = f" on {rule}" if rule else ""
+        world = " to the whole internet" if facts.get("open_to_world") else ""
+        return f"{'open' if world else verb} {what}{world}{on}{_where(result)}"
+
+
+# Options naming the port a firewall rule opens, per tool.
+_PORT_OPTIONS = ("--port", "--destination-port-ranges", "--destination-port-range", "--dport", "--ports",
+                 "--to-port", "--from-port", "-localport", "--allow", "--rules")
+_PORT_ASSIGNMENTS = re.compile(r"^(?:localport=|--add-port=|--remove-port=)(.+)$", re.IGNORECASE)
+_PORT_WORD = re.compile(r"^\d+(?:[:-]\d+)?(?:/(?:tcp|udp))?$", re.IGNORECASE)
+
+
+def _firewall_port(result: MatchResult) -> str | None:
+    """The port (or ports) the rule names, as written; None when the command does not say."""
+    command = result.command
+    if command is None:
+        return None
+    value = _opt(result, *_PORT_OPTIONS)
+    if value:
+        return value
+    for token in command.argv:
+        found = _PORT_ASSIGNMENTS.match(token)
+        if found:
+            return summary_value(found.group(1))
+    if command.command_name.lower() == "ufw":
+        argv = list(command.argv)
+        if "port" in argv and argv.index("port") + 1 < len(argv):
+            return summary_value(argv[argv.index("port") + 1])
+        return next((summary_value(t) for t in argv[1:] if _PORT_WORD.match(t)), None)
+    return None
+
+
+def _firewall_rule_name(result: MatchResult) -> str | None:
+    """`gcloud compute firewall-rules create NAME`: the rule's own name."""
+    if result.command is None or result.command.command_name.lower() != "gcloud":
+        return None
+    words = _words(result.command)
+    return summary_value(words[3]) if words[:2] == ["compute", "firewall-rules"] and len(words) > 3 else None
 
 
 # -- billable resources -------------------------------------------------------
@@ -487,7 +602,7 @@ def _cloud_create(command) -> tuple[str, str] | None:
         words = _words(command)
         if words[:3] in (["compute", "droplet", "create"], ["kubernetes", "cluster", "create"]) \
                 or words[:2] == ["databases", "create"]:
-            return "doctl", " ".join(words[:-1])
+            return "doctl", " ".join(words[:words.index("create")])
         return None
     if name == "hcloud":
         words = _words(command)
@@ -522,8 +637,37 @@ class CloudCreateMatcher(BaseMatcher):
 
     @classmethod
     def summary(cls, result: MatchResult) -> str | None:
-        return f"create a billable {result.facts.get('resource')} ({_provider(result)})" \
-               f"{_prod_suffix(result)}"
+        return f"{_create_detail(result)}{_where(result)}"
+
+
+# Options naming the resource being created, per tool.
+_CREATE_NAME_OPTIONS = ("--db-instance-identifier", "--db-cluster-identifier", "--cluster-name",
+                        "--cache-cluster-id", "--replication-group-id", "--domain-name", "--endpoint-name",
+                        "--notebook-instance-name", "--nodegroup-name", "--name", "-n")
+
+
+def _create_detail(result: MatchResult) -> str:
+    """`launch 4 p4d.24xlarge instances`, `create RDS db instance shop-db`, `create vm web-1`."""
+    resource = str(result.facts.get("resource") or "")
+    command = result.command
+    if command is None:
+        return f"create a billable {resource}"
+    provider = result.facts.get("provider")
+    if provider == "aws":
+        service, _, action = resource.partition(" ")
+        if action == "run-instances":
+            count, size = _opt(result, "--count"), _opt(result, "--instance-type")
+            plural = "instance" if count in (None, "1") else "instances"
+            return " ".join(part for part in ("launch", count, size, "EC2" if not size else None, plural) if part)
+        verb, _, noun = action.partition("-")
+        label = service.upper() if len(service) <= 3 else service
+        name = _opt(result, *_CREATE_NAME_OPTIONS)
+        return " ".join(part for part in (verb, label, noun.replace("-", " "), name) if part)
+    words = _words(command)
+    name = _opt(result, *_CREATE_NAME_OPTIONS)
+    if not name and "create" in words and words.index("create") + 1 < len(words):
+        name = summary_value(words[words.index("create") + 1])
+    return f"create {resource} {name}" if name else f"create a billable {resource}"
 
 
 # -- DNS ----------------------------------------------------------------------
@@ -595,4 +739,30 @@ class DnsChangeMatcher(BaseMatcher):
 
     @classmethod
     def summary(cls, result: MatchResult) -> str | None:
-        return f"change DNS records ({_provider(result)}){_prod_suffix(result)}"
+        return f"{_dns_detail(result)}{_where(result)}"
+
+
+def _dns_detail(result: MatchResult) -> str:
+    """`change DNS record www in zone example.com`, `delete DNS zone Z1`, else `change DNS records`."""
+    action = str(result.facts.get("action") or "")
+    command = result.command
+    if command is None:
+        return "change DNS records"
+    if action in ("create-hosted-zone", "delete-hosted-zone"):
+        zone = _opt(result, "--name", "--id")
+        return f"{action.split('-')[0]} DNS zone {zone}" if zone else f"{action.split('-')[0]} a DNS zone"
+    verb = "create" if action in ("create", "add-record", "post") else "delete" if action in (
+        "delete", "remove-record") else "change"
+    zone = _opt(result, "--hosted-zone-id", "--zone-name", "-z", "--zone")
+    record = None
+    if result.facts.get("provider") == "az":
+        record = _opt(result, "--record-set-name", "-n", "--name")
+    elif result.facts.get("provider") == "gcloud":
+        words = _words(command)
+        record = summary_value(words[3]) if len(words) > 3 and words[2] in ("create", "delete", "update") else None
+    elif result.facts.get("provider") == "doctl":
+        words = _words(command)
+        zone = summary_value(words[4]) if len(words) > 4 else None
+        record = _opt(result, "--record-name")
+    what = f"DNS record {record}" if record else "DNS records"
+    return f"{verb} {what}" + (f" in zone {zone}" if zone else "")

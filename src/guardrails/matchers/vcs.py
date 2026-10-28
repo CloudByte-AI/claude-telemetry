@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 
-from src.guardrails.matchers.base import BaseMatcher, MatchResult, asks_for_help
+from src.guardrails.matchers.base import BaseMatcher, MatchResult, asks_for_help, option_of, summary_value
 from src.guardrails.registry import register_matcher
 from src.guardrails.toolcall import KIND_MCP, KIND_SHELL, ToolCall
 
@@ -216,7 +216,26 @@ class HistoryRewriteMatcher(BaseMatcher):
 
     @classmethod
     def summary(cls, result: MatchResult) -> str | None:
-        return f"rewrite git history (git {result.facts.get('operation_kind')})"
+        kind = result.facts.get("operation_kind")
+        operands = cls.operands_from_subcommand(result.command, _GIT_VALUE_OPTIONS) if result.command else ()
+        ref = summary_value(next((o for o in operands[1:] if not o.startswith("-") and o != "--"), None))
+        if kind == "reset":
+            if ref and ref.upper() != "HEAD":
+                return f"hard-reset to {ref}, discarding later commits and uncommitted changes"
+            return "discard all uncommitted changes (git reset --hard)"
+        if kind == "rebase":
+            return f"rebase onto {ref}, rewriting this branch's commits" if ref else "rebase, rewriting this branch's commits"
+        if kind == "commit":
+            return "amend the last commit"
+        if kind in ("filter-branch", "filter-repo"):
+            return f"rewrite the whole repository history (git {kind})"
+        if kind == "checkout":
+            return f"force-checkout {ref}, discarding local changes" if ref else "force-checkout, discarding local changes"
+        if kind == "restore":
+            source = option_of(result.command, "--source", "-s")
+            return f"restore files from {source}, discarding local changes" if source \
+                else "restore files, discarding local changes"
+        return f"rewrite git history (git {kind})"
 
     # (subcommand, whether a flag is also required to make it destructive).
     # `restore --staged` only unstages, so it is not here; `--source` throws
@@ -409,3 +428,71 @@ class CredentialStoreMatcher(BaseMatcher):
         if not helper:
             return None                                   # an empty helper turns storing off
         return self.hit(target=rest[0], command=command, method="helper", helper=helper.split()[0])
+
+
+# `git add` arguments that stage every change in the tree, not chosen files.
+_STAGE_ALL_FLAGS = frozenset({"-A", "--all", "-u", "--update"})
+_STAGE_ALL_PATHS = frozenset({".", ":/", "*", "./", ":/."})
+
+
+@register_matcher
+class CommitMatcher(BaseMatcher):
+    OPERATION = "vcs.commit"
+    DOMAIN = "vcs"
+    DESCRIPTION = "Stages or commits changes"
+    APPLIES_TO = (KIND_SHELL,)
+    DEFAULT_ACTION = "allow"
+    DEFAULT_ALERT = "info"
+    # action: stage (git add) or commit. stages_all: every change in the tree is
+    # included, not chosen files (`git add -A`, `git add .`, `git commit -a`),
+    # which is how unrelated or teammates' files end up in a commit. amend:
+    # `commit --amend`. no_verify: the commit skips the repository's hooks.
+    FACTS = ("action", "stages_all", "amend", "no_verify")
+
+    def match(self, call: ToolCall) -> MatchResult | None:
+        hits = []
+        for command in self.commands_named(call, ("git",)):
+            if asks_for_help(command):
+                continue
+            sub = self.operands_from_subcommand(command, _GIT_VALUE_OPTIONS)
+            flags = set(command.flags)
+            if self.starts_with_run(sub, ("add",)):
+                if flags & {"-n", "--dry-run"}:
+                    continue
+                # `-A` / `-u` take in the whole tree only without paths: `git add -A
+                # -- src/a.ts` stages the changes under the paths it names.
+                paths = [o for o in sub[1:] if o != "--"]
+                chosen = [o for o in paths if o not in _STAGE_ALL_PATHS]
+                stages_all = (bool(flags & _STAGE_ALL_FLAGS) and not chosen) \
+                    or any(o in _STAGE_ALL_PATHS for o in paths)
+                hits.append(self.hit(target="all changes" if stages_all else (sub[1] if len(sub) > 1 else None),
+                                     command=command, action="stage", stages_all=stages_all, amend=False,
+                                     no_verify=False))
+            elif self.starts_with_run(sub, ("commit",)):
+                if "--dry-run" in flags:
+                    continue
+                hits.append(self.hit(target="commit", command=command, action="commit",
+                                     stages_all=bool(flags & {"-a", "--all"}), amend="--amend" in flags,
+                                     no_verify=bool(flags & {"-n", "--no-verify"})))
+        if not hits:
+            return None
+        # One call can stage and commit (`git add -A && git commit -m x`): report
+        # the step that takes in every change, if any, so a rule on it fires.
+        return next((h for h in hits if h.facts["stages_all"]), hits[-1])
+
+    @classmethod
+    def summary(cls, result: MatchResult) -> str | None:
+        facts = result.facts
+        if facts.get("action") == "stage":
+            if facts.get("stages_all"):
+                return "stage every changed file"
+            files = [o for o in cls.operands_from_subcommand(result.command, _GIT_VALUE_OPTIONS)[1:]
+                     if o != "--"] if result.command is not None else []
+            if not files:
+                return "stage files"
+            more = f" and {len(files) - 1} more" if len(files) > 1 else ""
+            return f"stage {summary_value(files[0])}{more}"
+        text = "amend the last commit" if facts.get("amend") else "commit staged changes"
+        if facts.get("stages_all"):
+            text = f"{text}, every changed file included"
+        return f"{text}, skipping commit hooks" if facts.get("no_verify") else text

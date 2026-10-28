@@ -298,3 +298,36 @@ def ensure_ready(timeout: float = READY_TIMEOUT_SECONDS) -> ProbeResult:
 
 # The name SessionStart imports.
 check_and_repair = ensure_ready
+
+
+def _version_key(version: str | None) -> tuple[int, ...] | None:
+    """`0.1.45` -> (0, 1, 45); None for anything that is not dotted numbers."""
+    parts = str(version or "").split(".")
+    return tuple(int(part) for part in parts) if parts and all(part.isdigit() for part in parts) else None
+
+
+def restart_if_older() -> bool:
+    """
+    Restart the dashboard when it runs an OLDER release of this plugin than this
+    copy. Returns True when it restarted it. Never raises.
+
+    For every install, whatever the guardrails transport: the dashboard loads
+    its code once, so after a plugin update it keeps serving the old release
+    until it stops. Only an older daemon is replaced, so two installs of
+    different versions (Claude Code and Cursor) settle on the newer one instead
+    of restarting each other. A process that does not answer as this plugin's
+    dashboard, or a version that cannot be compared, is left alone.
+    """
+    try:
+        if not _port_in_use():
+            return False
+        result = _probe_http()
+        if result.status != STALE:
+            return False
+        if result.daemon_version != "pre-guardrails":
+            theirs, mine = _version_key(result.daemon_version), _version_key(result.plugin_version)
+            if theirs is None or mine is None or theirs >= mine:
+                return False
+        return restart_daemon()
+    except Exception:
+        return False

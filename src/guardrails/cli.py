@@ -5,6 +5,8 @@ organisation manages guardrails centrally.
     python -m src.main guardrails workspace init   [--path DIR] [--preset NAME] [--force]
     python -m src.main guardrails workspace status [--path DIR]
     python -m src.main guardrails workspace path   [--path DIR]
+    python -m src.main guardrails notify-test
+    python -m src.main guardrails notify-test
 
 `init` writes the workspace file for a folder (default: the current one) from
 a shipped preset, keeping the preset's comments, and checks it with the same
@@ -155,6 +157,70 @@ def cmd_path(args) -> int:
     return 0
 
 
+# What each backend shows, and what to check when nothing appeared.
+_NOTIFY_HELP = {
+    "windows_toast": (
+        "A CloudByte-AI notification should appear at the bottom right now.",
+        ["Settings > System > Notifications: notifications on, and CloudByte-AI on.",
+         "Focus (Do not disturb) off."],
+    ),
+    "macos_osascript_dialog": (
+        "A CloudByte dialog should appear now. It closes by itself after 20 seconds.",
+        ["Send ~/.cloudbyte/logs/notifications-macos.log to your administrator."],
+    ),
+    "macos_osascript_notification": (
+        "A notification from Script Editor should appear at the top right now.",
+        ["Open Script Editor, run: display notification \"hello\" and click Allow when macOS asks.",
+         "System Settings > Notifications > Script Editor: Allow notifications on, style Banners or Alerts.",
+         "Focus (Do Not Disturb) off.",
+         "Or set mac_style: dialog in ~/.cloudbyte/guardrails/guardrails_notifications.yaml."],
+    ),
+    "wsl_windows_toast": (
+        "A CloudByte-AI notification should appear on the Windows desktop now (sent from WSL).",
+        ["Windows Settings > System > Notifications: notifications on, and CloudByte-AI on.",
+         "See ~/.cloudbyte/logs/notifications-wsl.log for what Windows reported."],
+    ),
+    "linux_freedesktop": (
+        "A CloudByte-AI notification should appear now.",
+        ["Your desktop's notifications on, and Do Not Disturb off."],
+    ),
+}
+
+
+def cmd_notify_test(args) -> int:
+    """Send one test notification and say how it was sent and what to check."""
+    from src.common import notifications
+    from src.guardrails.notify import ICONS_DIR, load_mac_style
+
+    backend = notifications.backend_name()
+    if backend is None or not notifications.supported():
+        print("CloudByte: this machine has no way to show desktop notifications "
+              "(no desktop session, or no notification service is running).")
+        print("Guardrail decisions are still enforced and recorded; only the pop-up is missing.")
+        return 1
+    style = load_mac_style()
+    key = f"{backend}_{style}" if backend == "macos_osascript" else backend
+    icon = ICONS_DIR / "claude_code-warn.png"
+    shown = notifications.show(notifications.Notice(
+        level=notifications.WARN,
+        title="CloudByte Guardrails  " + chr(0xB7) + "  Notification test",
+        text="If you can read this, guardrail notifications work on this machine.",
+        detail="Sent by: python -m src.main guardrails notify-test",
+        icon=icon if icon.is_file() else None,
+        mac_style=style,
+    ))
+    expect, checks = _NOTIFY_HELP.get(key, ("A notification should appear now.", []))
+    if not shown:
+        print("CloudByte: the test notification could not be sent. See the plugin log for the reason.")
+        return 1
+    print(f"CloudByte: test sent ({key}). {expect}")
+    if checks:
+        print("If nothing appeared:")
+        for number, check in enumerate(checks, 1):
+            print(f"  {number}. {check}")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="python -m src.main guardrails",
                                      description="Guardrails policy files.")
@@ -175,6 +241,9 @@ def main(argv: list[str]) -> int:
     path = actions.add_parser("path", help="Print where this folder's workspace policy lives")
     path.add_argument("--path")
     path.set_defaults(handler=cmd_path)
+
+    test = area.add_parser("notify-test", help="Send one test notification and say what to check")
+    test.set_defaults(handler=cmd_notify_test)
 
     args = parser.parse_args(argv)
     return args.handler(args)
