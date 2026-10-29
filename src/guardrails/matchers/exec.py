@@ -398,19 +398,30 @@ _KUBE_EXEC_VALUE_OPTIONS = _KUBE_VALUE_OPTIONS | {"-c", "--container", "--image"
 
 
 def _kube_target(argv, subcommand: str) -> str | None:
-    """The pod (or first path) a `kubectl exec` / `cp` names, past its options and their values."""
+    """
+    The pod a `kubectl exec` / `cp` names, past its options and their values.
+    For `cp` it is the `[namespace/]pod:path` operand, source or destination.
+    """
     if subcommand not in argv:
         return None
     i = argv.index(subcommand) + 1
+    operands: list[str] = []
     while i < len(argv):
         token = argv[i]
         if token == "--":
-            return None
+            break
         if token.startswith("-"):
             i += 2 if token in _KUBE_EXEC_VALUE_OPTIONS and "=" not in token else 1
             continue
-        return token
-    return None
+        if subcommand != "cp":
+            return token
+        operands.append(token)
+        i += 1
+    # `C:\dir` is a local Windows path, not a one-letter pod.
+    remote = next((o for o in operands if ":" in o and len(o.split(":", 1)[0]) > 1), None)
+    if remote:
+        return remote.split(":", 1)[0]
+    return operands[0] if operands else None
 
 
 def _flag_value(argv, names: tuple[str, ...], case_insensitive: bool = False) -> str | None:

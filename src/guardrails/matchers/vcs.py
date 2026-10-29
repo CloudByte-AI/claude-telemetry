@@ -21,6 +21,7 @@ from src.guardrails.matchers.base import (
     option_of,
     summary_path,
     summary_value,
+    without_redirects,
 )
 from src.guardrails.registry import register_matcher
 from src.guardrails.toolcall import KIND_MCP, KIND_SHELL, ToolCall
@@ -53,7 +54,8 @@ class ForcePushMatcher(BaseMatcher):
         branch = None
         if result.command is not None:
             sub = cls.operands_from_subcommand(result.command, _GIT_VALUE_OPTIONS)
-            branch = next((b for b in (_destination(r) for r in sub[2:]) if b), None)
+            refspecs = PushMatcher._positional(result.command, sub[1:])[1:]
+            branch = next((b for b in (_destination(r) for r in refspecs) if b), None)
         return f"force-push to {branch} on {remote}{lease}" if branch else f"force-push to {remote}{lease}"
 
     def match(self, call: ToolCall) -> MatchResult | None:
@@ -70,7 +72,8 @@ class ForcePushMatcher(BaseMatcher):
             # moved. Reported as a fact so a profile can allow it while still
             # asking about a bare --force.
             leased = "--force-with-lease" in lowered and not ({"-f", "--force"} & lowered or plus_ref)
-            remote = sub[1] if len(sub) > 1 else None
+            positional = PushMatcher._positional(command, sub[1:])
+            remote = positional[0] if positional else None
             return self.hit(
                 target=remote,
                 command=command,
@@ -164,17 +167,27 @@ class PushMatcher(BaseMatcher):
 
     @staticmethod
     def _positional(command, operands) -> list[str]:
-        """Remote and refspecs: the operands after `push`, minus the values of push's own options."""
+        """
+        Remote and refspecs: the operands after `push`, minus the values of
+        push's own options, separate or glued (`--force-with-lease=main:abc`).
+        A `--repo` value is the remote.
+        """
         values: list[str] = []
+        repo = None
         argv = command.argv
         for i, token in enumerate(argv):
+            option, glued, value = token.partition("=")
             if token in _PUSH_VALUE_OPTIONS and i + 1 < len(argv):
                 values.append(argv[i + 1])
+                repo = argv[i + 1] if token == "--repo" else repo
+            elif token.startswith("--") and glued:
+                values.append(value)
+                repo = value if option == "--repo" else repo
         positional = list(operands)
         for value in values:
             if value in positional:
                 positional.remove(value)
-        return positional
+        return ([repo] if repo else []) + positional
 
     def _pr_merge(self, command) -> MatchResult | None:
         """`gh pr merge 12`, `glab mr merge 7`: the remote merges into the base branch."""
@@ -255,8 +268,10 @@ class HistoryRewriteMatcher(BaseMatcher):
         (("filter-branch",), None),
         (("filter-repo",), None),
         (("commit",), frozenset({"--amend"})),
-        (("checkout",), frozenset({"--force", "-f"})),
-        (("restore",), frozenset({"--source", "-s"})),
+        # `checkout -f -B <branch> <start>` resets an existing branch to another
+        # commit (see match). `restore --source` and a bare `checkout -f` change
+        # only the working tree: those are vcs.clean.
+        (("checkout",), None),
     )
     # Steering a rebase already under way rewrites nothing new.
     _REBASE_CONTROL = frozenset({"--abort", "--quit", "--continue", "--skip", "--edit-todo", "--show-current-patch"})
@@ -271,6 +286,9 @@ class HistoryRewriteMatcher(BaseMatcher):
                 if required_flags and not (lowered & required_flags):
                     continue
                 if run == ("rebase",) and lowered & self._REBASE_CONTROL:
+                    continue
+                # Forced reset of a branch: -f with -B (case matters: -b creates).
+                if run == ("checkout",) and not ("-B" in command.flags and lowered & {"-f", "--force"}):
                     continue
                 return self.hit(
                     target=run[0],
@@ -361,9 +379,13 @@ class CleanMatcher(BaseMatcher):
                 {"-b", "-B", "--orphan", "-p", "--patch", "--ours", "--theirs", "--merge", "-m"} & flags
             ):
                 if "--" in command.argv or "." in sub[1:]:
-                    paths = sub[1:] if "--" not in command.argv else command.argv[command.argv.index("--") + 1:]
+                    argv = without_redirects(command.argv)
+                    paths = sub[1:] if "--" not in argv else argv[argv.index("--") + 1:]
                     return self.hit(target=paths[-1] if paths else ".", command=command,
                                     scope="changes", ignored=False)
+                # `checkout -f <branch>` switches and throws away local edits.
+                if {"-f", "--force"} & lowered:
+                    return self.hit(target=".", command=command, scope="changes", ignored=False)
 
             # git restore <path>: the working tree, unless only --staged.
             if self.starts_with_run(sub, ("restore",)) and len(sub) > 1:
@@ -474,8 +496,9 @@ class CommitMatcher(BaseMatcher):
                 # -- src/a.ts` stages the changes under the paths it names.
                 paths = [o for o in sub[1:] if o != "--"]
                 chosen = [o for o in paths if o not in _STAGE_ALL_PATHS]
-                stages_all = (bool(flags & _STAGE_ALL_FLAGS) and not chosen) \
-                    or any(o in _STAGE_ALL_PATHS for o in paths)
+                # -N / --intent-to-add records that paths exist but stages no content.
+                stages_all = not (flags & {"-N", "--intent-to-add"}) and (
+                    (bool(flags & _STAGE_ALL_FLAGS) and not chosen) or any(o in _STAGE_ALL_PATHS for o in paths))
                 sensitive = next((o for o in chosen if is_sensitive_path(o)), None)
                 hits.append(self.hit(target=sensitive or ("all changes" if stages_all else (sub[1] if len(sub) > 1 else None)),
                                      command=command, action="stage", stages_all=stages_all, amend=False,
