@@ -37,6 +37,10 @@ _CURL_SEND = frozenset({
     "-d", "--data", "--data-binary", "--data-raw", "--data-urlencode", "--data-ascii",
     "-F", "--form", "--form-string", "-T", "--upload-file", "--json",
 })
+# With -G / --get, curl appends -d / --data* to the URL as a query string and
+# sends a GET: nothing leaves as a body except a form, an upload or --json.
+_CURL_GET = frozenset({"-G", "--get"})
+_CURL_SEND_WITH_GET = frozenset({"-F", "--form", "--form-string", "-T", "--upload-file", "--json"})
 _WGET_SEND = frozenset({"--post-data", "--post-file", "--body-data", "--body-file"})
 # Invoke-WebRequest / Invoke-RestMethod (PowerShell flags are lower-cased).
 _POWERSHELL_SEND = frozenset({"-body", "-infile", "-form"})
@@ -308,6 +312,8 @@ class UploadMatcher(BaseMatcher):
             return bool(command.subcommand_path) and command.subcommand_path[0].upper() in _HTTPIE_METHODS
         if command.command_name == "wget":
             return bool(command.flags & _WGET_SEND)
+        if command.flags & _CURL_GET:
+            return bool(command.flags & _CURL_SEND_WITH_GET)
         return bool(command.flags & _CURL_SEND)
 
     @staticmethod

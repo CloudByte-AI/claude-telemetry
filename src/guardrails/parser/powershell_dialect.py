@@ -100,8 +100,20 @@ def looks_like_powershell(command: str) -> bool:
 
     Quoted text is ignored: `rm -rf src && powershell -Command "Remove-Item x
     -Force"` is a bash chain that happens to carry PowerShell as an argument.
+
+    A here-document or here-string (`<<EOF`, `<<'EOF'`, `<<<`) outside quotes
+    is POSIX-only: PowerShell has no `<<` operator. Its body is text, and may
+    well hold PowerShell (a script being written, an issue body), so it is
+    never read for markers.
     """
-    return bool(_MARKERS.search(_QUOTED.sub(" ", command or "")))
+    text = command or ""
+    quoted = [match.span() for match in _QUOTED.finditer(text)]
+    for heredoc in _POSIX_HEREDOC.finditer(text):
+        if not any(start <= heredoc.start() < end for start, end in quoted):
+            return False
+    return bool(_MARKERS.search(_QUOTED.sub(" ", text)))
 
 
 _QUOTED = re.compile(r"'[^']*'|\"(?:[^\"\\`]|[\\`].)*\"", re.DOTALL)
+# `<<WORD`, `<<-WORD`, `<<'WORD'`, `<<"WORD"`, and the here-string `<<<`.
+_POSIX_HEREDOC = re.compile(r"<<<|<<-?[ \t]*(['\"]?)[A-Za-z_][A-Za-z0-9_]*\1")

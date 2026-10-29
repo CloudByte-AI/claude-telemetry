@@ -56,6 +56,33 @@ def _secret_name(result: MatchResult) -> str | None:
 # `kubectl apply` keeps the whole manifest, data included, in the
 # last-applied-configuration annotation.
 _DATA_FIELD = re.compile(r"(?<![A-Za-z0-9_])(?:data|stringData|annotations)\b|last-applied", re.IGNORECASE)
+# A range over a secret's data that binds the key and the value
+# (`{{range $k, $v := .data}}`); printing only the key lists names, not values.
+_DATA_RANGE = re.compile(r"range\s+\$(\w+)\s*,\s*\$(\w+)\s*:=\s*\.(?:data|stringData)\b", re.IGNORECASE)
+
+# Words of an environment variable name that may hold a secret
+# (`DB_PASSWORD`, `GITHUB_TOKEN`, `DATABASE_URL`, `SENTRY_DSN`).
+_SECRET_VARIABLE_WORDS = frozenset({
+    "password", "passwd", "pass", "pwd", "secret", "secrets", "token", "tokens", "key", "keys", "apikey",
+    "credential", "credentials", "cred", "creds", "auth", "dsn", "private", "conn", "connection", "session",
+    "cookie", "jwt", "salt", "signing", "cert", "pem", "sas", "database", "db", "redis", "mongo", "mongodb",
+    "postgres", "pg", "mysql", "amqp", "smtp",
+})
+
+
+def _keys_only(expression: str) -> bool:
+    """Whether a template ranges over the data and prints only the key (`{{range $k, $v := .data}}{{$k}}`)."""
+    found = _DATA_RANGE.search(expression)
+    if not found:
+        return False
+    rest = expression[:found.start()] + expression[found.end():]
+    return not re.search(rf"\${found.group(2)}\b", rest) and not _DATA_FIELD.search(rest)
+
+
+def _secret_variable(name: str) -> bool:
+    """Whether an environment variable name may hold a secret. Unreadable names count."""
+    words = [word for word in re.split(r"[^A-Za-z0-9]+", name.lower()) if word]
+    return not words or not name.replace("_", "").isalnum() or any(word in _SECRET_VARIABLE_WORDS for word in words)
 
 
 @register_matcher
@@ -70,8 +97,40 @@ class CredentialReadMatcher(BaseMatcher):
     # `environment` for a dump of every environment variable. scope: one
     # (a named secret or token) or all (every variable at once). filtered: the
     # dump is piped through a filter (grep, findstr, Select-String), so only
-    # matching variables are printed.
-    FACTS = ("provider", "scope", "filtered")
+    # matching variables are printed. credential_type: token (a short-lived
+    # access token is minted), key (a long-lived account key, connection
+    # string, password or kubeconfig), secret (a stored secret or app setting)
+    # or environment (environment variables).
+    FACTS = ("provider", "scope", "filtered", "credential_type")
+
+    # Runs that mint a short-lived access token.
+    _TOKEN_RUNS = frozenset({
+        ("aws", "sts", "get-session-token"), ("aws", "sts", "assume-role"), ("aws", "sts", "get-federation-token"),
+        ("aws", "sts", "assume-role-with-web-identity"), ("aws", "sts", "assume-role-with-saml"),
+        ("aws", "ecr", "get-login-password"), ("aws", "ecr-public", "get-login-password"),
+        ("aws", "ecr", "get-authorization-token"), ("aws", "codeartifact", "get-authorization-token"),
+        ("aws", "rds", "generate-db-auth-token"), ("aws", "sso", "get-role-credentials"),
+        ("gcloud", "auth", "print-access-token"), ("gcloud", "auth", "print-identity-token"),
+        ("gcloud", "auth", "application-default", "print-access-token"),
+        ("az", "account", "get-access-token"), ("az", "storage", "account", "generate-sas"),
+        ("az", "storage", "container", "generate-sas"), ("az", "storage", "blob", "generate-sas"),
+        ("kubectl", "create", "token"), ("gh", "auth", "token"), ("gh", "auth", "status"),
+        ("heroku", "auth:token"),
+    })
+    # Runs that print a long-lived key, connection string, password or kubeconfig.
+    _KEY_RUNS = frozenset({
+        ("aws", "iam", "create-access-key"), ("aws", "configure", "export-credentials"),
+        ("az", "storage", "account", "keys", "list"), ("az", "storage", "account", "show-connection-string"),
+        ("az", "acr", "credential", "show"), ("az", "redis", "list-keys"),
+        ("az", "redisenterprise", "database", "list-keys"), ("az", "cosmosdb", "keys", "list"),
+        ("az", "webapp", "deployment", "list-publishing-credentials"),
+        ("az", "webapp", "deployment", "list-publishing-profiles"),
+        ("az", "cognitiveservices", "account", "keys", "list"), ("az", "search", "admin-key", "show"),
+        ("az", "appconfig", "credential", "list"),
+        ("az", "servicebus", "namespace", "authorization-rule", "keys", "list"),
+        ("az", "eventhubs", "namespace", "authorization-rule", "keys", "list"),
+        ("kubectl", "config", "view"), ("supabase", "projects", "api-keys"), ("git", "credential", "fill"),
+    })
 
     # command name -> token runs whose purpose is to emit a secret
     _SECRET_COMMANDS: dict[str, tuple[tuple[str, ...], ...]] = {
@@ -147,7 +206,7 @@ class CredentialReadMatcher(BaseMatcher):
         for command in call.commands:
             if command.command_name == "aws" and self._aws_configure_get(command):
                 return self.hit(target="aws configure get", command=command, provider="aws",
-                                scope="one", filtered=False)
+                                scope="one", filtered=False, credential_type="key")
             runs = self._SECRET_COMMANDS.get(command.command_name)
             if not runs:
                 continue
@@ -167,20 +226,34 @@ class CredentialReadMatcher(BaseMatcher):
                     provider=command.command_name,
                     scope="one",
                     filtered=False,
+                    credential_type=self._credential_type(command.command_name, run),
                 )
         for run in remote_runs(call):
             for inner in run.commands:
-                if self._dumps_environment(inner) or inner.command_name == "printenv":
+                # `printenv NAME` prints one variable: a credential only when the name may hold one.
+                if self._dumps_environment(inner) or (inner.command_name == "printenv" and any(
+                        _secret_variable(name) for name in inner.subcommand_path)):
                     return self.hit(target=f"{run.wrapper.command_name} exec {inner.command_name}",
                                     command=run.wrapper, provider=run.wrapper.command_name,
                                     scope="all" if not inner.subcommand_path else "one",
                                     filtered=self._filtered(run.commands, inner) or self._filtered(call.commands,
-                                                                                                    run.wrapper))
+                                                                                                    run.wrapper),
+                                    credential_type="environment")
         for command in call.commands:
             if self._dumps_environment(command):
                 return self.hit(target="environment", command=command, provider="environment", scope="all",
-                                filtered=self._filtered(call.commands, command))
+                                filtered=self._filtered(call.commands, command), credential_type="environment")
         return None
+
+    def _credential_type(self, name: str, run: tuple[str, ...]) -> str:
+        """token, key or secret for a secret command's run (`docker inspect` prints the environment)."""
+        if name in ("docker", "podman"):
+            return "environment"
+        if (name, *run) in self._TOKEN_RUNS:
+            return "token"
+        if (name, *run) in self._KEY_RUNS:
+            return "key"
+        return "secret"
 
     def _prints(self, command, run) -> bool:
         """Whether this run, with these options, prints the secret rather than a name or an id."""
@@ -280,7 +353,7 @@ class CredentialReadMatcher(BaseMatcher):
             if kind.startswith(self._SELECTING_OUTPUTS) and not kind.endswith("-file"):
                 # `.data` / `.stringData` as a field, not inside `.metadata`.
                 selects_data = bool(_DATA_FIELD.search(expression)) or expression.strip() in ("", "{}", "{.}", "{@}")
-                if not selects_data:
+                if not selects_data or _keys_only(expression):
                     continue
             return True
         return False
@@ -295,6 +368,16 @@ _HISTORY_OFF = re.compile(
     r"(?:^|[\n;&|(]\s*|\b(?:export|declare\s+-x|typeset\s+-x)\s+)"
     r"(HISTFILE=(?:/dev/null\b|\"\"|''|(?=[\s;&|)]|$))|(?:HISTSIZE|HISTFILESIZE|SAVEHIST)=0\b)"
 )
+# Quoted text, for blanking before that search: a quoted `export HISTFILE=/dev/null`
+# is data (a string in a script, a test case), not an assignment. An empty
+# pair stays, so `HISTFILE=""` still reads as emptying the variable.
+_QUOTED_TEXT = re.compile(r"'[^']*'|\"(?:[^\"\\]|\\.)*\"", re.DOTALL)
+
+
+def _without_quoted_text(text: str) -> str:
+    return _QUOTED_TEXT.sub(lambda m: m.group(0) if len(m.group(0)) == 2 else "''", text)
+
+
 _LOG_SERVICES = frozenset({"auditd", "rsyslog", "syslog", "syslog-ng", "systemd-journald", "journald", "eventlog"})
 _SERVICE_STOPS = frozenset({"stop", "disable", "mask", "kill"})
 
@@ -369,7 +452,7 @@ class AuditDisableMatcher(BaseMatcher):
         for command in call.commands:
             if command.stdin:
                 text = text.replace(command.stdin, "")
-        found = _HISTORY_OFF.search(text)
+        found = _HISTORY_OFF.search(_without_quoted_text(text))
         if found:
             return self.hit(target="shell_history", evidence=found.group(0).strip(),
                             area="shell_history", technique="disable")

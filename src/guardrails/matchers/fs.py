@@ -11,7 +11,14 @@ from __future__ import annotations
 import posixpath
 import re
 
-from src.guardrails.matchers.base import BaseMatcher, MatchResult, is_sensitive_path, summary_path, summary_value
+from src.guardrails.matchers.base import (
+    BaseMatcher,
+    MatchResult,
+    is_sensitive_path,
+    summary_path,
+    summary_value,
+    written_redirects,
+)
 from src.guardrails.registry import register_matcher
 from src.guardrails.toolcall import (
     KIND_DELETE,
@@ -358,7 +365,8 @@ def _changed_paths(call: ToolCall) -> list[tuple[str, object]]:
         return [(path, None) for path in call.file_paths]
     found: list[tuple[str, object]] = []
     for command in call.commands:
-        targets = list(command.redirects)
+        # Only redirects that write: `< ci.yml` reads the file.
+        targets = written_redirects(command)
         name = command.command_name.lower()
         operands = [o for o in command.subcommand_path if not o.startswith("-") and _looks_like_path(o)]
         if name in ("cp", "mv", "install", "ln"):

@@ -187,6 +187,7 @@ class KubernetesChangeMatcher(BaseMatcher):
     # upgrade, rollback, sync, use-context, set-context. resource: what it
     # changes. context / namespace: as given. production: names a production
     # target (`use-context prod` makes every later command a production one).
+    # use-context and set-context count only when production.
     FACTS = ("verb", "resource", "namespace", "context", "production")
 
     _KUBE = frozenset({"kubectl", "oc"})
@@ -215,11 +216,15 @@ class KubernetesChangeMatcher(BaseMatcher):
             if verb == "set" and "--list" in lowered:
                 continue
             context = self._option(argv, ("--context", "--kube-context"))
+            production = targets_production(command, call)
             if verb in ("use-context", "set-context"):
+                # Switching to a non-production cluster changes nothing live.
+                if not production:
+                    continue
                 context = resource
             return self.hit(target=resource or verb, command=command, verb=verb, resource=resource,
                             namespace=self._option(argv, ("-n", "--namespace")), context=context,
-                            production=targets_production(command, call))
+                            production=production)
         return None
 
     def _verb(self, command) -> tuple[str, str | None] | None:

@@ -931,6 +931,7 @@
       "default_alert": "warn",
       "implemented": true,
       "facts": [
+        "credential_type",
         "filtered",
         "provider",
         "scope"
