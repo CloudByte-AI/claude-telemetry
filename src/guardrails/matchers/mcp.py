@@ -63,7 +63,13 @@ class McpWriteMatcher(BaseMatcher):
     DEFAULT_ALERT = "info"
     FACTS = ("verb", "mcp_server")
 
+    # The Claude desktop app's own servers (`mcp__ccd_turn__update_plan` updates
+    # the session's plan panel) write nothing outside the client.
+    _CLIENT_INTERNAL_PREFIX = "mcp__ccd_"
+
     def match(self, call: ToolCall) -> MatchResult | None:
+        if (call.mcp_server or "").startswith(self._CLIENT_INTERNAL_PREFIX):
+            return None
         verb = _verb_in(call.mcp_tool, _WRITE_VERBS)
         if not verb:
             return None

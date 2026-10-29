@@ -38,7 +38,8 @@ STDIN_INTERPRETERS = frozenset({"python", "python3", "py", "node", "ruby", "perl
 _SENSITIVE_BASENAMES = frozenset({
     ".env", ".npmrc", ".pypirc", ".netrc", ".git-credentials", ".htpasswd",
     "credentials", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
-    "known_hosts", "authorized_keys", "secrets.yaml", "secrets.yml",
+    # authorized_keys holds no secret, but writing it grants access (a backdoor).
+    "authorized_keys", "secrets.yaml", "secrets.yml",
     "secrets.json", "terraform.tfvars", ".dockercfg", "kubeconfig",
 })
 _SENSITIVE_SUFFIXES = (
@@ -57,6 +58,19 @@ _TEMPLATE_SUFFIXES = (".example", ".sample", ".template", ".dist", ".defaults", 
 _SENSITIVE_DIRS = frozenset({".ssh", ".aws", ".gnupg", ".kube", ".docker", ".azure"})
 # The public half of a key pair carries no secret (`~/.ssh/id_ed25519.pub`).
 _PUBLIC_SUFFIXES = (".pub",)
+# Files under ~/.ssh that hold no secret: client settings and the public keys of
+# hosts already trusted.
+_SSH_PUBLIC_FILES = frozenset({"config", "known_hosts", "known_hosts.old"})
+# Files under ~/.aws that hold profiles, regions and command aliases, never keys
+# (those live in `credentials` and the SSO / CLI token caches).
+_AWS_SETTINGS_FILES = frozenset({"config", "alias"})
+# A CA, root or chain certificate is public (`root-ca.pem`,
+# `ca-bundle.crt`, `fullchain.pem`). A name that also says key or private is not.
+# Name-based, a heuristic of this plugin: the content is not read here.
+_PUBLIC_CERTIFICATE = re.compile(
+    r"^(?!.*(?:key|priv))(?:.*[-_.])?(?:ca|cacert|ca-bundle|root|rootca|chain|fullchain|intermediate)"
+    r"(?:[-_.]?\d*)?(?:[-_.].*)?\.(?:pem|crt|cer)$"
+)
 
 # Hosts that are this machine. Loopback only: a LAN address is another machine.
 _LOOPBACK = re.compile(r"^(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|::1|\[::1\]|host\.docker\.internal)$", re.I)
@@ -125,6 +139,28 @@ _TARGET_VARIABLES = re.compile(
 )
 
 
+# Options that pick the account, subscription, project or cluster a command acts
+# in, by tool; their value decides the environment for everything else named.
+_SCOPE_OPTIONS = {
+    "aws": ("--profile",),
+    "az": ("--subscription", "-g", "--resource-group"),
+    "gcloud": ("--project",),
+    "kubectl": ("--context",), "oc": ("--context",), "helm": ("--kube-context",),
+}
+_NON_PRODUCTION_WORDS = frozenset({"dev", "develop", "development", "uat", "stage", "staging", "stg", "test",
+                                   "testing", "qa", "sandbox", "sbx", "demo", "local", "nonprod", "preprod"})
+
+
+def _names_non_production_scope(command: Command) -> bool:
+    """Whether the command's scope options name a non-production environment and none names production."""
+    names = _SCOPE_OPTIONS.get(command.command_name.lower(), ())
+    values = [value for value in (option_of(command, name) for name in names) if value]
+    if not values or any(names_production(value) for value in values):
+        return False
+    return any(segment in _NON_PRODUCTION_WORDS
+               for value in values for segment in _NAME_SEGMENTS.findall(value.lower()))
+
+
 def names_production(word: str) -> bool:
     """`shop-prod`, `prod`, `env=production`, `shopprod`, `shopproduction` yes; `nonprod`, `products` no."""
     for segment in _NAME_SEGMENTS.findall(word.lower()):
@@ -142,7 +178,13 @@ def targets_production(command: Command, call: ToolCall | None = None) -> bool:
     own words (`--context prod`, `-g app-rg-prod`, `user@prod-db`,
     `-f env=prod`), or a target variable assigned earlier in the same call.
     A name heuristic: it reads names, it cannot know what an alias points at.
+
+    An explicit non-production scope wins: under `--profile shop-dev`, a
+    resource called `copy-of-prod-db` lives in the dev account. (This plugin's
+    own rule, not a standard.)
     """
+    if _names_non_production_scope(command):
+        return False
     for token in command.argv:
         if len(token) > 200 or any(ch.isspace() for ch in token):
             continue
@@ -180,6 +222,8 @@ def is_sensitive_path(path: str | None) -> bool:
 
     if basename.endswith(_TEMPLATE_SUFFIXES) or basename.endswith(_PUBLIC_SUFFIXES):
         return False
+    if _PUBLIC_CERTIFICATE.search(basename):
+        return False
     if basename in _SENSITIVE_BASENAMES:
         return True
     if basename.endswith(_SENSITIVE_SUFFIXES):
@@ -188,7 +232,44 @@ def is_sensitive_path(path: str | None) -> bool:
         return True
     if basename.startswith(_SERVICE_ACCOUNT_PREFIXES) and basename.endswith(".json"):
         return True
+    if ".aws" in segments and basename in _AWS_SETTINGS_FILES:
+        return False
+    if ".ssh" in segments and basename in _SSH_PUBLIC_FILES:
+        return False
     return bool(segments & _SENSITIVE_DIRS)
+
+
+# A redirect operator as the parser leaves it in argv (`>`, `2>>`, `&>`, `<`).
+# One ending in `&` duplicates a descriptor (`2>&1`): its target is not a file.
+_REDIRECT_TOKEN = re.compile(r"^(?:\d*|&)(?:>>?\|?|<<?<?)&?$")
+
+
+def _redirect_pairs(command: Command) -> list[tuple[str, str]]:
+    """(operator, target) for each file redirect, confirmed against command.redirects."""
+    known = set(command.redirects)
+    argv = command.argv
+    return [(op, target) for op, target in zip(argv, argv[1:])
+            if _REDIRECT_TOKEN.match(op) and not op.endswith("&") and target in known]
+
+
+def written_redirects(command: Command) -> list[str]:
+    """Files this command writes through a redirect (`> f`, `>> f`, `2> f`); never `< f`."""
+    return [target for op, target in _redirect_pairs(command) if ">" in op]
+
+
+def without_redirects(tokens: Sequence[str]) -> list[str]:
+    """`tokens` with every redirect operator and its target removed (`x 2> /dev/null` -> `x`)."""
+    kept: list[str] = []
+    skip = False
+    for token in tokens:
+        if skip:
+            skip = False
+            continue
+        if _REDIRECT_TOKEN.match(token):
+            skip = True     # its target: a file, or a descriptor after `>&`
+            continue
+        kept.append(token)
+    return kept
 
 
 def summary_value(value: str | None) -> str | None:

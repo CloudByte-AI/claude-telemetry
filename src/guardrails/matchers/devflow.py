@@ -17,6 +17,9 @@ _CONTAINER_BUILDERS = frozenset({"docker", "podman", "nerdctl", "buildah"})
 _CONTAINER_GLOBALS = frozenset({"-H", "--host", "--context", "-c", "--config", "-l", "--log-level", "--url",
                                 "--connection", "--namespace", "-n"})
 _IMAGE_COPIERS = frozenset({"skopeo", "crane"})
+# skopeo destinations on this machine, not a registry.
+_LOCAL_IMAGE_TRANSPORTS = ("dir:", "oci:", "oci-archive:", "docker-archive:", "docker-daemon:",
+                           "containers-storage:")
 _DRY_RUN = frozenset({"--dry-run", "--dryrun"})
 
 
@@ -43,7 +46,13 @@ def _image_push(command) -> tuple[str, str | None] | None:
             return name, _option(command.argv, ("-t", "--tag"))
         return None
     if name in _IMAGE_COPIERS and path[:1] in (("copy",), ("cp",), ("push",), ("sync",)):
-        return name, path[-1] if len(path) > 1 else None
+        destination = path[-1] if len(path) > 1 else None
+        # `skopeo copy docker://img dir:/tmp/img` saves a local copy; it pushes nothing.
+        if destination and destination.lower().startswith(_LOCAL_IMAGE_TRANSPORTS):
+            return None
+        if path[:1] == ("sync",) and (_option(command.argv, ("-d", "--dest")) or "").lower() == "dir":
+            return None
+        return name, destination
     return None
 
 

@@ -85,6 +85,8 @@ _DUMP_COMMANDS = frozenset({
     "pg_dump", "pg_dumpall", "mysqldump", "mongodump", "sqlite3",
     "redis-dump", "clickhouse-backup",
 })
+# Flags that only ask a tool about itself; nothing is read from a database.
+_TOOL_PROBE_FLAGS = frozenset({"--version", "-V", "--help", "-?"})
 
 
 def _sql_texts(command) -> list[str]:
@@ -128,7 +130,8 @@ def _db_host(result: MatchResult) -> str | None:
     """The host a database client run here was pointed at with a host option, else None."""
     if result.facts.get("channel") != "client":
         return None
-    names = _HOST_OPTIONS + (("-s", "--server") if result.facts.get("client") == "sqlcmd" else ())
+    # sqlcmd's -h is the header-rows count (`-h -1`); its host is -S.
+    names = ("-s", "--server") if result.facts.get("client") == "sqlcmd" else _HOST_OPTIONS
     return summary_value(option_of(result.command, *names))
 
 
@@ -284,7 +287,9 @@ _WRITE = re.compile(
     r"replace\s+into|alter\s+(?:table|database|schema|index|view|user|role|type|sequence)|"
     r"create\s+(?:or\s+replace\s+)?(?:unique\s+)?(?:table|index|schema|view|database|function|procedure|trigger|"
     r"extension|policy|role|user|type|sequence|materialized\s+view)|drop\s+\w+|truncate\s+|grant\s+|revoke\s+|"
-    r"rename\s+table|comment\s+on|copy\s+[\w.\"]+\s+from)",
+    r"rename\s+table|comment\s+on|copy\s+[\w.\"]+\s+from|"
+    # SQL Server system procedures that change users, roles, permissions or settings.
+    r"exec(?:ute)?\s+(?:[\w\[\]]+\.)*\[?sp_(?:add|drop|grant|revoke|change|rename|set)\w*)",
     re.IGNORECASE | re.MULTILINE,
 )
 _ROLLED_BACK = re.compile(r"(?:^|;)\s*rollback\s*;?\s*$", re.IGNORECASE)
@@ -340,6 +345,9 @@ class DatabaseDumpMatcher(BaseMatcher):
         for command in call.commands:
             if command.command_name in _DUMP_COMMANDS:
                 if command.command_name == "sqlite3" and not self.subcommand_is(command, ".dump"):
+                    continue
+                # `pg_dump --version` / `mysqldump --help` checks the tool is there.
+                if command.flags & _TOOL_PROBE_FLAGS:
                     continue
                 destination = command.redirects[0] if command.redirects else None
                 return self.hit(

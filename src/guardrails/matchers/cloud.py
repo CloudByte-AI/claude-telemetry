@@ -98,9 +98,11 @@ _AWS_DELETE_ACTION = re.compile(r"^(?:admin-)?(?:delete|terminate|deregister|pur
 # IAM and security-group rules have their own operations.
 _AWS_NOT_A_RESOURCE = re.compile(r"tag|permission|-from-|policy-version")
 _AZ_DELETE_VERBS = frozenset({"delete", "purge", "delete-batch"})
-# az groups whose delete is an access or network-rule change, not a resource.
+# az groups whose delete is an access or network-rule change, or removes a
+# setting of a resource (`webapp config appsettings delete`), not a resource.
 _AZ_OTHER_OPERATION = (("firewall-rule",), ("network", "nsg", "rule"), ("role", "assignment"), ("role", "definition"),
-                       ("ad",), ("network-rule",), ("access-restriction",), ("dns",), ("private-dns",))
+                       ("ad",), ("network-rule",), ("access-restriction",), ("dns",), ("private-dns",),
+                       ("appsettings",), ("connection-string",))
 
 
 def _cloud_delete(command) -> tuple[str, str, str | None] | None:

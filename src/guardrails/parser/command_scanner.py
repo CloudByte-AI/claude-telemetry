@@ -245,6 +245,14 @@ _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 # PowerShell assignment: `$x = cmd`, `$env:FOO = cmd`, glued `$x=cmd`.
 _PS_ASSIGNMENT = re.compile(r"^\$[A-Za-z_][\w:.]*$")
 _PS_ASSIGNMENT_GLUED = re.compile(r"^\$[A-Za-z_][\w:.]*=$")
+# A PowerShell hashtable entry key (`Name =`, `'Content-Type' =`) at the start
+# of an entry; the key goes and the value stays.
+_HASHTABLE_KEY = re.compile(r"(^|[;\n{])[ \t\r]*(?:'[^'\n]*'|\"[^\"\n]*\"|[\w.-]+)[ \t]*=(?!=)")
+# An entry value that runs nothing: a quoted string without `$(`, a number or
+# a variable reference (`'json'`, "Bearer $t", 42, $true, $k.name).
+_HASHTABLE_LITERAL = re.compile(
+    r"(^|[;\n{])[ \t\r]*(?:'[^'\n]*'|\"(?:[^\"\n$]|\$(?!\())*\"|-?\d[\w.]*|\$[\w:.]+)[ \t\r]*(?=[;\n}]|$)"
+)
 _REDIRECT = re.compile(r"^(?:\d*|&|\*)(?:>>|>&|>\||>|<<<|<<|<&|<>|<)$")
 # Where a substitution sat inside a word: a private mark while scanning, shown
 # as SUBSTITUTION_PLACEHOLDER in the word (`"$(pwd)/build"` -> `$(...)/build`).
@@ -502,6 +510,20 @@ def _scan(text: str, dialect: Dialect) -> tuple[list[_Token], list[str], list[st
                 buf_start = i
             quote = ch
             i += 1
+            continue
+
+        # A PowerShell hashtable literal `@{ Name = $x.name; Size = Get-Size }`: the
+        # keys are names, never commands, and a literal value runs nothing,
+        # while any other value is a pipeline PowerShell runs, so those values
+        # are scanned like a substitution.
+        if dialect.name != POSIX_NAME and text.startswith("@{", i):
+            if not buf:
+                buf_start = i
+            inner, i = _balanced(text, i + 1, "{", "}")
+            values = _HASHTABLE_LITERAL.sub(r"\1", _HASHTABLE_KEY.sub(r"\1", inner))
+            if values.strip(" \t\r\n;"):
+                substitutions.append(values)
+            buf.append(_SUBSTITUTED)
             continue
 
         sub_prefix = next((p for p in dialect.substitution_prefixes if text.startswith(p, i)), None)
