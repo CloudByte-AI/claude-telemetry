@@ -301,7 +301,7 @@ check_and_repair = ensure_ready
 
 
 def _version_key(version: str | None) -> tuple[int, ...] | None:
-    """`0.1.47` -> (0, 1, 45); None for anything that is not dotted numbers."""
+    """`0.1.48` -> (0, 1, 45); None for anything that is not dotted numbers."""
     parts = str(version or "").split(".")
     return tuple(int(part) for part in parts) if parts and all(part.isdigit() for part in parts) else None
 

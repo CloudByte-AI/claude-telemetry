@@ -45,6 +45,12 @@ def _image_push(command) -> tuple[str, str | None] | None:
                                                  for a in command.argv)):
             return name, _option(command.argv, ("-t", "--tag"))
         return None
+    # A cloud build that tags the image pushes it to the registry: `az acr build -t app:1 .`,
+    # `gcloud builds submit --tag gcr.io/p/app`.
+    if name == "az" and path[:2] == ("acr", "build"):
+        return "az", _option(command.argv, ("-t", "--image"))
+    if name == "gcloud" and path[:2] == ("builds", "submit") and _option(command.argv, ("--tag", "-t")):
+        return "gcloud", _option(command.argv, ("--tag", "-t"))
     if name in _IMAGE_COPIERS and path[:1] in (("copy",), ("cp",), ("push",), ("sync",)):
         destination = path[-1] if len(path) > 1 else None
         # `skopeo copy docker://img dir:/tmp/img` saves a local copy; it pushes nothing.
@@ -91,6 +97,11 @@ class PublishMatcher(BaseMatcher):
         "dotnet": (("nuget", "push"),),
         "nuget": (("push",),),
         "gh": (("release", "create"),),
+        # Release tools that publish the package as one of their steps.
+        "semantic-release": ((),),
+        "release-it": ((),),
+        "changeset": (("publish",),),
+        "lerna": (("publish",),),
     }
 
     def match(self, call: ToolCall) -> MatchResult | None:
@@ -112,11 +123,12 @@ class PublishMatcher(BaseMatcher):
             # The project wrappers (./gradlew, ./mvnw) are the same tools.
             anywhere = command.command_name in ("mvn", "mvnw", "mvnw.cmd", "gradle", "gradlew", "gradlew.bat")
             for run in runs:
-                if not (self.has_token_run(path, run) if anywhere else self.starts_with_run(path, run)):
+                # An empty run: the tool itself publishes (`semantic-release`, `release-it`).
+                if run and not (self.has_token_run(path, run) if anywhere else self.starts_with_run(path, run)):
                     continue
                 lowered = {f.lower() for f in command.flags}
                 # A dry run publishes nothing, so it is not this operation.
-                if {"--dry-run", "--dryrun"} & lowered:
+                if {"--dry-run", "--dryrun"} & lowered or asks_for_help(command):
                     continue
                 artifact = next(
                     (o for o in command.subcommand_path if o not in run),

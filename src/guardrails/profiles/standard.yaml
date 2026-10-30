@@ -66,6 +66,10 @@ tables:
     - { id: cb.fs.cleanup-pycache,
         operation: fs.delete.recursive, disposable: true, target_path: {contains: "__pycache__"},
         decision: allow, alert: info, reason: "Build output cleanup" }
+    # Every folder deleted is a cache, a virtual environment or below a temp location.
+    - { id: cb.fs.cleanup-disposable,
+        operation: fs.delete.recursive, disposable: true,
+        decision: allow, alert: info, reason: "Temp, cache or virtual environment cleanup" }
 
     # 1. Recursive delete of anything else. A forced delete of single files
     #    (`rm -f out.txt`) is not recursive and does not ask.
@@ -243,6 +247,21 @@ tables:
         operation: vcs.push,
         decision: ask, alert: warn,
         reason: "This pushes or merges commits on a remote - confirm the branch" }
+
+    # An MCP filesystem server touching a credential file: the same rows as the file tools.
+    - { id: cb.fs.credential-write-mcp,
+        operation: fs.sensitive, kind: mcp, writes: true,
+        decision: ask, alert: warn,
+        reason: "Writing to a credential or key file" }
+    - { id: cb.fs.credential-read-mcp,
+        operation: fs.sensitive, kind: mcp,
+        decision: allow, alert: info, audit: true,
+        reason: "Read of a sensitive file - recorded" }
+
+    # A browser MCP tool opening a URL: the same page as the web tool, so the same row.
+    - { id: cb.net.web-fetch-browser,
+        operation: net.web.fetch, decision: allow, alert: info, audit: true,
+        reason: "Web fetch - recorded" }
 
     - { id: cb.mcp.default,
         decision: allow, alert: info, reason: "Default allow" }

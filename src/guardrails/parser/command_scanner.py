@@ -694,6 +694,9 @@ def _code_position(argv: tuple[str, ...], code_flags: tuple[str, ...], whole_wor
         if token == "--":
             return None
         flag = (token.lower() if whole_word else token).partition("=")[0]
+        # Git Bash doubles a leading slash so it is not read as a path: `cmd //c "..."`.
+        if flag.startswith("//") and flag[1:] in code_flags:
+            return position
         if flag in code_flags:
             return position
         if whole_word and "-command" in code_flags and len(flag) >= 2 and "-command".startswith(flag):

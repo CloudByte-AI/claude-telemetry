@@ -56,6 +56,18 @@ def handle_session_start() -> None:
     setup_logging(log_to_file=True, log_to_console=False, log_dir=get_cursor_logs_dir())
     logger.info("=== Cursor SessionStart Handler ===")
 
+    # Hooks never install packages themselves (--no-sync). A missing one is
+    # installed by a background repair; sessionStart has no user-facing
+    # output on Cursor, so it is reported in the log only.
+    packages_ready = True
+    try:
+        from src.common.package_repair import check_and_repair as repair_packages
+        from src.common.package_repair import missing_distributions
+        repair_packages()
+        packages_ready = not missing_distributions()
+    except Exception as e:
+        logger.debug(f"Package check failed (non-fatal): {e}")
+
     try:
         hook_data = _read_stdin_data()
         logger.info(f"sessionStart full payload: {json.dumps(hook_data, default=str)}")
@@ -120,9 +132,11 @@ def handle_session_start() -> None:
             logger.debug(f"Worker check failed: {e}")
 
         # A plugin update does not reach a dashboard that is already running.
+        # The old one keeps serving until this copy's packages are installed,
+        # since a replacement could not start without them.
         try:
             from src.guardrails.health import restart_if_older
-            if restart_if_older():
+            if packages_ready and restart_if_older():
                 logger.info("Restarted the dashboard: it was running an older plugin release")
         except Exception as e:
             logger.debug(f"Dashboard version check failed: {e}")

@@ -58,6 +58,9 @@ def load_yaml(path: Path, what: str = "profile") -> dict | None:
         with open(path, encoding="utf-8") as handle:
             raw = yaml.load(handle, Loader=_Loader)
     except Exception as exc:
+        from src.common.package_repair import report_if_missing
+
+        report_if_missing(exc, "pyyaml")
         _log().warning(f"{what} unreadable at {path}: {exc}")
         return None
     if raw is None:

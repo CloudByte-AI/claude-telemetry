@@ -153,6 +153,9 @@ def _load_preset(name: str) -> dict:
         with open(path, encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
     except Exception as e:
+        from src.common.package_repair import report_if_missing
+
+        report_if_missing(e, "pyyaml")
         logger.warning(f"Could not load preset '{name}': {e}")
         return {}
 
@@ -367,6 +370,9 @@ def _read_profile_strict(path: Path, what: str) -> dict:
         with open(path, encoding="utf-8") as f:
             raw = yaml.safe_load(f)
     except Exception as e:
+        from src.common.package_repair import report_if_missing
+
+        report_if_missing(e, "pyyaml")
         raise SecurityConfigError("profile_unreadable", f"{what} {path.name} unreadable: {e}") from e
     if not isinstance(raw, dict):
         raise SecurityConfigError("profile_not_mapping", f"{what} {path.name} is not a mapping")
