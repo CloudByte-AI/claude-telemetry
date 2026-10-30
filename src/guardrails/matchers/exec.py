@@ -335,6 +335,9 @@ _CLOUD_VALUE_OPTIONS = frozenset({
     "--profile", "--region", "--output", "--endpoint-url", "--query", "--color", "--ca-bundle",
     "--subscription", "-o", "--project", "--zone", "--account", "--configuration",
 })
+_ANSIBLE_COMMAND_MODULES = frozenset({"command", "shell", "raw", "script", "win_command", "win_shell"})
+_ANSIBLE_VALUE_OPTIONS = frozenset({"-m", "--module-name", "-a", "--args", "-i", "--inventory", "-u", "--user",
+                                    "-e", "--extra-vars", "-f", "--forks", "-l", "--limit", "-b", "--become-user"})
 _WINDOWS_REMOTING = frozenset({"invoke-command", "icm", "enter-pssession", "etsn", "new-pssession", "nsn"})
 
 
@@ -348,6 +351,13 @@ def _remote_channel(command) -> tuple[str, str | None] | None:
         # script on its input it runs one there. -N forwards ports only.
         if operands and (len(operands) > 1 or command.stdin) and "-N" not in command.flags:
             return "ssh", operands[0].rsplit("@", 1)[-1]
+        return None
+    if name == "ansible":
+        # Ad-hoc commands: `-a CMD` (the command module) or a shell module.
+        module = _flag_value(argv, ("-m", "--module-name"))
+        if (module or "command") in _ANSIBLE_COMMAND_MODULES and _flag_value(argv, ("-a", "--args")) is not None:
+            hosts = BaseMatcher.operands_from_subcommand(command, _ANSIBLE_VALUE_OPTIONS)
+            return "ansible", hosts[0] if hosts else None
         return None
     if name in ("kubectl", "oc"):
         sub = BaseMatcher.operands_from_subcommand(command, _KUBE_VALUE_OPTIONS)
@@ -511,6 +521,9 @@ def _kill_target(command) -> tuple[str, str | None] | None:
         image = _flag_value(argv, ("/im", "//im", "-im"), case_insensitive=True)
         return ("name", image) if image else ("pid", None)
     if name == "kill":
+        # Signal 0 (`kill -0 PID`, `kill -s 0 PID`) only checks that the process exists.
+        if "-0" in argv or _flag_value(argv, ("-s",)) == "0":
+            return None
         program = _flag_value(argv, ("-name", "-processname"), case_insensitive=True)
         return ("name", program) if program else ("pid", None)
     if name in ("pkill", "killall"):
@@ -524,6 +537,29 @@ def _kill_target(command) -> tuple[str, str | None] | None:
         return "pid", None
     if name in ("kill-port", "killport"):
         return "pid", None
+    return None
+
+
+# Commands that turn a program name into process ids for `kill`.
+_PID_LOOKUPS = frozenset({"pgrep", "pidof"})
+
+
+def _pid_lookup(call: ToolCall, kill) -> tuple[str, str | None] | None:
+    """
+    (method, program) when `kill` gets its process ids from a name lookup in the
+    same call: `kill $(pgrep node)`, `kill `pidof node``, `pgrep node | xargs kill`.
+    That ends every process of the program, like `pkill node`. `pgrep -f` is a
+    command-line pattern, like `pkill -f`.
+    """
+    explicit_pids = [o for o in kill.subcommand_path if o.lstrip("-").isdigit() or o.startswith("%")]
+    for lookup in call.commands:
+        if lookup.command_name.lower() not in _PID_LOOKUPS:
+            continue
+        fed = lookup.command_name in kill.piped_from or not explicit_pids
+        names = _kill_operands(lookup.argv)
+        if fed and names:
+            method = "pattern" if {"-f", "--full"} & lookup.flags else "name"
+            return method, names[-1]
     return None
 
 
@@ -549,6 +585,9 @@ class ProcessKillMatcher(BaseMatcher):
             if found is None:
                 continue
             method, program = found
+            if method == "pid" and command.command_name.lower() in ("kill", "xargs"):
+                found = _pid_lookup(call, command) or found
+                method, program = found
             by_name = method == "name"
             # `Stop-Process -Name python3,python` names several programs.
             names = {n.strip().lower().removesuffix(".exe") for n in (program or "").strip("\"'").split(",")}

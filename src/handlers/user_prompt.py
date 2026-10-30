@@ -16,7 +16,7 @@ import os
 import sys
 from pathlib import Path
 
-from ftfy import fix_text
+from src.common.text_repair import fix_text
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))

@@ -28,6 +28,8 @@ from src.guardrails.toolcall import KIND_MCP, KIND_SHELL, ToolCall
 
 _GIT = frozenset({"git", "hub", "gh"})
 _FORCE_FLAGS = frozenset({"-f", "--force", "--force-with-lease", "--force-if-includes"})
+# `--mirror` force-updates and deletes remote refs to match the local ones.
+_OVERWRITE_FLAGS = _FORCE_FLAGS | {"--mirror"}
 # git's global options that take a value, which the parser cannot tell from the
 # subcommand: `git -C /repo push` must still be a push, and `git -c x=y rebase`
 # a rebase.
@@ -66,7 +68,7 @@ class ForcePushMatcher(BaseMatcher):
             lowered = {f.lower() for f in command.flags}
             # A `+refspec` is a force push of that ref.
             plus_ref = any(o.startswith("+") and len(o) > 1 for o in sub[1:])
-            if not (lowered & _FORCE_FLAGS or plus_ref):
+            if not (lowered & _OVERWRITE_FLAGS or plus_ref):
                 continue
             # --force-with-lease is the safe form: it refuses when the remote
             # moved. Reported as a fact so a profile can allow it while still
@@ -153,7 +155,7 @@ class PushMatcher(BaseMatcher):
                 set_upstream=bool({"-u", "--set-upstream"} & lowered),
                 tags=tags,
                 all_refs=bool({"--all", "--mirror", "--branches"} & lowered),
-                force=bool(lowered & _FORCE_FLAGS) or any(r.startswith("+") and len(r) > 1 for r in refspecs),
+                force=bool(lowered & _OVERWRITE_FLAGS) or any(r.startswith("+") and len(r) > 1 for r in refspecs),
                 delete=delete,
                 dry_run=bool({"-n", "--dry-run"} & lowered),
                 via="push",

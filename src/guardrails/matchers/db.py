@@ -12,6 +12,7 @@ import re
 
 from src.guardrails.matchers.base import (BaseMatcher, MatchResult, option_of, remote_runs, summary_path,
                                           summary_value, targets_production)
+from src.guardrails.matchers.inline_code import code_sql, code_targets_production
 from src.guardrails.registry import register_matcher
 from src.guardrails.toolcall import KIND_MCP, KIND_SHELL, ToolCall
 
@@ -21,6 +22,19 @@ _CLIENTS = frozenset({
 })
 # Command-line tools that drop a whole database or role on their own.
 _DROP_COMMANDS = {"dropdb": "database", "dropuser": "role"}
+# Framework and ORM commands that drop or wipe a whole database: (command, subcommand words, flag needed).
+_RESET_COMMANDS = (
+    ("prisma", ("migrate", "reset"), None),
+    ("prisma", ("db", "push"), "--force-reset"),
+    ("rails", ("db:drop",), None), ("rails", ("db:reset",), None), ("rails", ("db:purge",), None),
+    ("rake", ("db:drop",), None), ("rake", ("db:reset",), None), ("rake", ("db:purge",), None),
+    ("sequelize", ("db:drop",), None),
+    ("typeorm", ("schema:drop",), None),
+)
+# Django's `manage.py flush` / `reset_db` empty or recreate the database.
+_MANAGE_RESETS = frozenset({"flush", "reset_db"})
+# Mongo shell drops: `db.dropDatabase()`, `db.orders.drop()`.
+_MONGO_DROP = re.compile(r"\.drop(Database)?\(\s*\)")
 
 # MCP tools that send SQL: a tool named for SQL or queries, with the statement
 # in one of these arguments.
@@ -55,8 +69,9 @@ def _sql_sources(call: ToolCall) -> list[tuple[str, str, str, object]]:
     (sql, client, channel, command) for every place this call sends SQL: a
     database client's arguments and here-document (channel `client`), a client
     run inside a container or on another machine (`docker_exec`,
-    `kubectl_exec`, `ssh`; the command is the wrapper), and an MCP SQL tool
-    (`mcp`, no command).
+    `kubectl_exec`, `ssh`; the command is the wrapper), an MCP SQL tool
+    (`mcp`, no command), and SQL that inline interpreter code sends through a
+    database driver (`code`; the client is the driver).
     """
     sources: list[tuple[str, str, str, object]] = []
     for command in call.commands:
@@ -72,7 +87,32 @@ def _sql_sources(call: ToolCall) -> list[tuple[str, str, str, object]]:
     if sql:
         server = (call.mcp_server or "").removeprefix("mcp__").removesuffix("__") or "mcp"
         sources.append((sql, server, "mcp", None))
+    for text, driver, command in code_sql(call):
+        sources.append((text, driver, "code", command))
     return sources
+
+
+def _production(call: ToolCall, channel: str, command) -> bool:
+    """Whether a source's database is production: from the command's words, or the host in inline code."""
+    if command is None:
+        return False
+    if channel == "code":
+        return code_targets_production(command) or targets_production(command, call)
+    return targets_production(command, call)
+
+
+def _reset_command(command) -> str | None:
+    """The tool name when this command drops or wipes a whole database through a framework or ORM."""
+    name = command.command_name.lower()
+    path = tuple(command.subcommand_path)
+    for tool, words, flag in _RESET_COMMANDS:
+        if name == tool and path[:len(words)] == words and (flag is None or flag in command.flags):
+            return tool
+    if name in ("python", "python3", "py") and len(path) >= 2 and path[0].replace("\\", "/").endswith("manage.py") \
+            and path[1] in _MANAGE_RESETS:
+        return "django"
+    return None
+
 
 _DROP = re.compile(r"\bdrop\s+(database|schema|table|index|view|collection)\b", re.IGNORECASE)
 # TRUNCATE as a statement: at the start of the SQL or after `;`, so a
@@ -162,7 +202,17 @@ class DatabaseDropMatcher(BaseMatcher):
                 return self.hit(target=command.subcommand_path[-1], command=command, object_type=object_type,
                                 client=command.command_name, channel="command",
                                 production=targets_production(command, call))
+            reset = _reset_command(command)
+            if reset:
+                return self.hit(target=reset, command=command, object_type="database", client=reset,
+                                channel="command", production=targets_production(command, call))
         for text, client, channel, command in _sql_sources(call):
+            mongo = _MONGO_DROP.search(text) if client in ("mongo", "mongosh") else None
+            if mongo:
+                object_type = "database" if mongo.group(1) else "collection"
+                return self.hit(target=object_type, evidence=mongo.group(0), command=command,
+                                object_type=object_type, client=client, channel=channel,
+                                production=_production(call, channel, command))
             found = _DROP.search(text)
             if found:
                 return self.hit(
@@ -172,7 +222,7 @@ class DatabaseDropMatcher(BaseMatcher):
                     object_type=found.group(1).lower(),
                     client=client,
                     channel=channel,
-                    production=bool(command is not None and targets_production(command, call)),
+                    production=_production(call, channel, command),
                 )
         return None
 
@@ -207,7 +257,7 @@ class DatabaseTruncateMatcher(BaseMatcher):
                     table=table,
                     client=client,
                     channel=channel,
-                    production=bool(command is not None and targets_production(command, call)),
+                    production=_production(call, channel, command),
                 )
         return None
 
@@ -263,13 +313,13 @@ class BulkDeleteMatcher(BaseMatcher):
         for text, client, channel, command in _sql_sources(call):
             if client == "redis-cli" and any(w.lower() in _REDIS_FLUSH for w in text.split()):
                 return self.hit(target="FLUSH", command=command, statement="flush", table=None, client=client,
-                                channel=channel, production=bool(command is not None and targets_production(command, call)))
+                                channel=channel, production=_production(call, channel, command))
             found = _bulk_statement(text)
             if found:
                 statement, table = found
                 return self.hit(target=table, evidence=text[:200], command=command, statement=statement, table=table,
                                 client=client, channel=channel,
-                                production=bool(command is not None and targets_production(command, call)))
+                                production=_production(call, channel, command))
         return None
 
     @classmethod
@@ -316,7 +366,7 @@ class DatabaseWriteMatcher(BaseMatcher):
                 statement = found.group(1).split()[0].lower()
                 return self.hit(target=client, evidence=found.group(0).strip(" ;(")[:120], command=command,
                                 statement=statement, client=client, channel=channel,
-                                production=bool(command is not None and targets_production(command, call)),
+                                production=_production(call, channel, command),
                                 rolled_back=bool(_ROLLED_BACK.search(text.strip())))
         return None
 
@@ -540,7 +590,7 @@ class DatabaseQueryMatcher(BaseMatcher):
         text, client, channel, command = (writes or sources)[0]
         return self.hit(target=client, evidence=text.strip()[:120], command=command,
                         statement_kind="write" if writes else "read", client=client, channel=channel,
-                        production=bool(command is not None and targets_production(command, call)))
+                        production=_production(call, channel, command))
 
     @classmethod
     def summary(cls, result: MatchResult) -> str | None:

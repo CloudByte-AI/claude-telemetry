@@ -4,7 +4,7 @@ import json
 import re
 import sys
 
-from ftfy import fix_text
+from src.common.text_repair import fix_text
 
 from src.common.logging import get_logger
 

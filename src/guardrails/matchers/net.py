@@ -18,8 +18,9 @@ import re
 
 from src.guardrails.matchers.base import BaseMatcher, MatchResult, network_of, url_host
 from src.guardrails.parser import Command
+from src.guardrails.matchers.inline_code import code_posts, host_of
 from src.guardrails.registry import register_matcher
-from src.guardrails.toolcall import KIND_SHELL, KIND_WEB, ToolCall
+from src.guardrails.toolcall import KIND_MCP, KIND_SHELL, KIND_WEB, ToolCall
 
 # PowerShell's Invoke-WebRequest / Invoke-RestMethod / wget aliases resolve to curl.
 _FETCHERS = frozenset({"curl", "wget", "aria2c", "httpie", "http", "https", "iwr", "irm"})
@@ -298,10 +299,19 @@ class UploadMatcher(BaseMatcher):
                     host = self._remote_host(remote)
                     return self.hit(target=remote, command=command, host=host, method=name,
                                     network=network_of(host))
+            # `gh gist create file` publishes the file's content (public with --public).
+            if name == "gh" and command.subcommand_path[:2] == ("gist", "create") and len(command.subcommand_path) > 2:
+                return self.hit(target=command.subcommand_path[2], command=command, host="gist.github.com",
+                                method="gist", network="public")
             if self._cloud_upload(command):
                 destination = command.subcommand_path[-1]
                 return self.hit(target=destination, command=command, host=destination.split("/")[2] or None,
                                 method=name, network="public")
+        # Inline interpreter code that posts a body: `requests.post(url, ...)`, `fetch(url, {method: 'POST'})`.
+        for url, command in code_posts(call):
+            host = host_of(url)
+            if host and network_of(host) != "loopback":
+                return self.hit(target=host, command=command, host=host, method="code", network=network_of(host))
         return None
 
     @staticmethod
@@ -343,17 +353,29 @@ class UploadMatcher(BaseMatcher):
         return False
 
 
+# MCP browser tools that open the URL they are given.
+_BROWSER_OPEN_TOOLS = frozenset({
+    "navigate", "browser_navigate", "navigate_page", "new_page", "goto", "open_url", "open_page",
+    "puppeteer_navigate", "playwright_navigate",
+})
+
+
 @register_matcher
 class WebFetchMatcher(BaseMatcher):
     OPERATION = "net.web.fetch"
     DOMAIN = "net"
-    DESCRIPTION = "Fetches a URL through the platform's own web tool"
-    APPLIES_TO = (KIND_WEB,)
+    DESCRIPTION = "Fetches a URL through the platform's own web tool or a browser tool"
+    APPLIES_TO = (KIND_WEB, KIND_MCP)
     DEFAULT_ACTION = "allow"
     DEFAULT_ALERT = "info"
+    # The agent's web tool (WebFetch), and an MCP browser tool told to open a
+    # URL (Claude Desktop's browser, Claude in Chrome, Playwright): the same
+    # page reaches the agent either way.
     FACTS = ("host",)
 
     def match(self, call: ToolCall) -> MatchResult | None:
+        if call.kind == KIND_MCP and (call.mcp_tool or "").lower() not in _BROWSER_OPEN_TOOLS:
+            return None
         if not call.urls:
             return None
         host = call.hosts[0] if call.hosts else None
@@ -408,6 +430,9 @@ def _tunnel(command: Command) -> tuple[str, str] | None:
         if name == "ngrok" and command.subcommand_path[:1] in (("config",), ("version",), ("help",), ("update",)):
             return None
         return name, "public"
+    # socat relaying a listening port to another address: `socat TCP-LISTEN:8080,fork TCP:db:5432`.
+    if name == "socat" and any(re.match(r"(?i)(tcp|tcp4|tcp6|udp)-listen:", o) for o in command.subcommand_path):
+        return "socat", "local"
     if name == "tailscale" and command.subcommand_path[:1] in (("funnel",), ("serve",)):
         return "tailscale", "public" if command.subcommand_path[0] == "funnel" else "private"
     return None

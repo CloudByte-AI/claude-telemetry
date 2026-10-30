@@ -489,14 +489,15 @@ def shutdown_worker_if_no_active_sessions(session_id) -> bool:
 
     logger.info("No other active sessions - proceeding with worker shutdown")
 
+    # Only the dashboard is stopped. Killing every process whose command line
+    # names the plugin, or every uv.exe, also killed other sessions' MCP
+    # servers and hooks, and package installs still in progress, which left
+    # environments half installed. The update route keeps those broad kills.
     killed = kill_worker_by_pid()
     if not killed:
         killed = kill_worker_by_port()
 
-    all_killed = kill_all_claude_telemetry_processes()
-    uv_killed = kill_uv_process()
-
-    if killed or all_killed or uv_killed:
+    if killed:
         logger.info("Worker shutdown completed successfully")
     else:
         logger.warning("Worker shutdown attempted but no processes were killed")
