@@ -41,7 +41,7 @@ from src.observations.writer import save_observation, was_rejected
 from src.common.obs_salvage import salvage_obs_args
 import json as _json
 import glob as _glob
-from ftfy import fix_text as _fix_text
+from src.common.text_repair import fix_text as _fix_text
 
 # Initialize logger
 logger = get_logger(__name__)

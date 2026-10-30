@@ -488,13 +488,15 @@
         "read",
         "write",
         "edit",
-        "delete"
+        "delete",
+        "mcp"
       ],
       "default_action": "ask",
       "default_alert": "warn",
       "implemented": true,
       "facts": [
-        "sensitive_path"
+        "sensitive_path",
+        "writes"
       ]
     },
     {
@@ -870,9 +872,10 @@
     {
       "operation": "net.web.fetch",
       "domain": "net",
-      "description": "Fetches a URL through the platform's own web tool",
+      "description": "Fetches a URL through the platform's own web tool or a browser tool",
       "applies_to": [
-        "web"
+        "web",
+        "mcp"
       ],
       "default_action": "allow",
       "default_alert": "info",

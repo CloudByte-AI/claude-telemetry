@@ -141,6 +141,9 @@ def _engine() -> tuple[Any, Any]:
         # Only match/no-match is ever asked for; capturing costs time for nothing.
         options.never_capture = True
     except Exception as exc:  # ImportError, or a native build that fails to load
+        from src.common.package_repair import report_if_missing
+
+        report_if_missing(exc, PACKAGE)
         raise RegexError(
             f"regex conditions need the {PACKAGE} package, which could not be loaded "
             f"({type(exc).__name__}: {exc}). They are disabled until it is installed - "

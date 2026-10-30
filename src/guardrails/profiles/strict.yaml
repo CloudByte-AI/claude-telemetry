@@ -230,6 +230,19 @@ tables:
     - { id: cb.vcs.push-mcp,
         operation: vcs.push,
         decision: ask, alert: warn, reason: "This pushes or merges commits on a remote - confirm the branch" }
+    # An MCP filesystem server touching a credential file: the same rows as the file tools.
+    - { id: cb.fs.credential-write-mcp,
+        operation: fs.sensitive, kind: mcp, writes: true,
+        decision: deny, alert: critical,
+        reason: "Writing credential files is blocked. Put secrets in the environment or a secret store." }
+    - { id: cb.fs.credential-read-mcp,
+        operation: fs.sensitive, kind: mcp,
+        decision: ask, alert: warn, reason: "Reading a credential or key file" }
+    # A browser MCP tool opening a URL: the same page as the web tool, so the same row.
+    - { id: cb.net.web-fetch-browser,
+        operation: net.web.fetch,
+        decision: ask, alert: warn, audit: true,
+        reason: "Fetching an external URL" }
     - { id: cb.mcp.write,
         operation: mcp.write,
         decision: ask, alert: info, reason: "This MCP tool writes data" }

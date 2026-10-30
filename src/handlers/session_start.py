@@ -157,6 +157,19 @@ def handle_session_start():
             except Exception as e:
                 logger.debug(f"session_registry.register failed: {e}")
 
+        # Hooks never install packages themselves (--no-sync). A missing one
+        # (fresh install, update, damaged environment) is installed by a
+        # background repair, and the user is told once per repair.
+        package_warning = None
+        packages_ready = True
+        try:
+            from src.common.package_repair import check_and_repair as repair_packages
+            from src.common.package_repair import missing_distributions
+            package_warning = repair_packages()
+            packages_ready = not missing_distributions()
+        except Exception as e:
+            logger.debug(f"Package check failed (non-fatal): {e}")
+
         # Remembered guardrail approvals left by sessions that never ended
         # cleanly (a closed terminal, a crash: no SessionEnd) are swept here,
         # so cleanup never depends on a clean exit. Only files untouched for a
@@ -181,9 +194,11 @@ def handle_session_start():
             logger.debug(f"Worker check failed: {e}")
 
         # A plugin update does not reach a dashboard that is already running.
+        # The old one keeps serving until this copy's packages are installed,
+        # since a replacement could not start without them.
         try:
             from src.guardrails.health import restart_if_older
-            if restart_if_older():
+            if packages_ready and restart_if_older():
                 logger.info("Restarted the dashboard: it was running an older plugin release")
         except Exception as e:
             logger.debug(f"Dashboard version check failed: {e}")
@@ -257,8 +272,12 @@ def handle_session_start():
             }
             # Shown to the user, not Claude: additionalContext would only tell
             # the model.
-            if guardrails_warning:
-                output_data["systemMessage"] = f"Guardrails: {guardrails_warning}"
+            user_messages = [message for message in (
+                package_warning,
+                f"Guardrails: {guardrails_warning}" if guardrails_warning else None,
+            ) if message]
+            if user_messages:
+                output_data["systemMessage"] = "\n".join(user_messages)
             print(json.dumps(output_data))
             logger.info("✓ OBS instruction successfully output to Claude Code")
             logger.info("=" * 60)

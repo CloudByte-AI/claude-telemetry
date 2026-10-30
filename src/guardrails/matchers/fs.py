@@ -19,10 +19,12 @@ from src.guardrails.matchers.base import (
     summary_value,
     written_redirects,
 )
+from src.guardrails.matchers.inline_code import code_file_reads
 from src.guardrails.registry import register_matcher
 from src.guardrails.toolcall import (
     KIND_DELETE,
     KIND_EDIT,
+    KIND_MCP,
     KIND_READ,
     KIND_SHELL,
     KIND_WRITE,
@@ -33,7 +35,20 @@ from src.guardrails.toolcall import (
 
 # Commands that remove things, in either dialect (PowerShell's Remove-Item and
 # its aliases already normalise to `rm` in the parser).
-_DELETE_COMMANDS = frozenset({"rm", "rmdir", "shred", "srm", "unlink", "wipe"})
+_DELETE_COMMANDS = frozenset({"rm", "rmdir", "rd", "del", "erase", "shred", "srm", "unlink", "wipe", "rimraf"})
+# Tools that always delete recursively and without asking (`npx rimraf dist` is `rm -rf dist`).
+_ALWAYS_RECURSIVE = frozenset({"rimraf"})
+
+
+def _windows_switches(command) -> set[str]:
+    """cmd.exe switches on a delete command, lower-case: `rmdir /s /q x` -> {"/s", "/q"}."""
+    return {o.lower() for o in command.subcommand_path if o.startswith("/") and 1 < len(o) <= 3 and o[1:].isalpha()}
+
+
+def _delete_targets(command) -> list[str]:
+    """A delete command's targets: its operands without options or cmd.exe switches."""
+    switches = _windows_switches(command)
+    return [o for o in command.subcommand_path if not o.startswith("-") and o.lower() not in switches]
 
 # Shell commands whose operands are text, not files (`echo ".env" >> .gitignore`
 # writes .gitignore; its redirect is still checked).
@@ -127,6 +142,11 @@ def _candidate_paths(call: ToolCall) -> list[tuple[str, str, object]]:
             resolved = resolve_path(target, call.cwd)
             if resolved:
                 found.append((resolved, command.raw, command))
+    # A file inline interpreter code opens by a literal path: `python -c "open('.env')"`.
+    for path, command in code_file_reads(call):
+        resolved = resolve_path(path, call.cwd)
+        if resolved:
+            found.append((resolved, command.raw, command))
     return found
 
 
@@ -171,17 +191,82 @@ def _find_delete(command) -> tuple[list[str], bool, bool] | None:
     return None
 
 
-# Folders that are disposable build or dependency output.
+# Folders that are disposable build, dependency, cache or virtual-environment output.
 _DISPOSABLE = frozenset({
     "node_modules", "dist", "build", ".next", "__pycache__", ".pytest_cache", ".mypy_cache",
     ".turbo", ".cache", ".parcel-cache", ".nuxt", ".svelte-kit", "coverage",
+    ".venv", "venv", ".tox", ".ruff_cache", ".nyc_output", "htmlcov",
 })
+
+# A folder below a temp location: /tmp, macOS /var/folders, $TMPDIR, %TEMP%, $env:TEMP,
+# AppData/Local/Temp, Windows/Temp. The temp location itself, and a bare `*` in it
+# (every other program's files), are not.
+_TEMP_CHILD = re.compile(
+    r"(?i)^(?:/tmp|/var/tmp|/private/tmp|(?:/private)?/var/folders"
+    r"|\$\{?(?:TMPDIR|TMP|TEMP|RUNNER_TEMP)\}?|\$env:(?:TEMP|TMP)|%(?:TEMP|TMP)%"
+    r"|(?:[a-z]:|/[a-z])?/users/[^/]+/appdata/local/temp"
+    r"|(?:~|\$HOME|\$env:USERPROFILE|%USERPROFILE%)/appdata/local/temp"
+    r"|(?:[a-z]:|/[a-z])/windows/temp)"
+    r"/(?!\*+$)[^/]"
+)
+# Commands that create a fresh temp folder: a variable set from one names a temp path.
+_MAKES_TEMP = re.compile(r"(?i)\bmktemp\b|New-TemporaryFile|GetTempPath\(|GetTempFileName\(")
 
 
 def _is_disposable(operand: str) -> bool:
-    """Whether a delete target, AS WRITTEN, is (inside) build or dependency output."""
-    parts = [p for p in operand.replace("\\", "/").split("/") if p not in ("", ".")]
+    """
+    Whether a delete target, as written (after same-command variables are filled
+    in), is (inside) build, dependency, cache or virtual-environment output, or a
+    folder below a temp location. `..` is resolved first, so `build/../src` is not,
+    while `../app/node_modules` still is (only leading `..` survive normalising).
+    """
+    path = posixpath.normpath(operand.replace("\\", "/")) if operand else ""
+    if _TEMP_CHILD.match(path):
+        return True
+    parts = [p for p in path.split("/") if p not in ("", ".", "..")]
     return any(p in _DISPOSABLE for p in parts)
+
+
+# Shell variables assigned in the command text: `D=/tmp/x`, `export D="$TMPDIR/x"`,
+# `D=$(mktemp -d)`, PowerShell `$d = "$env:TEMP\x"`.
+_POSIX_ASSIGN = re.compile(
+    r"(?:^|[;&|\n(])\s*(?:export\s+|local\s+|declare\s+)?([A-Za-z_]\w*)="
+    r"(\"[^\"]*\"|'[^']*'|\$\([^)]*\)|`[^`]*`|[^\s;&|)]*)"
+)
+_PS_ASSIGN = re.compile(r"(?:^|[;\n{(])\s*\$([A-Za-z_]\w*)\s*=\s*(\"[^\"]*\"|'[^']*'|[^\s;|]+)")
+_VARIABLE = re.compile(r"\$\{(\w+)\}|\$(\w+)(?!\w|:)")
+
+
+def _assigned_variables(command: str) -> dict[str, str]:
+    """
+    Variables assigned exactly once in the command text, by name, with the value
+    as written. A variable assigned more than once is left out: which value a
+    later use sees depends on control flow the scanner does not follow. A value
+    made by mktemp (or a PowerShell equivalent) becomes `$TMPDIR/mktemp`.
+    PowerShell names are stored lower-case (PowerShell ignores their case).
+    """
+    seen: dict[str, list[str]] = {}
+    for pattern, fold in ((_POSIX_ASSIGN, False), (_PS_ASSIGN, True)):
+        for name, value in pattern.findall(command):
+            if len(value) > 1 and value[0] in ("'", '"') and value[-1] == value[0]:
+                value = value[1:-1]
+            if _MAKES_TEMP.search(value):
+                value = "$TMPDIR/mktemp"
+            seen.setdefault(name.lower() if fold else name, []).append(value)
+    return {name: values[0] for name, values in seen.items() if len(values) == 1}
+
+
+def _expand(operand: str, variables: dict[str, str]) -> str:
+    """The operand with same-command variables filled in; unknown ones stay as written."""
+    def value(m: re.Match) -> str:
+        name = m.group(1) or m.group(2)
+        return variables.get(name, variables.get(name.lower(), m.group(0)))
+    for _ in range(3):
+        expanded = _VARIABLE.sub(value, operand)
+        if expanded == operand:
+            break
+        operand = expanded
+    return operand
 
 
 @register_matcher
@@ -199,10 +284,7 @@ class DeleteMatcher(BaseMatcher):
             return self.hit(target=call.file_paths[0], evidence=call.file_paths[0])
 
         for command in self.commands_named(call, _DELETE_COMMANDS):
-            target = next(
-                (resolve_path(o, call.cwd) for o in command.subcommand_path if not o.startswith("-")),
-                None,
-            )
+            target = next((resolve_path(o, call.cwd) for o in _delete_targets(command)), None)
             return self.hit(target=target, command=command)
         for command in call.commands:
             found = _find_delete(command)
@@ -224,7 +306,9 @@ class RecursiveDeleteMatcher(BaseMatcher):
     DEFAULT_ACTION = "ask"
     DEFAULT_ALERT = "warn"
     # disposable: every target, as written (not the folder the session runs
-    # in), is build or dependency output - node_modules, dist, build, .next...
+    # in), is build, dependency, cache or virtual-env output (node_modules, dist,
+    # .venv...) or a folder below a temp location (/tmp/x, %TEMP%/x, a mktemp
+    # folder). Variables assigned once in the same command are filled in first.
     FACTS = ("recursive", "forced", "target_count", "disposable")
 
     @classmethod
@@ -234,11 +318,14 @@ class RecursiveDeleteMatcher(BaseMatcher):
 
     def match(self, call: ToolCall) -> MatchResult | None:
         # (command, targets, recursive, forced) for every forced or recursive delete.
-        deletes = [
-            (c, [o for o in c.subcommand_path if not o.startswith("-")], c.has_recursive_flag, c.has_force_flag)
-            for c in self.commands_named(call, _DELETE_COMMANDS)
-            if c.has_recursive_flag or c.has_force_flag
-        ]
+        deletes = []
+        for c in self.commands_named(call, _DELETE_COMMANDS):
+            switches = _windows_switches(c)
+            always = c.command_name.lower() in _ALWAYS_RECURSIVE
+            recursive = c.has_recursive_flag or "/s" in switches or always
+            forced = c.has_force_flag or "/q" in switches or always
+            if recursive or forced:
+                deletes.append((c, _delete_targets(c), recursive, forced))
         for command in call.commands:
             found = _find_delete(command)
             if found and (found[1] or found[2]):
@@ -247,7 +334,11 @@ class RecursiveDeleteMatcher(BaseMatcher):
         # `rm -f a.tgz && rm -rf /tmp/pkg` that is the recursive one, which a
         # rule scoped on `recursive: true` must not miss.
         deletes.sort(key=lambda d: not d[2])
+        variables = _assigned_variables(call.command) if any("$" in t for d in deletes for t in d[1]) else {}
         for command, targets, recursive, forced in deletes:
+            # `D=$(mktemp -d); ...; rm -rf "$D"`: judge the folder the variable names.
+            if variables:
+                targets = [_expand(t, variables) for t in targets]
             # The target a rule sees is the one worth reviewing: in
             # `rm -rf node_modules src` that is src, so an "allow node_modules
             # cleanup" rule cannot wave the whole command through.
@@ -263,6 +354,14 @@ class RecursiveDeleteMatcher(BaseMatcher):
             )
         return None
 
+
+# MCP filesystem tools that read or change a file's content (the reference filesystem
+# server and its common forks). Listing and metadata tools are not.
+_MCP_FILE_TOOLS = frozenset({
+    "read_file", "read_text_file", "read_media_file", "read_multiple_files", "write_file", "edit_file",
+    "move_file", "create_file", "append_file", "delete_file",
+})
+_MCP_WRITE_TOOLS = frozenset({"write_file", "edit_file", "move_file", "create_file", "append_file", "delete_file"})
 
 # How a shell command touches a credential file, for summaries.
 _SENSITIVE_VERBS = (
@@ -280,12 +379,17 @@ class SensitiveFileMatcher(BaseMatcher):
     OPERATION = "fs.sensitive"
     DOMAIN = "fs"
     DESCRIPTION = "Touches a credential, key or other sensitive file"
-    APPLIES_TO = (KIND_SHELL, KIND_READ, KIND_WRITE, KIND_EDIT, KIND_DELETE)
+    APPLIES_TO = (KIND_SHELL, KIND_READ, KIND_WRITE, KIND_EDIT, KIND_DELETE, KIND_MCP)
     DEFAULT_ACTION = "ask"
     DEFAULT_ALERT = "warn"
-    FACTS = ("sensitive_path",)
+    # Also an MCP filesystem server's file tools (read_file, write_file...): the
+    # same file reaches the agent or changes either way. `writes` (MCP calls only)
+    # tells a tool that changes the file from one that reads it.
+    FACTS = ("sensitive_path", "writes")
 
     def match(self, call: ToolCall) -> MatchResult | None:
+        if call.kind == KIND_MCP:
+            return self._mcp_file(call)
         for path, evidence, command in _candidate_paths(call):
             if is_sensitive_path(path):
                 # `kind` distinguishes read from write, so ONE matcher serves
@@ -293,6 +397,20 @@ class SensitiveFileMatcher(BaseMatcher):
                 #   { operation: fs.sensitive, kind: write, decision: ask }
                 # The command is attached so `is_destructive` reads THAT one.
                 return self.hit(target=path, evidence=evidence, command=command, sensitive_path=path)
+        return None
+
+    def _mcp_file(self, call: ToolCall) -> MatchResult | None:
+        if (call.mcp_tool or "").lower() not in _MCP_FILE_TOOLS:
+            return None
+        raw = call.raw_input if isinstance(call.raw_input, dict) else {}
+        paths = list(call.file_paths)
+        for key in ("paths", "source", "destination"):
+            value = raw.get(key)
+            paths += [v for v in (value if isinstance(value, list) else [value]) if isinstance(v, str)]
+        for path in paths:
+            if is_sensitive_path(path):
+                return self.hit(target=path, evidence=path, sensitive_path=path,
+                                writes=(call.mcp_tool or "").lower() in _MCP_WRITE_TOOLS)
         return None
 
     @classmethod

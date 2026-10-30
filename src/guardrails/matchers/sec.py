@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import re
 
-from src.guardrails.matchers.base import BaseMatcher, MatchResult, option_of, remote_runs, summary_value
+from src.guardrails.matchers.base import (BaseMatcher, MatchResult, option_of, remote_runs, summary_value,
+                                          written_redirects)
 from src.guardrails.registry import register_matcher
 from src.guardrails.toolcall import KIND_SHELL, ToolCall
 
@@ -272,6 +273,12 @@ class CredentialReadMatcher(BaseMatcher):
             return bool(template and re.search(r"\.Config\.Env|\.Env\b", template))
         if run == ("containerapp", "secret", "list"):
             return "--show-values" in argv
+        # Parameter Store returns a SecureString decrypted only with --with-decryption;
+        # without it a read returns plain configuration or the encrypted blob.
+        if name == "aws" and run[:1] == ("ssm",) and not any(
+                a == "--with-decryption" or a.startswith("--with-decryption=") and not a.endswith("=false")
+                for a in argv):
+            return False
         if name in ("aws", "az"):
             query = self._value(argv, ("--query",))
             if query is not None and not self._VALUE_WORDS.search(query):
@@ -361,6 +368,12 @@ class CredentialReadMatcher(BaseMatcher):
 
 # Shell-history variables that, emptied or zeroed, stop history being kept.
 _HISTORY_VARS = ("HISTFILE", "HISTSIZE", "HISTFILESIZE", "SAVEHIST")
+_HISTORY_FILES = frozenset({".bash_history", ".zsh_history", ".sh_history", ".history", "consolehost_history.txt"})
+
+
+def _is_history_file(path: str) -> bool:
+    """Whether a path names a shell history file."""
+    return path.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1].lower() in _HISTORY_FILES
 # `HISTFILE=/dev/null`, `HISTFILE=`, `HISTSIZE=0` at the start of a statement or
 # after export/declare/typeset. An assignment alone is not a parsed command, so
 # this reads the call's text (here-document bodies removed).
@@ -395,6 +408,11 @@ def _audit_off(command) -> tuple[str, str] | None:
     if name == "set" and "+o" in operands and "history" in operands:
         return "shell_history", "disable"
     if name == "history" and "-c" in command.flags:
+        return "shell_history", "clear"
+    # The history file itself deleted or emptied: `rm ~/.bash_history`, `: > ~/.zsh_history`,
+    # `truncate -s 0 ~/.zsh_history`, `Remove-Item (Get-PSReadLineOption).HistorySavePath`.
+    history_files = [o for o in operands if _is_history_file(o)] if name in ("rm", "truncate", "shred") else []
+    if history_files or any(_is_history_file(t) for t in written_redirects(command)):
         return "shell_history", "clear"
     if name == "set-psreadlineoption" and "savenothing" in lowered:
         return "shell_history", "disable"

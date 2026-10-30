@@ -18,7 +18,7 @@ Two recovery passes:
 import json
 import re as _re
 import uuid as _uuid_mod
-from ftfy import fix_text as _fix_text
+from src.common.text_repair import fix_text as _fix_text
 
 from src.common.logging import get_logger
 from src.common.time_utils import to_ist
