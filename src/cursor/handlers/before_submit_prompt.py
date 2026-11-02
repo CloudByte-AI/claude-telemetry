@@ -60,23 +60,27 @@ def _build_block_user_message(findings: list, masked_text: str, scan_result) -> 
     ms = scan_result.scan_ms
     ms_str = f"{ms:.2f}" if ms < 1 else f"{int(ms)}"
 
+    from src.common.notifications import APP_NAME
+
     finding_lines = "\n".join(
-        f"  • {f.category} - {f.type} [{f.severity}]"
+        f"  - {f.category} - {f.type} [{f.severity}]"
         for f in findings
     )
+    separator = "-" * 56
 
+    # Named as the desktop notifications name the product.
     return (
-        f"⚠️  Sensitive data detected - prompt blocked by CloudByte Security\n\n"
-        f"Detected {len(findings)} sensitive item(s) found in the prompt:\n\n"
+        f"{APP_NAME} Security: prompt blocked, sensitive data detected\n\n"
+        f"Detected {len(findings)} sensitive item(s) in the prompt:\n\n"
         f"{finding_lines}\n\n"
-        f"📊 Scanned {scan_result.line_count} line(s) in {ms_str}ms"
+        f"Scanned {scan_result.line_count} line(s) in {ms_str}ms"
         f" [strategy: {scan_result.scan_strategy}]\n\n"
-        f"✅ Your prompt has been sanitized. Copy the masked version below and resubmit:\n\n"
-        f"────────────────────────────────────────────────────────\n\n"
+        f"Your prompt has been sanitized. Copy the masked version below and resubmit:\n\n"
+        f"{separator}\n\n"
         f"{masked_text}\n\n"
-        f"────────────────────────────────────────────────────────\n\n"
-        f"💡 False positive? Add the value to your allowlist so it is never\n"
-        f"   flagged again:\n\n"
+        f"{separator}\n\n"
+        f"False positive? Add the value to your allowlist so it is never\n"
+        f"flagged again:\n\n"
         f"   http://localhost:4723/security\n\n"
     )
 
@@ -254,6 +258,21 @@ def handle_before_submit_prompt() -> None:
         if block_response is not None:
             debug(f"Prompt blocked by security scan - session_id={session_id}")
             print(json.dumps(block_response))
+            return
+
+        # -- Model access: block a prompt sent with a blocked model -----------
+        # Before the USER_PROMPT write: a blocked prompt never ran. Fails open.
+        try:
+            from src.cursor.handlers.model_access import check_prompt as check_prompt_model
+            roots = [normalize_cwd(root) for root in workspace_roots if root]
+            model_block = check_prompt_model(hook_data, session_id, prompt_id, roots)
+        except Exception as e:
+            logger.warning(f"Model access check error (non-fatal, prompt proceeding): {e}")
+            model_block = None
+        if model_block is not None:
+            debug(f"Prompt blocked by model access - session_id={session_id}")
+            print(json.dumps(model_block.answer))
+            model_block.notify()
             return
 
         # ── Persist prompt (only reached on clean / disabled scan) ────────────

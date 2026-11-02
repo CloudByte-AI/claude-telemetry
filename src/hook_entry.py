@@ -14,6 +14,10 @@ guardrails code cannot be imported (_check_failed).
 `claude post_tool_use` is the one post-execution hook here: it opens the window
 of a remembered approval once an asked-about tool has run (approvals.py), and
 never fails closed, since it decides nothing.
+
+`claude model_switch | model_switched | agent_model` are the model-access hooks
+(hooks/model-hooks.json, src/handlers/model_access.py). They fail open: a
+model check that cannot run allows the model.
 """
 
 import os
@@ -23,6 +27,9 @@ USAGE = "Usage: python -m src.hook_entry <claude|cursor> [hook_name]"
 # `claude post_tool_use`: shown asks that ran (src/guardrails/asks.py) and
 # remembered approvals (src/guardrails/approvals.py).
 POST_TOOL_USE = "post_tool_use"
+# Model-access hooks -> what each prints when it has no opinion. PostModelSwitch
+# prints nothing: its stdout would be added to Claude's context.
+_MODEL_HOOKS = {"model_switch": "{}", "model_switched": None, "agent_model": "{}"}
 
 # Duplicated from src.guardrails.config, which would pull in the engine;
 # test_contracts.py asserts the copies stay equal.
@@ -102,6 +109,9 @@ def main(argv: list[str]) -> int:
     if platform == "claude" and len(argv) > 1 and argv[1] == POST_TOOL_USE:
         return _post_tool_use()
 
+    if platform == "claude" and len(argv) > 1 and argv[1] in _MODEL_HOOKS:
+        return _model_hook(argv[1])
+
     if _is_inactive():
         print(_NO_OPINION[platform])
         return 0
@@ -178,6 +188,27 @@ def _post_tool_use() -> int:
         _drain_stdin()
         return 0
     return handle_post_tool_use()
+
+
+def _model_hook(command: str) -> int:
+    """
+    A model-access hook. With guardrails off, or when the handler cannot be
+    imported, it answers with no opinion and exits 0: these hooks never fail
+    closed, and a PreModelSwitch hook that errors or hangs would block the switch.
+    """
+    neutral = _MODEL_HOOKS[command]
+    if not _is_inactive():
+        try:
+            from src.handlers.model_access import HANDLERS
+        except Exception as exc:
+            print(f"CloudByte guardrails: could not load the model check, so it was skipped "
+                  f"({exc!r})", file=sys.stderr)
+        else:
+            return HANDLERS[command]()
+    _drain_stdin()
+    if neutral is not None:
+        print(neutral)
+    return 0
 
 
 def _check_failed(platform: str, exc: Exception) -> int:

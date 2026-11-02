@@ -481,17 +481,16 @@ def handle_user_prompt():
                     # ── CLI's yellow warning is easy to miss with multiple sessions
                     # open, so also fire a native desktop popup - same content as
                     # the block reason above, including the masked prompt (copyable
-                    # via the dialog's clipboard icon). Detached + best-effort: never
-                    # affects the block decision or the hook's own exit.
+                    # via the dialog's copy button). Detached + best-effort: never
+                    # affects the block decision or the hook's own exit. The
+                    # dialog's own header says the prompt was blocked and not sent.
                     try:
                         from src.security.notifier import notify_blocked_prompt
                         _dialog_msg = (
-                            f"Sensitive data detected and blocked!\n\n"
                             f"Detected:\n{_finding_lines}\n\n"
                             f"Scanned {_sec_result.line_count} lines in {_ms_str}ms"
                             f" [strategy: {_sec_result.scan_strategy}]\n\n"
-                            f"Your prompt was not sent. Sanitized version"
-                            f" (use the copy icon above to copy it):\n\n"
+                            f"Sanitized version you can send instead:\n\n"
                             f"{_masked}\n\n"
                             f"False positive? Add safe values to your allowlist:\n"
                             f"http://localhost:4723/security"
@@ -504,6 +503,20 @@ def handle_user_prompt():
         except Exception as _sec_err:
             # Scan failure must never block the user - log and continue
             logger.warning(f"Security scan error (non-fatal, prompt proceeding): {_sec_err}")
+
+        # -- Model access: block the prompt while a blocked model is in use --
+        # Before the prompt is stored: a blocked prompt never ran. Fails open.
+        try:
+            from src.handlers.model_access import check_prompt as check_prompt_model
+            _model_block = check_prompt_model(hook_data, prompt_id=turn_prompt_id)
+        except Exception as _model_err:
+            logger.warning(f"Model access check error (non-fatal, prompt proceeding): {_model_err}")
+            _model_block = None
+        if _model_block is not None:
+            logger.info("Prompt blocked: the session's model is not allowed by the guardrails policy")
+            print(json.dumps(_model_block.answer))
+            _model_block.notify()
+            return
 
         # ── Defer prompts with emojis / special characters ───────────────────
         # Hook text and JSONL canonical text can differ when non-ASCII chars are
