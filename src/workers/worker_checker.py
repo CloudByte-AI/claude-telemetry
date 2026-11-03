@@ -109,10 +109,13 @@ def ensure_worker_quick_sync() -> bool:
         import subprocess
         project_dir = Path(__file__).parent.parent.parent
         log = _open_dashboard_log()
+        # --frozen: install from uv.lock as shipped, never rewrite it. A plain
+        # `uv run` re-locks the project, so every machine ended up with its own
+        # uv.lock (whatever its uv version wrote) inside the installed plugin.
         try:
             if sys.platform == "win32":
                 # Windows: Use start /B to run in background without new window
-                cmd = f'start /B "" uv run --directory "{project_dir}" {" ".join(DASHBOARD_ARGS)}'
+                cmd = f'start /B "" uv run --frozen --directory "{project_dir}" {" ".join(DASHBOARD_ARGS)}'
                 subprocess.Popen(
                     cmd,
                     shell=True,
@@ -123,7 +126,7 @@ def ensure_worker_quick_sync() -> bool:
                 )
             else:
                 subprocess.Popen(
-                    ["uv", "run", "--directory", str(project_dir), *DASHBOARD_ARGS],
+                    ["uv", "run", "--frozen", "--directory", str(project_dir), *DASHBOARD_ARGS],
                     start_new_session=True,
                     stdin=subprocess.DEVNULL,
                     stdout=log,
