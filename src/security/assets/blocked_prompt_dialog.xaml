@@ -1,33 +1,71 @@
+<!--
+  Blocked-prompt dialog (Windows), in the CloudByte-AI brand: the logo and its
+  blue and cyan accents, on a light or dark surface that follows the Windows
+  app theme. Red is kept only for the "blocked" status.
+
+  notifier.py fills __APP_NAME__ (the name the desktop notifications show),
+  __AUTO_CLOSE__, every __C_<NAME>__ colour (notifier.THEMES) and
+  __MESSAGE_BODY__, and sets the logo, the buttons and the drag handle by name
+  after parsing. The brand colours are the same in both themes.
+-->
 <Window
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    Title="CloudByte Security"
-    Width="480"
-    Height="440"
+    Title="__APP_NAME__ Security"
+    Width="540"
+    SizeToContent="Height"
     WindowStartupLocation="CenterScreen"
     ResizeMode="NoResize"
-    WindowStyle="SingleBorderWindow"
-    Background="#111111"
+    WindowStyle="None"
+    AllowsTransparency="True"
+    Background="Transparent"
     FontFamily="Segoe UI"
     ShowInTaskbar="False"
     Topmost="True">
 
     <Window.Resources>
-        <!-- Thin, dark scrollbar thumb matching the CloudByte dashboard's own
-             ::-webkit-scrollbar-thumb styling (border-alt colored, subtle) -->
+        <!-- Theme colours -->
+        <SolidColorBrush x:Key="Surface" Color="__C_SURFACE__"/>
+        <SolidColorBrush x:Key="Panel" Color="__C_PANEL__"/>
+        <SolidColorBrush x:Key="Line" Color="__C_LINE__"/>
+        <SolidColorBrush x:Key="Text" Color="__C_TEXT__"/>
+        <SolidColorBrush x:Key="TextBody" Color="__C_TEXT_BODY__"/>
+        <SolidColorBrush x:Key="TextMuted" Color="__C_TEXT_MUTED__"/>
+        <SolidColorBrush x:Key="ScrollThumb" Color="__C_SCROLL_THUMB__"/>
+        <SolidColorBrush x:Key="SecondaryBg" Color="__C_SECONDARY_BG__"/>
+        <SolidColorBrush x:Key="SecondaryBorder" Color="__C_SECONDARY_BORDER__"/>
+        <SolidColorBrush x:Key="SecondaryText" Color="__C_SECONDARY_TEXT__"/>
+        <SolidColorBrush x:Key="SecondaryHoverBg" Color="__C_SECONDARY_HOVER_BG__"/>
+        <SolidColorBrush x:Key="CopyIcon" Color="__C_COPY_ICON__"/>
+        <SolidColorBrush x:Key="IconHoverBg" Color="__C_ICON_HOVER_BG__"/>
+        <SolidColorBrush x:Key="CloseIcon" Color="__C_CLOSE_ICON__"/>
+        <SolidColorBrush x:Key="StatusBg" Color="__C_STATUS_BG__"/>
+        <SolidColorBrush x:Key="StatusBorder" Color="__C_STATUS_BORDER__"/>
+        <SolidColorBrush x:Key="StatusIconBg" Color="__C_STATUS_ICON_BG__"/>
+        <SolidColorBrush x:Key="StatusIcon" Color="__C_STATUS_ICON__"/>
+        <SolidColorBrush x:Key="StatusText" Color="__C_STATUS_TEXT__"/>
+
+        <!-- Brand colours, the same in both themes -->
+        <SolidColorBrush x:Key="BrandCyan" Color="#00A0D0"/>
+        <LinearGradientBrush x:Key="PrimaryGradient" StartPoint="0,0" EndPoint="1,1">
+            <GradientStop Color="#0046D8" Offset="0"/>
+            <GradientStop Color="#0098D0" Offset="1"/>
+        </LinearGradientBrush>
+
+        <!-- Thin scrollbar -->
         <Style x:Key="ThinScrollThumb" TargetType="Thumb">
-            <Setter Property="Background" Value="#454545"/>
+            <Setter Property="Background" Value="{StaticResource ScrollThumb}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Thumb">
-                        <Border Background="{TemplateBinding Background}" CornerRadius="1"/>
+                        <Border Background="{TemplateBinding Background}" CornerRadius="2"/>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
-
         <Style x:Key="ThinScrollBar" TargetType="ScrollBar">
-            <Setter Property="Width" Value="2"/>
+            <Setter Property="Width" Value="4"/>
+            <Setter Property="MinWidth" Value="0"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="Template">
                 <Setter.Value>
@@ -49,7 +87,6 @@
                 </Setter.Value>
             </Setter>
         </Style>
-
         <Style x:Key="ThinScrollViewer" TargetType="ScrollViewer">
             <Setter Property="Template">
                 <Setter.Value>
@@ -59,7 +96,7 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <ScrollContentPresenter Grid.Column="0" Margin="0,0,4,0"/>
+                            <ScrollContentPresenter Grid.Column="0" Margin="0,0,10,0"/>
                             <ScrollBar Grid.Column="1"
                                        Style="{StaticResource ThinScrollBar}"
                                        Value="{TemplateBinding VerticalOffset}"
@@ -72,81 +109,165 @@
             </Setter>
         </Style>
 
-        <!-- Flat button template - the stock Windows Button chrome applies its
-             own MouseOver highlight regardless of a plain Background setter,
-             so a custom flat template is the only way to suppress the hover
-             tint while keeping the hand cursor. -->
-        <Style x:Key="FlatButton" TargetType="Button">
+        <!-- Buttons: flat templates, so the stock Windows chrome adds no highlight of its own -->
+        <Style x:Key="PrimaryButton" TargetType="Button">
+            <Setter Property="Background" Value="{StaticResource PrimaryGradient}"/>
+            <Setter Property="Foreground" Value="#FFFFFF"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Height" Value="36"/>
+            <Setter Property="Padding" Value="22,0"/>
+            <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}" CornerRadius="6">
+                        <Border Name="Bg" Background="{TemplateBinding Background}" CornerRadius="8"
+                                Padding="{TemplateBinding Padding}">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Opacity" Value="0.88"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bg" Property="Opacity" Value="0.75"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SecondaryButton" TargetType="Button">
+            <Setter Property="Background" Value="{StaticResource SecondaryBg}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource SecondaryBorder}"/>
+            <Setter Property="Foreground" Value="{StaticResource SecondaryText}"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Height" Value="36"/>
+            <Setter Property="Padding" Value="14,0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Name="Bg" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
+                                CornerRadius="8" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="{StaticResource SecondaryHoverBg}"/>
+                                <Setter TargetName="Bg" Property="BorderBrush" Value="{StaticResource BrandCyan}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="IconButton" TargetType="Button">
+            <Setter Property="Width" Value="30"/>
+            <Setter Property="Height" Value="30"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Name="Bg" Background="Transparent" CornerRadius="7">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="{StaticResource IconHoverBg}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
     </Window.Resources>
 
-    <Grid Margin="24">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
+    <!-- The margin leaves room for the shadow around the rounded window -->
+    <Border Name="Chrome" Margin="18" Background="{StaticResource Surface}"
+            BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="14">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="28" ShadowDepth="0" Opacity="__C_SHADOW_OPACITY__" Color="#000000"/>
+        </Border.Effect>
 
-        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,16">
-            <TextBlock Text="CLOUD" FontSize="15" FontWeight="Bold" Foreground="#faf9f6"/>
-            <TextBlock Text="BYTE" FontSize="15" FontWeight="Bold" Foreground="#ff5600"/>
-        </StackPanel>
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
 
-        <Border Grid.Row="1" Background="#1a1a1a" BorderBrush="#313130" BorderThickness="1"
-                CornerRadius="10" Padding="18" Margin="0,0,0,14">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
-
-                <DockPanel Grid.Row="0" LastChildFill="False" Margin="0,0,0,12">
-                    <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
-                        <Border Width="42" Height="42" Background="#dc2626" CornerRadius="8" VerticalAlignment="Top">
-                            <TextBlock Text="!" Foreground="White" FontSize="22" FontWeight="Bold"
-                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <TextBlock Text="Prompt blocked" Margin="14,6,0,0" FontSize="20" FontWeight="SemiBold"
-                                   Foreground="#faf9f6" VerticalAlignment="Center"/>
+            <!-- Header: logo, name, close -->
+            <DockPanel Grid.Row="0" Margin="22,18,14,0" LastChildFill="False">
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
+                    <Image Name="Logo" Width="30" Height="30" RenderOptions.BitmapScalingMode="HighQuality"/>
+                    <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                        <TextBlock Text="__APP_NAME__" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
+                        <TextBlock Text="Security" FontSize="11.5" Foreground="{StaticResource TextMuted}"/>
                     </StackPanel>
+                </StackPanel>
+                <Button Name="CloseButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}"
+                        ToolTip="Close" VerticalAlignment="Top">
+                    <Path Data="M1,1 L11,11 M11,1 L1,11" Stroke="{StaticResource CloseIcon}" StrokeThickness="1.6"
+                          StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                </Button>
+            </DockPanel>
 
-                    <Button Name="CopyButton" DockPanel.Dock="Right" Width="34" Height="34"
-                            Style="{StaticResource FlatButton}" Background="#242424"
-                            BorderThickness="0" Cursor="Hand" VerticalAlignment="Top"
-                            ToolTip="Copy sanitized prompt">
-                        <Viewbox Width="16" Height="16">
+            <!-- Status -->
+            <Border Grid.Row="1" Margin="22,16,22,0" Padding="14,12" CornerRadius="10"
+                    Background="{StaticResource StatusBg}" BorderBrush="{StaticResource StatusBorder}" BorderThickness="1">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Width="38" Height="38" CornerRadius="19" Background="{StaticResource StatusIconBg}" VerticalAlignment="Center">
+                        <Grid Width="18" Height="18">
+                            <Path Data="M9,1 L17,16 L1,16 Z" Fill="{StaticResource StatusIcon}"/>
+                            <TextBlock Text="!" Foreground="{StaticResource StatusIconBg}" FontSize="11" FontWeight="Bold"
+                                       HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,1"/>
+                        </Grid>
+                    </Border>
+                    <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center">
+                        <TextBlock Text="Prompt blocked" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
+                        <TextBlock Text="Sensitive data was found, so your prompt was not sent." FontSize="12.5"
+                                   Foreground="{StaticResource StatusText}" Margin="0,2,0,0" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- Details -->
+            <Border Grid.Row="2" Margin="22,12,22,0" Padding="16,14,6,14" CornerRadius="10"
+                    Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1">
+                <ScrollViewer Style="{StaticResource ThinScrollViewer}" VerticalScrollBarVisibility="Auto" MaxHeight="300">
+                    <TextBlock TextWrapping="Wrap" FontSize="12.5" Foreground="{StaticResource TextBody}" LineHeight="19">__MESSAGE_BODY__</TextBlock>
+                </ScrollViewer>
+            </Border>
+
+            <!-- Actions -->
+            <DockPanel Grid.Row="3" Margin="22,16,22,20" LastChildFill="False">
+                <TextBlock DockPanel.Dock="Left" VerticalAlignment="Center" FontSize="11"
+                           Foreground="{StaticResource TextMuted}" Text="Closes automatically in __AUTO_CLOSE__ seconds"/>
+                <Button Name="OkButton" DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Content="Got it"/>
+                <Button Name="CopyButton" DockPanel.Dock="Right" Style="{StaticResource SecondaryButton}"
+                        Margin="0,0,10,0" ToolTip="Copy the sanitized prompt to the clipboard">
+                    <StackPanel Orientation="Horizontal">
+                        <Viewbox Width="14" Height="14" VerticalAlignment="Center">
                             <Canvas Width="24" Height="24">
                                 <Rectangle Canvas.Left="8" Canvas.Top="2" Width="8" Height="4"
-                                           RadiusX="1" RadiusY="1" Stroke="#faf9f6" StrokeThickness="2"/>
-                                <Path Stroke="#faf9f6" StrokeThickness="2" StrokeLineJoin="Round"
+                                           RadiusX="1" RadiusY="1" Stroke="{StaticResource CopyIcon}" StrokeThickness="2"/>
+                                <Path Stroke="{StaticResource CopyIcon}" StrokeThickness="2" StrokeLineJoin="Round"
                                       Data="M16,4 H18 A2,2 0 0 1 20,6 V20 A2,2 0 0 1 18,22 H6 A2,2 0 0 1 4,20 V6 A2,2 0 0 1 6,4 H8"/>
                             </Canvas>
                         </Viewbox>
-                    </Button>
-                </DockPanel>
-
-                <ScrollViewer Grid.Row="1" Style="{StaticResource ThinScrollViewer}"
-                              VerticalScrollBarVisibility="Auto">
-                    <TextBlock TextWrapping="Wrap" FontSize="13" Foreground="#9c9fa5" LineHeight="20">__MESSAGE_BODY__</TextBlock>
-                </ScrollViewer>
-            </Grid>
-        </Border>
-
-        <DockPanel Grid.Row="2" LastChildFill="False">
-            <Button Name="OkButton" Content="OK" Width="96" Height="34"
-                    HorizontalAlignment="Right" DockPanel.Dock="Right"
-                    Style="{StaticResource FlatButton}"
-                    Background="#ff5600" Foreground="White" BorderThickness="0"
-                    FontWeight="SemiBold" Cursor="Hand"/>
-        </DockPanel>
-    </Grid>
+                        <TextBlock Name="CopyLabel" Text="Copy sanitized prompt" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+            </DockPanel>
+        </Grid>
+    </Border>
 </Window>
