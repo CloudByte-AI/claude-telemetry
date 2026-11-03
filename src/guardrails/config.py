@@ -23,6 +23,7 @@ src/guardrails/workspaces.py. Every file has the same format:
     allowlist: []                 # exact commands/paths that never match
     mcp_allowlist: []             # MCP tools considered governed
     known_hosts: []
+    models: {mode: block, block: []}  # which AI models are allowed (model_access.py)
     ui_categories: {...}          # any `ui_` key: an editor's own data, never read here
 
 Validation is the save gate for any editor: validate_profile_text() takes the
@@ -116,7 +117,7 @@ TABLE_NAMES = ("bash", "file", "mcp", "web")
 # the engine never reads them.
 KNOWN_SETTINGS = (
     "schema_version", "enabled", "plan", "tables",
-    "allowlist", "mcp_allowlist", "known_hosts", "ask_memory",
+    "allowlist", "mcp_allowlist", "known_hosts", "ask_memory", "models",
 )
 LIST_SETTINGS = ("allowlist", "mcp_allowlist", "known_hosts")
 EDITOR_KEY_PREFIX = _yaml_cache.EDITOR_KEY_PREFIX
@@ -146,6 +147,8 @@ class GuardrailsProfile:
     # prompts; else `same_target` or `any_target`, for `ask_memory_minutes`.
     ask_memory_mode: str | None = None
     ask_memory_minutes: int = 15
+    # Which AI models are allowed (model_access.ModelRules); None = no model rules.
+    models: Any = None
 
     def table_for(self, kind: str) -> Table | None:
         return self.tables.get(TABLE_FOR_KIND.get(kind, ""))
@@ -381,6 +384,10 @@ def parse_profile(raw: Any, source: str = "user") -> GuardrailsProfile:
     mcp_allowlist = _read_list(raw, "mcp_allowlist", errors)
     known_hosts = _read_list(raw, "known_hosts", errors)
     ask_memory_mode, ask_memory_minutes = _read_ask_memory(raw.get("ask_memory"), errors)
+    models = None
+    if raw.get("models") is not None:
+        from src.guardrails.model_access import read_models
+        models = read_models(raw["models"], errors)
 
     return GuardrailsProfile(
         enabled=enabled,
@@ -395,6 +402,7 @@ def parse_profile(raw: Any, source: str = "user") -> GuardrailsProfile:
         fingerprint=_fingerprint(raw),
         ask_memory_mode=ask_memory_mode,
         ask_memory_minutes=ask_memory_minutes,
+        models=models,
     )
 
 

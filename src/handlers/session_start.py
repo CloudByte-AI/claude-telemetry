@@ -223,6 +223,15 @@ def handle_session_start():
         except Exception as e:
             logger.debug(f"Guardrails health probe failed: {e}")
 
+        # Model access: remember the starting model, and say so now when the
+        # policy blocks it (the prompt itself is blocked at UserPromptSubmit).
+        model_warning = None
+        try:
+            from src.handlers.model_access import on_session_start as check_session_model
+            model_warning = check_session_model(hook_data)
+        except Exception as e:
+            logger.debug(f"Model access check failed (non-fatal): {e}")
+
         # Store session_id to a temp file for Stop hook to read later
         if session_id:
             from src.common.paths import get_cloudbyte_dir
@@ -275,6 +284,7 @@ def handle_session_start():
             user_messages = [message for message in (
                 package_warning,
                 f"Guardrails: {guardrails_warning}" if guardrails_warning else None,
+                model_warning,
             ) if message]
             if user_messages:
                 output_data["systemMessage"] = "\n".join(user_messages)

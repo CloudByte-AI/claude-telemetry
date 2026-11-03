@@ -1,0 +1,39 @@
+{
+  "description": "CloudByte model access. Kept apart from hooks.json: a Claude Code release without the model-switch events rejects the file that names them, so only these hooks are lost there.",
+  "hooks": {
+    "PreModelSwitch": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-sync --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.hook_entry claude model_switch",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostModelSwitch": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-sync --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.hook_entry claude model_switched",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-sync --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.hook_entry claude agent_model",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
