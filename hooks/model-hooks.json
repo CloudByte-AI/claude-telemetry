@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --no-sync --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.hook_entry claude model_switch",
+            "command": "uv run -q --no-sync --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.hook_entry claude model_switch",
             "timeout": 10
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --no-sync --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.hook_entry claude model_switched",
+            "command": "uv run -q --no-sync --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.hook_entry claude model_switched",
             "timeout": 10
           }
         ]
@@ -29,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --no-sync --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.hook_entry claude agent_model",
+            "command": "uv run -q --no-sync --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.hook_entry claude agent_model",
             "timeout": 10
           }
         ]

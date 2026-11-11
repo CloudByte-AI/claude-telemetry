@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --no-sync --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.main session_start",
+            "command": "uv run -q --no-sync --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.main session_start",
             "timeout": 300
           }
         ]
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --no-sync --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.hook_entry claude",
+            "command": "uv run -q --no-sync --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.hook_entry claude",
             "timeout": 10,
             "statusMessage": "CloudByte: checking guardrails..."
           }
@@ -32,7 +32,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --no-sync --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.hook_entry claude post_tool_use",
+            "command": "uv run -q --no-sync --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.hook_entry claude post_tool_use",
             "timeout": 10
           }
         ]
@@ -43,7 +43,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --no-sync --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.main user_prompt",
+            "command": "uv run -q --no-sync --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.main user_prompt",
             "timeout": 300
           }
         ]
@@ -54,7 +54,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --no-sync --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.main stop",
+            "command": "uv run -q --no-sync --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.main stop",
             "timeout": 120
           }
         ]
@@ -66,7 +66,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --no-sync --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.main session_end",
+            "command": "uv run -q --no-sync --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.main session_end",
             "timeout": 60
           }
         ]

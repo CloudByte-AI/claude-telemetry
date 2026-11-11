@@ -877,12 +877,13 @@ function Test-EnvStale {
 # Microsoft already trusts. Older installs built the plugin environment on a
 # uv-downloaded Python, which is unsigned, so on such a machine every hook dies
 # before any plugin code runs. Same check as validate.ps1.
-# VerifiedAndReputablePolicyState: 0 off, 1 on, 2 evaluation (does not block).
+# VerifiedAndReputablePolicyState: 0 off, 1 on, 2 evaluation. Evaluation blocks
+# nothing yet, but Windows switches it on by itself, so it counts as on.
 function Test-SmartAppControl {
     try {
         $state = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy" `
             -Name "VerifiedAndReputablePolicyState" -ErrorAction Stop).VerifiedAndReputablePolicyState
-        return ($state -eq 1)
+        return ($state -eq 1 -or $state -eq 2)
     }
     catch { return $false }
 }
@@ -899,16 +900,23 @@ function Test-EnvBlocked {
     return ($script:LastNativeExit -ne 0)
 }
 
-# A Python 3.12 that is installed system-wide (python.org, never a uv download)
-# and that Windows actually starts. $null when there is none.
+# python.org revoked the signing certificate of these releases: Windows may
+# refuse to run them, so they never count as signed. Kept identical in validate.ps1.
+$REVOKED_PYTHON_VERSIONS = @("3.12.8", "3.13.1")
+
+# A signed Python 3.12 that is installed system-wide (python.org, never a uv
+# download), is not a revoked release, and that Windows actually starts. $null
+# when there is none.
 function Find-RunnablePython312 {
     $out = Invoke-Native "uv" @("python", "find", "3.12", "--no-project", "--system",
                                 "--python-preference", "only-system")
     if ($script:LastNativeExit -ne 0) { return $null }
     $path = $out.Trim()
     if (-not $path -or -not (Test-Path $path)) { return $null }
-    $null = Invoke-Native $path @("-c", "0")
+    if ((Get-AuthenticodeSignature -LiteralPath $path).Status -ne 'Valid') { return $null }
+    $version = (Invoke-Native $path @("-c", "import platform; print(platform.python_version())")).Trim()
     if ($script:LastNativeExit -ne 0) { return $null }
+    if ($REVOKED_PYTHON_VERSIONS -contains $version) { return $null }
     return $path
 }
 
@@ -1397,14 +1405,14 @@ function Invoke-PluginSync {
     Say "  Location: $Dir"
     Say "  This downloads Python packages and can take a minute the first time..."
 
-    # Under Smart App Control the environment must be built on a Python Windows
-    # will start: name it explicitly, or uv may pick its own unsigned download.
+    # Build on a signed Python whenever one is installed, naming it explicitly,
+    # or uv may pick its own unsigned download: Windows then keeps starting the
+    # environment if Smart App Control or an App Control policy is switched on
+    # later. Under Smart App Control it is required.
     $pyArg = "3.12"
-    if ($script:SacOn) {
-        $runnable = Find-RunnablePython312
-        if ($runnable) { $pyArg = $runnable }
-        else { SayWarn "${Name}: Smart App Control is on but no signed Python 3.12 was found - re-run without -SkipPrereqs" }
-    }
+    $runnable = Find-RunnablePython312
+    if ($runnable) { $pyArg = $runnable }
+    elseif ($script:SacOn) { SayWarn "${Name}: Smart App Control is on but no signed Python 3.12 was found - re-run without -SkipPrereqs" }
 
     # uv cannot query an interpreter Windows refuses to start, so it cannot
     # rebuild in place: remove the environment first. Nothing can hold it open,

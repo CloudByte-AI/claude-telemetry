@@ -114,8 +114,13 @@ def ensure_worker_quick_sync() -> bool:
         # uv.lock (whatever its uv version wrote) inside the installed plugin.
         try:
             if sys.platform == "win32":
-                # Windows: Use start /B to run in background without new window
-                cmd = f'start /B "" uv run --frozen --directory "{project_dir}" {" ".join(DASHBOARD_ARGS)}'
+                # Windows: Use start /B to run in background without new window.
+                # An environment moved onto a signed Python names it, or uv would
+                # rebuild it on the pinned version (windows_signed_python).
+                from src.common.windows_signed_python import sync_python_args
+                python_args = subprocess.list2cmdline(sync_python_args(project_dir))
+                frozen = f"--frozen {python_args}" if python_args else "--frozen"
+                cmd = f'start /B "" uv run {frozen} --directory "{project_dir}" {" ".join(DASHBOARD_ARGS)}'
                 subprocess.Popen(
                     cmd,
                     shell=True,

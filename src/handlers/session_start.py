@@ -170,6 +170,17 @@ def handle_session_start():
         except Exception as e:
             logger.debug(f"Package check failed (non-fatal): {e}")
 
+        # Windows Smart App Control: keep the environment on a signed Python, or
+        # say (once a day) that one is needed. No-op elsewhere.
+        signed_python_warning = None
+        try:
+            from src.common.windows_signed_python import ensure_signed_environment, notify_needs_python
+            signed_python_warning = ensure_signed_environment("session_start").message
+            if signed_python_warning:
+                notify_needs_python("claude")
+        except Exception as e:
+            logger.debug(f"Signed Python check failed (non-fatal): {e}")
+
         # Remembered guardrail approvals left by sessions that never ended
         # cleanly (a closed terminal, a crash: no SessionEnd) are swept here,
         # so cleanup never depends on a clean exit. Only files untouched for a
@@ -283,6 +294,7 @@ def handle_session_start():
             # the model.
             user_messages = [message for message in (
                 package_warning,
+                signed_python_warning,
                 f"Guardrails: {guardrails_warning}" if guardrails_warning else None,
                 model_warning,
             ) if message]

@@ -3,70 +3,70 @@
   "hooks": {
     "sessionStart": [
       {
-        "command": "uv run --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main session_start",
+        "command": "uv run -q --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main session_start",
         "type": "command",
         "timeout": 30
       }
     ],
     "beforeSubmitPrompt": [
       {
-        "command": "uv run --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main before_submit_prompt",
+        "command": "uv run -q --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main before_submit_prompt",
         "type": "command",
         "timeout": 30
       }
     ],
     "stop": [
       {
-        "command": "uv run --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main stop",
+        "command": "uv run -q --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main stop",
         "type": "command",
         "timeout": 30
       }
     ],
     "afterAgentResponse": [
       {
-        "command": "uv run --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main after_agent_response",
+        "command": "uv run -q --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main after_agent_response",
         "type": "command",
         "timeout": 30
       }
     ],
     "postToolUse": [
       {
-        "command": "uv run --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main post_tool_use",
+        "command": "uv run -q --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main post_tool_use",
         "type": "command",
         "timeout": 30
       }
     ],
     "postToolUseFailure": [
       {
-        "command": "uv run --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main post_tool_use_failure",
+        "command": "uv run -q --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main post_tool_use_failure",
         "type": "command",
         "timeout": 30
       }
     ],
     "beforeShellExecution": [
       {
-        "command": "uv run --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.hook_entry cursor before_shell_execution",
+        "command": "uv run -q --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.hook_entry cursor before_shell_execution",
         "type": "command",
         "timeout": 10
       }
     ],
     "beforeMCPExecution": [
       {
-        "command": "uv run --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.hook_entry cursor before_mcp_execution",
+        "command": "uv run -q --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.hook_entry cursor before_mcp_execution",
         "type": "command",
         "timeout": 10
       }
     ],
     "beforeReadFile": [
       {
-        "command": "uv run --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.hook_entry cursor before_read_file",
+        "command": "uv run -q --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.hook_entry cursor before_read_file",
         "type": "command",
         "timeout": 10
       }
     ],
     "preToolUse": [
       {
-        "command": "uv run --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.hook_entry cursor pre_tool_use",
+        "command": "uv run -q --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.hook_entry cursor pre_tool_use",
         "type": "command",
         "timeout": 10,
         "matcher": "Write|StrReplace|EditNotebook|Delete"
@@ -74,21 +74,21 @@
     ],
     "afterMCPExecution": [
       {
-        "command": "uv run --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main after_mcp_execution",
+        "command": "uv run -q --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main after_mcp_execution",
         "type": "command",
         "timeout": 30
       }
     ],
     "afterAgentThought": [
       {
-        "command": "uv run --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main after_agent_thought",
+        "command": "uv run -q --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main after_agent_thought",
         "type": "command",
         "timeout": 30
       }
     ],
     "sessionEnd": [
       {
-        "command": "uv run --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main session_end",
+        "command": "uv run -q --no-sync --directory \"${CURSOR_PLUGIN_ROOT}\" -m src.cursor.main session_end",
         "type": "command",
         "timeout": 30
       }

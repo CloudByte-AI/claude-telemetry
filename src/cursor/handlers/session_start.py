@@ -68,6 +68,15 @@ def handle_session_start() -> None:
     except Exception as e:
         logger.debug(f"Package check failed (non-fatal): {e}")
 
+    # Windows Smart App Control: keep the environment on a signed Python. With
+    # no user-facing output here, a needed Python is reported by notification.
+    try:
+        from src.common.windows_signed_python import ensure_signed_environment, notify_needs_python
+        if ensure_signed_environment("session_start").message:
+            notify_needs_python("cursor")
+    except Exception as e:
+        logger.debug(f"Signed Python check failed (non-fatal): {e}")
+
     try:
         hook_data = _read_stdin_data()
         logger.info(f"sessionStart full payload: {json.dumps(hook_data, default=str)}")

@@ -164,6 +164,11 @@ def start_repair(reason: str) -> bool:
     started within the cooldown. True when this call started it. Never raises.
     """
     try:
+        from src.common.windows_signed_python import rebuild_in_progress
+
+        if rebuild_in_progress(PLUGIN_ROOT):
+            logger.debug("package repair: the environment is being rebuilt, which installs the packages")
+            return False
         if not _claim_repair_slot():
             logger.debug("package repair: a repair already ran within the cooldown")
             return False
@@ -215,9 +220,16 @@ def _claim_repair_slot() -> bool:
 
 
 def _sync_command() -> list[str]:
-    """`uv sync --frozen` for this folder; UV is the uv binary that started this hook."""
+    """
+    `uv sync --frozen` for this folder; UV is the uv binary that started this hook.
+    On an environment moved onto a signed Python (Windows), that Python is named,
+    or uv would rebuild the environment on the pinned version.
+    """
+    from src.common.windows_signed_python import sync_python_args
+
     command_name = os.environ.get("UV") or shutil.which("uv") or "uv"
-    return [command_name, "sync", "--frozen", "--directory", str(PLUGIN_ROOT)]
+    return [command_name, "sync", "--frozen", *sync_python_args(PLUGIN_ROOT),
+            "--directory", str(PLUGIN_ROOT)]
 
 
 def _spawn_sync(reason: str) -> None:

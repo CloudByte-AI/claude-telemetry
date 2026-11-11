@@ -2,11 +2,15 @@
 # Ensures uv is installed, then ensures a Python 3.12 interpreter is available
 # TO UV - not to the user's shell.
 #
-# Python is provisioned through `uv python install`, which places a managed
-# interpreter under %APPDATA%\uv\python and touches neither PATH nor the `py`
-# launcher. A pre-existing Python of any version is left exactly as it is: an
-# older interpreter (3.9, say) is no longer an error, because nothing the
-# plugin runs depends on the user's default `python`.
+# The plugin environment is built on a signed Python, so that Windows Smart App
+# Control or an App Control policy, now or later, keeps starting it: an
+# installed signed Python 3.12 is used, otherwise python.org's signed installer
+# runs for this user only (no PATH change, no py launcher, no file
+# associations). uv's own Python (`uv python install`, under %APPDATA%\uv\python,
+# also off PATH) is the fallback while Smart App Control is off. A pre-existing
+# Python of any version is left exactly as it is: an older interpreter (3.9,
+# say) is no longer an error, because nothing the plugin runs depends on the
+# user's default `python`.
 #
 # Run directly or via skill - no plugin context required.
 
@@ -211,24 +215,40 @@ if ($systemPython) {
 # Smart App Control (Windows 11) starts only programs that are signed or that
 # Microsoft already trusts. The Pythons `uv python install` downloads are not
 # signed, so on such a machine every plugin hook would die before any plugin
-# code runs. python.org's installer is signed, so it is used instead.
-# VerifiedAndReputablePolicyState: 0 off, 1 on, 2 evaluation (does not block).
+# code runs. Smart App Control can be switched on at any time, and a company
+# App Control policy acts the same way, so the plugin is built on a signed
+# python.org Python whenever one can be installed; uv's own Python is only the
+# fallback while Smart App Control is off.
+# VerifiedAndReputablePolicyState: 0 off, 1 on, 2 evaluation. Evaluation blocks
+# nothing yet, but Windows switches it on by itself, so it counts as on.
 function Test-SmartAppControl {
     try {
         $state = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy" `
             -Name "VerifiedAndReputablePolicyState" -ErrorAction Stop).VerifiedAndReputablePolicyState
-        return ($state -eq 1)
+        return ($state -eq 1 -or $state -eq 2)
     }
     catch { return $false }
 }
 
 $SacOn = Test-SmartAppControl
 if ($SacOn) {
-    log "Smart App Control is on - only a Python that Windows allows to run will be used"
+    log "Smart App Control is on or evaluating - only a signed Python will be used"
     Write-Host "     Smart App Control is on - a signed Python from python.org will be used"
 }
 
+# python.org revoked the signing certificate of these releases: Windows may
+# refuse to run them, so they never count as signed. Kept identical in install.ps1.
+$REVOKED_PYTHON_VERSIONS = @("3.12.8", "3.13.1")
+# The last Python 3.12 release with Windows installers.
+$PYTHON_ORG_VERSION = "3.12.10"
+
+# A Python $PY_TARGET for building the plugin environment, or $null.
+# -SignedOnly (implied under Smart App Control): a system install, signed, not
+# a revoked release, and one that Windows actually starts.
 function Find-Python312 {
+    param([switch] $SignedOnly)
+
+    $signedOnly = $SignedOnly -or $SacOn
     # --no-project  so a pyproject.toml in the working directory cannot redirect
     #               the answer to an unrelated project environment
     # --system      so a .venv in the working directory is not mistaken for an
@@ -236,25 +256,30 @@ function Find-Python312 {
     #               the plugin's own environment. uv-managed installs are still
     #               included, only virtualenvs are excluded.
     $findArgs = @("python", "find", $PY_TARGET, "--no-project", "--system")
-    # Under Smart App Control a uv-managed install is never an answer, even one
-    # that is already on disk: Windows refuses to start it.
-    if ($SacOn) { $findArgs += @("--python-preference", "only-system") }
+    # A uv-managed install is never signed, even one that is already on disk.
+    if ($signedOnly) { $findArgs += @("--python-preference", "only-system") }
     $out = Invoke-Native "uv" $findArgs
-    if ($script:LastNativeExit -eq 0) {
-        $path = $out.Trim()
-        if ($path -and (Test-Path $path)) {
-            # Found is not the same as allowed to run: prove it.
-            if ($SacOn) {
-                $null = Invoke-Native $path @("-c", "0")
-                if ($script:LastNativeExit -ne 0) {
-                    log "Python at $path is blocked from running (exit $($script:LastNativeExit))"
-                    return $null
-                }
-            }
-            return $path
-        }
+    if ($script:LastNativeExit -ne 0) { return $null }
+    $path = $out.Trim()
+    if (-not $path -or -not (Test-Path $path)) { return $null }
+    if (-not $signedOnly) { return $path }
+
+    # Only a signed Python gives the plugin environment a signed launcher. Found
+    # is not the same as allowed to run, so prove that too.
+    if ((Get-AuthenticodeSignature -LiteralPath $path).Status -ne 'Valid') {
+        log "Python at $path is not signed"
+        return $null
     }
-    return $null
+    $version = (Invoke-Native $path @("-c", "import platform; print(platform.python_version())")).Trim()
+    if ($script:LastNativeExit -ne 0) {
+        log "Python at $path is blocked from running (exit $($script:LastNativeExit))"
+        return $null
+    }
+    if ($REVOKED_PYTHON_VERSIONS -contains $version) {
+        log "Python $version at $path has a revoked signature"
+        return $null
+    }
+    return $path
 }
 
 function Install-PythonViaUv {
@@ -278,10 +303,10 @@ function Install-PythonViaUv {
     return ($code -eq 0)
 }
 
-# ── Legacy system-wide fallbacks ───────────────────────────────────────────────
-# Only reached when uv cannot provision Python at all (blocked download host,
-# for example). These install a real system Python, so they are deliberately
-# last and deliberately do not prepend to PATH.
+# ── System-wide installs ───────────────────────────────────────────────────────
+# python.org's signed installer comes first and installs for this user only,
+# with nothing beyond Python itself. winget is the last resort: its package
+# adds Python to PATH.
 
 function Remove-GhostPythonRegistry {
     $regRoots = @("HKCU:\Software\Python\PythonCore", "HKLM:\Software\Python\PythonCore")
@@ -303,59 +328,20 @@ function Remove-GhostPythonRegistry {
     }
 }
 
-function Get-RegisteredPythonVersion {
-    try {
-        $hasRegistry = (Test-Path "HKCU:\Software\Python\PythonCore") -or
-                       (Test-Path "HKLM:\Software\Python\PythonCore")
-        if (-not $hasRegistry) {
-            log "No Python registry entries - skipping MSI check"
-            return $null
-        }
-
-        $products = Get-WmiObject -Class Win32_Product -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -like "Python 3.12*Core*" }
-        if ($products) {
-            $ver = @($products)[0].Version
-            if (-not $ver) { return $null }
-            $parts = $ver.Split(".")
-            if ($parts.Length -ge 3) {
-                $buildNum = [int]$parts[2]
-                $patchVersion = [Math]::Floor($buildNum / 1000)
-                $pyVer = "$($parts[0]).$($parts[1]).$patchVersion"
-                log "Found registered Python version: $pyVer"
-                return $pyVer
-            }
-        }
-    } catch {
-        log "Could not check MSI records: $_"
-    }
-    return $null
-}
-
 function Install-Python-Via-Direct-Download {
     log "Trying direct download from python.org..."
-    Write-Host "Downloading Python 3.12 from python.org..."
 
     Remove-GhostPythonRegistry
 
-    $pythonVersion = "3.12.0"
-
-    # Match an already-registered version to avoid MSI error 1638.
-    $registeredVersion = Get-RegisteredPythonVersion
-    if ($registeredVersion) {
-        log "MSI has Python $registeredVersion registered - downloading same version"
-        Write-Host "Detected registered Python $registeredVersion - downloading matching version..."
-        $pythonVersion = $registeredVersion
-    }
-
+    $pythonVersion = $PYTHON_ORG_VERSION
     $pythonUrl     = "https://www.python.org/ftp/python/$pythonVersion/python-$pythonVersion-amd64.exe"
     $installerPath = "$env:TEMP\python-$pythonVersion-amd64.exe"
 
     log "Downloading: $pythonUrl"
-    Write-Host "Downloading Python $pythonVersion (~25MB)..."
+    Write-Host "Downloading Python $pythonVersion (about 26 MB)..."
 
     try {
-        # No time limit: ~25MB can legitimately take minutes on a slow link.
+        # No time limit: ~26MB can legitimately take minutes on a slow link.
         Save-Download -Url $pythonUrl -OutFile $installerPath -TimeoutSec 0
 
         if (-not (Test-Path $installerPath)) {
@@ -364,17 +350,27 @@ function Install-Python-Via-Direct-Download {
             return $false
         }
 
+        # Never run a download that the Python Software Foundation did not sign.
+        $signature = Get-AuthenticodeSignature -LiteralPath $installerPath
+        if ($signature.Status -ne 'Valid' -or
+            "$($signature.SignerCertificate.Subject)" -notlike "*Python Software Foundation*") {
+            log "Downloaded installer is not signed by the Python Software Foundation ($($signature.Status))"
+            Write-Host "The downloaded Python installer is not signed by python.org - not running it"
+            Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
+            return $false
+        }
+
         Write-Host "Running Python installer silently..."
-        # PrependPath=0 on purpose: uv discovers this install through the
-        # Windows registry (PEP 514), so there is no reason to change which
-        # python the user's shell resolves.
-        $installArgs = "/quiet InstallAllUsers=0 PrependPath=0 Include_test=0"
+        # For this user only, and nothing beyond Python itself: no PATH change
+        # (uv discovers the install through the Windows registry, PEP 514), no
+        # py launcher, no Start menu shortcuts, no .py file associations.
+        $installArgs = "/quiet InstallAllUsers=0 PrependPath=0 Include_launcher=0 Include_test=0 Shortcuts=0 AssociateFiles=0"
         $proc = Start-Process -FilePath $installerPath -ArgumentList $installArgs -Wait -PassThru
 
         if ($proc.ExitCode -eq 1638) {
             log "Exit 1638 - attempting reinstall with REINSTALL=ALL..."
             Write-Host "Forcing reinstall..."
-            $reinstallArgs = "/quiet REINSTALL=ALL REINSTALLMODE=amus InstallAllUsers=0 PrependPath=0 Include_test=0"
+            $reinstallArgs = "$installArgs REINSTALL=ALL REINSTALLMODE=amus"
             $proc = Start-Process -FilePath $installerPath -ArgumentList $reinstallArgs -Wait -PassThru
             log "Reinstall exit code: $($proc.ExitCode)"
         }
@@ -435,100 +431,103 @@ function Install-Python-Via-Winget {
 
 # ── Ensure a 3.12 interpreter exists for uv ────────────────────────────────────
 
-$pythonPath = Find-Python312
+# The Python the plugin environment is built on, or $null. A signed system
+# Python first, installing python.org's when there is none; uv's own Python
+# only while Smart App Control is off; winget last. Sets $script:UvPythonBroken
+# when uv installed a Python that it then cannot find.
+function Get-PluginPython {
+    $script:UvPythonBroken = $false
+    $path = Find-Python312 -SignedOnly
+    if ($path) { return $path }
 
-if ($pythonPath) {
-    log "Python $PY_TARGET already available at: $pythonPath"
-    Write-Host "[OK] Python $PY_TARGET available"
-    Write-Host "     $pythonPath"
-}
-else {
-    log "No Python $PY_TARGET found - provisioning"
-
-    $uvInstallOk = $false
-    if ($SacOn) {
-        log "Smart App Control is on - skipping uv python install (its builds are unsigned)"
-    }
-    else {
-        try { $uvInstallOk = Install-PythonViaUv } catch { log "uv python install threw: $_"; $uvInstallOk = $false }
-    }
-    $global:LASTEXITCODE = 0
-
-    if ($uvInstallOk) { $pythonPath = Find-Python312 }
-
-    # uv said it installed Python but cannot then see it. Installing a system
-    # Python would not help - uv is the thing that has to find it - and would
-    # modify the machine for nothing, so stop here with a real diagnostic.
-    if ($uvInstallOk -and -not $pythonPath) {
-        log "uv python install reported success but $PY_TARGET is not discoverable - uv looks broken"
-        Write-Host ""
-        Write-Host "[FAIL] uv installed Python $PY_TARGET but cannot find it afterwards."
-        Write-Host "       This usually means the uv installation itself is damaged."
-        Write-Host ""
-        Write-Host "  Check what uv reports:"
-        Write-Host "    uv --version"
-        Write-Host "    uv python list"
-        Write-Host ""
-        Write-Host "  Reinstalling uv normally fixes it:"
-        Write-Host "    irm https://astral.sh/uv/install.ps1 | iex"
-        Write-Host ""
-        exit 1
-    }
-
-    # uv genuinely could not download (blocked host, offline mirror). A real
-    # system install still helps, because uv discovers registered installs
-    # through the Windows registry.
+    log "No signed Python $PY_TARGET found - installing one from python.org"
+    Write-Host "Installing a signed Python $PY_TARGET from python.org..."
+    Write-Host "  (for this user only - PATH, the py launcher and file associations are untouched)"
     $directOk = $false
-    if (-not $pythonPath) {
-        Write-Host ""
-        if ($SacOn) {
-            log "Smart App Control is on - installing signed Python from python.org"
-            Write-Host "Installing a signed Python $PY_TARGET from python.org..."
-        }
-        else {
-            log "uv could not download Python - falling back to a system install"
-            Write-Host "[WARN] uv could not download Python $PY_TARGET - trying a system install..."
-        }
+    try { $directOk = Install-Python-Via-Direct-Download } catch { $directOk = $false }
+    $global:LASTEXITCODE = 0
+    if ($directOk) {
+        Refresh-Path
+        $path = Find-Python312 -SignedOnly
+        if ($path) { return $path }
+    }
 
-        try { $directOk = Install-Python-Via-Direct-Download } catch { $directOk = $false }
+    # Smart App Control off: Windows starts unsigned programs, so uv's own
+    # Python is an acceptable fallback, and lighter than winget's PATH change.
+    if (-not $SacOn) {
+        $path = Find-Python312
+        if ($path) {
+            log "No signed Python could be installed - using the Python at $path"
+            return $path
+        }
+        $uvInstallOk = $false
+        try { $uvInstallOk = Install-PythonViaUv } catch { log "uv python install threw: $_"; $uvInstallOk = $false }
         $global:LASTEXITCODE = 0
-        if ($directOk) {
-            Refresh-Path
-            $pythonPath = Find-Python312
+        if ($uvInstallOk) {
+            $path = Find-Python312
+            if ($path) { return $path }
+            log "uv python install reported success but $PY_TARGET is not discoverable - uv looks broken"
+            $script:UvPythonBroken = $true
+            return $null
         }
     }
 
     # winget last, and ONLY if the direct download failed outright - otherwise a
     # working install would be layered over with a second copy that also
     # rewrites PATH.
-    if (-not $pythonPath -and -not $directOk) {
+    if (-not $directOk) {
         $wingetOk = $false
         try { $wingetOk = Install-Python-Via-Winget } catch { $wingetOk = $false }
         $global:LASTEXITCODE = 0
-        if ($wingetOk) { $pythonPath = Find-Python312 }
-    }
-
-    if (-not $pythonPath) {
-        log "All Python provisioning methods failed"
-        Write-Host ""
-        Write-Host "[FAIL] Could not provide Python $PY_TARGET"
-        if ($SacOn) {
-            # A uv-managed Python would be blocked by Smart App Control too.
-            Write-Host "Install it manually from python.org (its installer is signed):"
+        if ($wingetOk) {
+            $path = Find-Python312 -SignedOnly
+            if (-not $path -and -not $SacOn) { $path = Find-Python312 }
+            if ($path) { return $path }
         }
-        else {
-            Write-Host "Install it manually with either:"
-            Write-Host "  uv python install $PY_TARGET"
-        }
-        Write-Host "  https://www.python.org/downloads/"
-        Write-Host "Then re-run the installer."
-        exit 1
     }
-
-    log "Python $PY_TARGET ready at: $pythonPath"
-    Write-Host "[OK] Python $PY_TARGET ready"
-    Write-Host "     $pythonPath"
+    return $null
 }
+
+$pythonPath = Get-PluginPython
+
+# uv said it installed Python but cannot then see it. Installing anything else
+# would not help - uv is the thing that has to find it - so stop here with a
+# real diagnostic.
+if ($script:UvPythonBroken) {
+    Write-Host ""
+    Write-Host "[FAIL] uv installed Python $PY_TARGET but cannot find it afterwards."
+    Write-Host "       This usually means the uv installation itself is damaged."
+    Write-Host ""
+    Write-Host "  Check what uv reports:"
+    Write-Host "    uv --version"
+    Write-Host "    uv python list"
+    Write-Host ""
+    Write-Host "  Reinstalling uv normally fixes it:"
+    Write-Host "    irm https://astral.sh/uv/install.ps1 | iex"
+    Write-Host ""
+    exit 1
+}
+
+if (-not $pythonPath) {
+    log "All Python provisioning methods failed"
+    Write-Host ""
+    Write-Host "[FAIL] Could not provide Python $PY_TARGET"
+    if ($SacOn) {
+        # A uv-managed Python would be blocked by Smart App Control too.
+        Write-Host "Install it manually from python.org (its installer is signed):"
+    }
+    else {
+        Write-Host "Install it manually with either:"
+        Write-Host "  uv python install $PY_TARGET"
+    }
+    Write-Host "  https://www.python.org/downloads/"
+    Write-Host "Then re-run the installer."
+    exit 1
+}
+
+log "Python $PY_TARGET ready at: $pythonPath"
+Write-Host "[OK] Python $PY_TARGET ready"
+Write-Host "     $pythonPath"
 
 # ── Done ───────────────────────────────────────────────────────────────────────
 
