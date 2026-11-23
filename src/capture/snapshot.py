@@ -22,7 +22,8 @@ Rules:
     recorded with no lines
   - HEAD moved, or a git working-tree command (checkout, stash, reset, ...): the record is
     marked git_operation; those lines are not the assistant's writing
-  - binary files (a NUL in the first 8000 bytes, git's own test) get no lines
+  - binary files (a NUL in the first 8000 bytes, git's own test) get no lines; a file with a
+    byte-order mark (UTF-8, UTF-16, UTF-32: Windows PowerShell 5.1 writes UTF-16) is text
   - notes (kind "note") say where changes may be unseen: a background command (its changes
     land after the hook), a command that ends in another repo, a repo skipped for the rest of
     the session because its status was slow (over SLOW_SECONDS, SLOW_STRIKES times) or too big
@@ -338,12 +339,34 @@ def take_before(payload: dict, client: str, profile, now: float):
 
 # ── After ─────────────────────────────────────────────────────────────────────
 
+# Byte-order marks, longest first (a UTF-32 LE mark starts like a UTF-16 LE one). Windows
+# PowerShell 5.1 writes `>` and Out-File as UTF-16 LE with a mark, so such a file is text.
+_BOMS = ((b"\xff\xfe\x00\x00", "utf-32"), (b"\x00\x00\xfe\xff", "utf-32"),
+         (b"\xef\xbb\xbf", "utf-8-sig"), (b"\xff\xfe", "utf-16"), (b"\xfe\xff", "utf-16"))
+
+
+def decode_text(content: bytes | None) -> str | None:
+    """The file's text, or None when it is binary (git's test: a NUL in the first 8000
+    bytes, checked after a byte-order mark has chosen the encoding). Missing is ""."""
+    if not content:
+        return ""
+    for bom, encoding in _BOMS:
+        if content.startswith(bom):
+            try:
+                return content.decode(encoding)
+            except UnicodeDecodeError:
+                return None
+    if b"\0" in content[:BINARY_PROBE]:
+        return None
+    return content.decode("utf-8", "replace")
+
+
 def _is_binary(*contents) -> bool:
-    return any(c and b"\0" in c[:BINARY_PROBE] for c in contents)
+    return any(c and decode_text(c) is None for c in contents)
 
 
 def _lines(content: bytes | None) -> list[str]:
-    return content.decode("utf-8", "replace").splitlines() if content else []
+    return (decode_text(content) or "").splitlines()
 
 
 def diff_hunks(before: list[str], after: list[str]):

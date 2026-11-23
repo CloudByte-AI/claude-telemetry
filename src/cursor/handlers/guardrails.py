@@ -31,7 +31,7 @@ import sys
 from dataclasses import dataclass, replace
 
 from src.guardrails.decision import ALLOW, ASK, DENY, MESSAGE_PREFIX, SOURCE_ERROR, Decision
-from src.guardrails.hook_input import HookInputError, read_stdin_payload
+from src.guardrails.hook_input import HookInputError, parse_payload, read_stdin_payload
 from src.guardrails.toolcall import (
     KIND_AGENT,
     KIND_DELETE,
@@ -354,14 +354,15 @@ def _log_decision(hook: HookSpec, decision: Decision, payload: dict) -> None:
         pass
 
 
-def dispatch(hook_name: str, record: bool = True) -> int:
+def dispatch(hook_name: str, record: bool = True, raw: bytes | None = None) -> int:
     """
     Entry point for all four Cursor hooks. Always returns 0: deny is expressed
     in the permission object, not with exit code 2.
 
     `record=False`, for a copy that is another client's install, still decides
     and answers but writes no audit event and shows no notification
-    (src/common/install_owner.py).
+    (src/common/install_owner.py). `raw` is the hook input when the caller has
+    already read it (src/hook_entry.py, for edit capture); otherwise stdin.
     """
     hook = HOOKS.get(hook_name)
     if hook is None:
@@ -372,7 +373,7 @@ def dispatch(hook_name: str, record: bool = True) -> int:
 
     try:
         # Bytes, with the BOM Cursor prefixes stripped - see hook_input.
-        payload = read_stdin_payload()
+        payload = read_stdin_payload() if raw is None else parse_payload(raw)
     except HookInputError as exc:
         # Unreadable input. Emit a valid allow rather than nothing, so a
         # failClosed:true configuration does not block on our parse failure,

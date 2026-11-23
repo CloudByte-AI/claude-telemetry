@@ -34,6 +34,8 @@ USAGE = "Usage: python -m src.hook_entry <claude|cursor> [hook_name]"
 POST_TOOL_USE = "post_tool_use"
 # `claude post_tool_use_failure`: a failed shell call's after-snapshot (src/capture/).
 POST_TOOL_USE_FAILURE = "post_tool_use_failure"
+# Cursor guardrails hooks that also take edit evidence's "before" (src/capture/cursor.py).
+_CURSOR_CAPTURE_HOOKS = ("pre_tool_use", "before_shell_execution")
 # Model-access hooks -> what each prints when it has no opinion. PostModelSwitch
 # prints nothing: its stdout would be added to Claude's context.
 _MODEL_HOOKS = {"model_switch": "{}", "model_switched": None, "agent_model": "{}"}
@@ -129,6 +131,11 @@ def main(argv: list[str]) -> int:
         raw = _read_stdin()
         _capture_shell_before(raw)
 
+    # Cursor preToolUse (file tools) and beforeShellExecution: the same, for Cursor.
+    if platform == "cursor" and len(argv) > 1 and argv[1] in _CURSOR_CAPTURE_HOOKS:
+        raw = _read_stdin()
+        _capture_cursor_before(raw, argv[1])
+
     if _is_inactive():
         print(_NO_OPINION[platform])
         return 0
@@ -154,7 +161,7 @@ def main(argv: list[str]) -> int:
         print(stand_down_notice(owner, CURSOR) + " (guardrails still checked, not recorded)",
               file=sys.stderr)
 
-    return dispatch(argv[1] if len(argv) > 1 else "", record=owner is None)
+    return dispatch(argv[1] if len(argv) > 1 else "", record=owner is None, raw=raw)
 
 
 def _has_entries(parts: tuple, suffix: str) -> bool:
@@ -190,9 +197,16 @@ def _drain_stdin() -> None:
 
 
 def _read_stdin() -> bytes:
-    """The whole hook input; empty when it cannot be read."""
+    """The whole hook input as bytes; empty when it cannot be read. Like
+    src.guardrails.hook_input: the byte stream when there is one (a BOM survives for the
+    parser to strip), else the text stream, encoded."""
+    stream = sys.stdin
     try:
-        return sys.stdin.buffer.read()
+        buffer = getattr(stream, "buffer", None)
+        if buffer is not None:
+            return buffer.read()
+        text = stream.read()
+        return text.encode("utf-8") if isinstance(text, str) else bytes(text or b"")
     except Exception:
         return b""
 
@@ -212,6 +226,19 @@ def _capture_shell_before(raw: bytes) -> None:
     try:
         from src.capture.hook import capture_pre_tool_use
         capture_pre_tool_use(raw, "claude")
+    except Exception:
+        pass
+
+
+def _capture_cursor_before(raw: bytes, hook: str) -> None:
+    """Cursor: copy the file a write is about to change, or snapshot the repo a shell command
+    starts in (src/capture/cursor.py). Only Cursor's own install records, so a copy that is
+    another client's install skips it. Never raises, never prints."""
+    try:
+        from src.common.install_owner import CURSOR, foreign_owner
+        if foreign_owner(CURSOR) is None:
+            from src.capture.cursor import capture_before
+            capture_before(raw, hook)
     except Exception:
         pass
 

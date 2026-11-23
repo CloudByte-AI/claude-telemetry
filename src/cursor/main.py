@@ -59,14 +59,36 @@ def after_agent_response() -> None:
     handle_after_agent_response()
 
 
+def _capture_edit_evidence(failed: bool) -> None:
+    """
+    Edit evidence (src/capture/cursor.py) from this post-tool call, before the TOOL row is
+    written. Reads stdin once and puts the same bytes back for the handler, which reads it
+    again. Never raises, never prints. Runs after stand_down: only Cursor's own install.
+    """
+    try:
+        raw = sys.stdin.buffer.read()
+    except Exception:
+        return
+    try:
+        from src.capture.cursor import capture_after
+        capture_after(raw, failed=failed)
+    except Exception:
+        pass
+    import io
+    sys.stdin = io.TextIOWrapper(io.BytesIO(raw), encoding="utf-8")
+
+
 def post_tool_use() -> None:
-    """postToolUse hook - writes TOOL."""
+    """postToolUse hook - records edit evidence, then writes TOOL."""
+    _capture_edit_evidence(failed=False)
     from src.cursor.handlers.post_tool_use import handle_post_tool_use
     handle_post_tool_use()
 
 
 def post_tool_use_failure() -> None:
-    """postToolUseFailure hook - writes TOOL for a failed, timed-out or denied call."""
+    """postToolUseFailure hook - records edit evidence (a failed shell command can still have
+    changed files), then writes TOOL for a failed, timed-out or denied call."""
+    _capture_edit_evidence(failed=True)
     from src.cursor.handlers.post_tool_use_failure import handle_post_tool_use_failure
     handle_post_tool_use_failure()
 
