@@ -3,13 +3,14 @@ Evidence files - one file per record.
 
     ~/.cloudbyte/capture/evidence/
         2026-11-23/                         one folder per UTC day
-            1795431234567890123-3f9a1c2b7d4e.json
+            1795431234567890123-00000004817263549182-3f9a1c2b.json
 
 One file per record, not a shared append-only file, for the same reason as the guardrails
 audit spool: many hook processes write at once and appends are not atomic on Windows. Each
 record is written to a temporary name and renamed into place (atomic within one directory),
 so a reader sees the whole record or no file. Names start with the write time in
-nanoseconds, so a plain name sort is chronological.
+nanoseconds and then the machine's monotonic counter, so a plain name sort is the write
+order, even for writes within one tick of a coarse wall clock.
 
 Housekeeping (retention, abandoned temp files, a size cap) runs at most once every few hours,
 from a write, and costs one stat otherwise. Capture is on even where nothing ever reads the
@@ -55,7 +56,10 @@ def write_record(record: dict, retention_days: int, now: float | None = None) ->
     try:
         directory = os.path.join(evidence_dir(), _day(now))
         os.makedirs(directory, exist_ok=True)
-        name = f"{int(now * 1_000_000_000)}-{os.urandom(6).hex()}"
+        # Wall time first (orders across reboots), then the monotonic high-resolution counter
+        # (shared by every process on the machine), because the wall clock can be coarse:
+        # Python 3.12 on Windows reads GetSystemTimeAsFileTime, up to 15.6 ms per step.
+        name = f"{int(now * 1_000_000_000)}-{time.perf_counter_ns():020d}-{os.urandom(4).hex()}"
         temp = os.path.join(directory, name + TEMP_SUFFIX)
         final = os.path.join(directory, name + RECORD_SUFFIX)
         with open(temp, "w", encoding="utf-8") as handle:
