@@ -11,9 +11,10 @@ guardrails code cannot be imported (_check_failed).
     python -m src.hook_entry claude post_tool_use
     python -m src.hook_entry cursor before_shell_execution
 
-`claude post_tool_use` is the one post-execution hook here: it opens the window
-of a remembered approval once an asked-about tool has run (approvals.py), and
-never fails closed, since it decides nothing.
+`claude post_tool_use` is the one post-execution hook here: it records what a
+tool call changed in files (src/capture/), opens the window of a remembered approval once
+an asked-about tool has run (approvals.py), and never fails closed, since it
+decides nothing.
 
 `claude model_switch | model_switched | agent_model` are the model-access hooks
 (hooks/model-hooks.json, src/handlers/model_access.py). They fail open: a
@@ -172,22 +173,40 @@ def _drain_stdin() -> None:
         pass
 
 
+def _read_stdin() -> bytes:
+    """The whole hook input; empty when it cannot be read."""
+    try:
+        return sys.stdin.buffer.read()
+    except Exception:
+        return b""
+
+
+def _capture_edit(raw: bytes) -> None:
+    """Edit evidence (src/capture/): only calls that changed files do any work. Never raises."""
+    try:
+        from src.capture.hook import capture_post_tool_use
+        capture_post_tool_use(raw, "claude")
+    except Exception:
+        pass
+
+
 def _post_tool_use() -> int:
     """
-    Claude Code PostToolUse: record that an asked-about call ran, and turn an
-    approved ask into an approval window (src/handlers/post_tool_use.py). It
-    decides nothing, so unlike PreToolUse it never fails closed: whatever goes
-    wrong, it prints nothing and exits 0.
+    Claude Code PostToolUse: record what an edit tool changed (src/capture/),
+    then record that an asked-about call ran and turn an approved ask into an
+    approval window (src/handlers/post_tool_use.py). It decides nothing, so
+    unlike PreToolUse it never fails closed: whatever goes wrong, it prints
+    nothing and exits 0.
     """
+    raw = _read_stdin()
+    _capture_edit(raw)
     if _is_inactive() or not (_has_shown_asks() or _has_pending_approvals()):
-        _drain_stdin()
         return 0
     try:
         from src.handlers.post_tool_use import handle_post_tool_use
     except Exception:
-        _drain_stdin()
         return 0
-    return handle_post_tool_use()
+    return handle_post_tool_use(raw)
 
 
 def _model_hook(command: str) -> int:

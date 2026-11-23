@@ -21,10 +21,12 @@ import sys
 HOOK_EVENT = "PostToolUse"
 
 
-def handle_post_tool_use() -> int:
-    """The command-hook entry point. Returns the process exit code."""
+def handle_post_tool_use(raw: bytes | None = None) -> int:
+    """The command-hook entry point. Returns the process exit code. `raw` is the hook
+    input when the caller has already read it; otherwise it is read from stdin."""
     try:
-        raw = sys.stdin.buffer.read()
+        if raw is None:
+            raw = sys.stdin.buffer.read()
         payload = json.loads(raw.decode("utf-8-sig") or "{}") if raw else {}
     except Exception:
         return 0

@@ -18,6 +18,7 @@ DATA_SUBDIR = "data"
 LOGS_SUBDIR = "logs"
 SECURITY_SUBDIR = "security"
 GUARDRAILS_SUBDIR = "guardrails"
+CAPTURE_SUBDIR = "capture"
 ASSETS_SUBDIR = "assets"
 DB_FILENAME = "cloudbyte.db"
 
@@ -97,6 +98,19 @@ def get_guardrails_dir() -> Path:
         callers that write into it should mkdir(parents=True, exist_ok=True)).
     """
     return get_cloudbyte_dir() / GUARDRAILS_SUBDIR
+
+
+def get_capture_dir() -> Path:
+    """
+    Get the directory for edit evidence capture: its settings and its evidence files.
+    Typically: C:\\Users\\<username>\\.cloudbyte\\capture
+
+    Like guardrails, shared by both plugins and NOT split per client.
+
+    Returns:
+        Path: The capture directory (not guaranteed to exist yet - writers create it).
+    """
+    return get_cloudbyte_dir() / CAPTURE_SUBDIR
 
 
 def get_assets_dir() -> Path:
