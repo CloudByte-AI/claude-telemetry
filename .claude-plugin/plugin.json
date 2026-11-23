@@ -5,6 +5,6 @@
   "author": {
     "name": "CloudByte-AI"
   },
-  "hooks": "./hooks/model-hooks.json",
+  "hooks": ["./hooks/model-hooks.json", "./hooks/capture-hooks.json"],
   "skills": "./claude-skills/"
 }

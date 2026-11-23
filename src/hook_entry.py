@@ -11,10 +11,14 @@ guardrails code cannot be imported (_check_failed).
     python -m src.hook_entry claude post_tool_use
     python -m src.hook_entry cursor before_shell_execution
 
-`claude post_tool_use` is the one post-execution hook here: it records what a
-tool call changed in files (src/capture/), opens the window of a remembered approval once
+`claude` (PreToolUse) also takes a shell call's before-snapshot (src/capture/)
+before the check; it prints nothing and cannot change the answer.
+
+`claude post_tool_use` is the post-execution hook: it records what a tool call
+changed in files (src/capture/), opens the window of a remembered approval once
 an asked-about tool has run (approvals.py), and never fails closed, since it
-decides nothing.
+decides nothing. `claude post_tool_use_failure` records what a failed shell call
+changed (hooks/capture-hooks.json).
 
 `claude model_switch | model_switched | agent_model` are the model-access hooks
 (hooks/model-hooks.json, src/handlers/model_access.py). They fail open: a
@@ -28,6 +32,8 @@ USAGE = "Usage: python -m src.hook_entry <claude|cursor> [hook_name]"
 # `claude post_tool_use`: shown asks that ran (src/guardrails/asks.py) and
 # remembered approvals (src/guardrails/approvals.py).
 POST_TOOL_USE = "post_tool_use"
+# `claude post_tool_use_failure`: a failed shell call's after-snapshot (src/capture/).
+POST_TOOL_USE_FAILURE = "post_tool_use_failure"
 # Model-access hooks -> what each prints when it has no opinion. PostModelSwitch
 # prints nothing: its stdout would be added to Claude's context.
 _MODEL_HOOKS = {"model_switch": "{}", "model_switched": None, "agent_model": "{}"}
@@ -110,8 +116,18 @@ def main(argv: list[str]) -> int:
     if platform == "claude" and len(argv) > 1 and argv[1] == POST_TOOL_USE:
         return _post_tool_use()
 
+    if platform == "claude" and len(argv) > 1 and argv[1] == POST_TOOL_USE_FAILURE:
+        return _post_tool_use_failure()
+
     if platform == "claude" and len(argv) > 1 and argv[1] in _MODEL_HOOKS:
         return _model_hook(argv[1])
+
+    # Claude Code PreToolUse: a shell call's before-snapshot first (src/capture/), with the
+    # input read once here and handed to the guardrails check below.
+    raw = None
+    if platform == "claude" and len(argv) == 1:
+        raw = _read_stdin()
+        _capture_shell_before(raw)
 
     if _is_inactive():
         print(_NO_OPINION[platform])
@@ -127,7 +143,7 @@ def main(argv: list[str]) -> int:
         return _check_failed(platform, exc)
 
     if platform == "claude":
-        return handle_pre_tool_use()
+        return handle_pre_tool_use(raw)
 
     # A copy that is another client's install (Cursor also runs our hooks from
     # the Claude Code install) still decides - its answer can only add a deny,
@@ -181,13 +197,33 @@ def _read_stdin() -> bytes:
         return b""
 
 
-def _capture_edit(raw: bytes) -> None:
+def _capture_edit(raw: bytes, failed: bool = False) -> None:
     """Edit evidence (src/capture/): only calls that changed files do any work. Never raises."""
     try:
         from src.capture.hook import capture_post_tool_use
-        capture_post_tool_use(raw, "claude")
+        capture_post_tool_use(raw, "claude", failed=failed)
     except Exception:
         pass
+
+
+def _capture_shell_before(raw: bytes) -> None:
+    """A shell call's before-snapshot (src/capture/snapshot.py). Never raises, never prints,
+    so it cannot change the guardrails answer that follows."""
+    try:
+        from src.capture.hook import capture_pre_tool_use
+        capture_pre_tool_use(raw, "claude")
+    except Exception:
+        pass
+
+
+def _post_tool_use_failure() -> int:
+    """
+    Claude Code PostToolUseFailure (hooks/capture-hooks.json): a shell command that failed
+    can still have changed files, so its after-snapshot is taken here. Prints nothing,
+    exits 0.
+    """
+    _capture_edit(_read_stdin(), failed=True)
+    return 0
 
 
 def _post_tool_use() -> int:

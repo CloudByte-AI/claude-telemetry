@@ -1,0 +1,17 @@
+{
+  "description": "CloudByte edit capture for failed shell calls. Kept apart from hooks.json: a Claude Code release that does not know PostToolUseFailure may reject the file that names it, so only this hook is lost there.",
+  "hooks": {
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run -q --no-sync --directory \"${CLAUDE_PLUGIN_ROOT}\" -m src.hook_entry claude post_tool_use_failure",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

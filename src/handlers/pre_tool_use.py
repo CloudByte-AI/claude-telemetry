@@ -20,7 +20,7 @@ import os
 import sys
 
 from src.guardrails.decision import ASK, DENY, MESSAGE_PREFIX, Decision
-from src.guardrails.hook_input import HookInputError, read_stdin_payload
+from src.guardrails.hook_input import HookInputError, parse_payload, read_stdin_payload
 from src.guardrails.toolcall import (
     KIND_AGENT,
     KIND_EDIT,
@@ -205,14 +205,15 @@ def _log_error(message: str) -> None:
         pass
 
 
-def handle_pre_tool_use() -> int:
-    """The command-hook entry point. Returns the process exit code."""
+def handle_pre_tool_use(raw: bytes | None = None) -> int:
+    """The command-hook entry point. Returns the process exit code. `raw` is the hook input
+    when the caller has already read it; otherwise it is read from stdin."""
     from src.common.logging import get_logger
 
     logger = get_logger(__name__)
 
     try:
-        payload = read_stdin_payload()
+        payload = read_stdin_payload() if raw is None else parse_payload(raw)
     except HookInputError as exc:
         logger.warning(f"guardrails: unreadable hook input, no opinion: {exc}")
         print(f"{MESSAGE_PREFIX}: could not read the hook input, so this call was "

@@ -136,6 +136,11 @@ def housekeep(retention_days: int, now: float | None = None) -> dict:
             total -= n
     except Exception:
         pass
+    try:
+        from src.capture.snapshot import cleanup
+        removed["shell"] = cleanup(now)                   # unfinished snapshots, old copies
+    except Exception:
+        pass
     return removed
 
 
