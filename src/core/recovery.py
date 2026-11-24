@@ -34,6 +34,7 @@ from src.integrations.claude.reader import (
     normalize_project_name,
     read_jsonl_file,
 )
+from src.integrations.claude.transcript_window import read_window
 from src.observations.writer import save_observation, obs_gate_enabled, was_rejected
 from src.common.obs_salvage import salvage_obs_args
 
@@ -501,7 +502,7 @@ def _is_hook_output(text: str) -> bool:
 # Public entry point
 # ---------------------------------------------------------------------------
 
-def process_missed_pairs(session_id: str, cwd: str) -> dict:
+def process_missed_pairs(session_id: str, cwd: str, incremental: bool = False) -> dict:
     """
     Recover response data for any JSONL turns the stop hook missed.
 
@@ -512,6 +513,11 @@ def process_missed_pairs(session_id: str, cwd: str) -> dict:
     Pass 2 - message_id-based:
       For end_turn pairs not in the RESPONSE table (stop hook missed for
       any other reason), apply the same stop-hook matching + write logic.
+
+    incremental=True (UserPromptSubmit) reads only what its earlier runs have not
+    fully processed; it keeps its own position, apart from the Stop hook's
+    (src/integrations/claude/transcript_window.py). SessionEnd keeps the full
+    read: a once-per-session safety net.
 
     Returns dict with keys 'pass1' and 'pass2' (counts processed).
     """
@@ -526,8 +532,16 @@ def process_missed_pairs(session_id: str, cwd: str) -> dict:
             logger.debug(f"process_missed_pairs: JSONL not found: {jsonl_path}")
             return counts
 
-        events = list(read_jsonl_file(jsonl_path))
+        window = None
+        if incremental:
+            window = read_window(jsonl_path, "recovery")
+            events = window.events
+            logger.debug(f"process_missed_pairs: transcript {window.describe()}")
+        else:
+            events = list(read_jsonl_file(jsonl_path))
         if not events:
+            if window is not None:
+                window.commit()
             return counts
 
         # Run migrations before any writes - ensures status column exists
@@ -602,6 +616,12 @@ def process_missed_pairs(session_id: str, cwd: str) -> dict:
                         writer.write_tool_tokens(tt)
                         break
 
+            # A reply that should have been stored but is not: read it again next time.
+            if window is not None and any(r["prompt_id"] == jsonl_prompt_id for r in db_data.get("responses", [])):
+                cursor.execute("SELECT 1 FROM RESPONSE WHERE message_id = ? LIMIT 1", (message_id,))
+                if not cursor.fetchone():
+                    window.hold(jsonl_prompt_id)
+
             counts["pass2"] += 1
             logger.info(f"recovery pass2: recovered message_id={message_id}")
 
@@ -625,6 +645,11 @@ def process_missed_pairs(session_id: str, cwd: str) -> dict:
                         logger.info(f"recovery pass2: saved MCP observation: {obs_data.get('title')}")
                 except Exception as obs_err:
                     logger.warning(f"recovery pass2: MCP obs save failed: {obs_err}")
+
+        # Both passes finished: save where the next run starts (not reached on an error,
+        # so a failed run is read again).
+        if window is not None:
+            window.commit()
 
     except Exception as exc:
         logger.error(f"process_missed_pairs failed: {exc}", exc_info=True)

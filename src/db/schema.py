@@ -268,6 +268,9 @@ def create_tables(conn: sqlite3.Connection) -> None:
     # ---------------- TOOL_GUARDRAIL_EVENT ----------------
     cursor.execute(TOOL_GUARDRAIL_EVENT_DDL)
 
+    # ---------------- TRANSCRIPT_READ_STATE ----------------
+    cursor.execute(TRANSCRIPT_READ_STATE_DDL)
+
     conn.commit()
     logger.info("Database tables created successfully")
 
@@ -335,6 +338,34 @@ TOOL_GUARDRAIL_EVENT_ADDED_COLUMNS = (("policy_scope", "TEXT"), ("workspace_root
                                      ("session_root", "TEXT"))
 
 
+# ── TRANSCRIPT_READ_STATE ─────────────────────────────────────────────────────
+#
+# How far the Stop hook and the UserPromptSubmit recovery have read each Claude
+# Code transcript, so they read only what is new (see
+# src/integrations/claude/transcript_window.py). One row per transcript file and
+# reader: each reader keeps its own position, so each does exactly what its full
+# read did whichever runs first. Holds byte offsets, hashes and prompt ids only:
+# no transcript text.
+#
+# A cache: a missing or unusable row only means the next run reads the whole
+# file, as before. Rows not updated for 35 days are deleted (Claude Code
+# deletes its transcripts after 30 days by default).
+TRANSCRIPT_READ_STATE_DDL = """
+CREATE TABLE IF NOT EXISTS TRANSCRIPT_READ_STATE (
+    transcript_path TEXT NOT NULL,     -- normalised absolute path of the main transcript
+    reader          TEXT NOT NULL,     -- stop | recovery
+    read_offset     INTEGER NOT NULL,  -- next read starts here: the first byte of a prompt line
+    head_len        INTEGER NOT NULL,  -- how many leading bytes head_hash covers
+    head_hash       TEXT NOT NULL,     -- BLAKE2b of the file's first head_len bytes
+    before_hash     TEXT NOT NULL,     -- BLAKE2b of the up to 4096 bytes before read_offset
+    prompt_offsets  TEXT NOT NULL,     -- JSON {promptId: offset of its prompt line}
+    subagents       TEXT,              -- JSON {file name: {size, pids}}, the Stop reader only
+    updated_at      TEXT NOT NULL,     -- UTC ISO time
+    PRIMARY KEY (transcript_path, reader)
+);
+"""
+
+
 # Schema version tracked via SQLite's built-in PRAGMA user_version (an
 # integer stored in the DB file header - no extra table needed). Bump this
 # whenever a new block is added to migrate_schema() below; that's the only
@@ -342,7 +373,7 @@ TOOL_GUARDRAIL_EVENT_ADDED_COLUMNS = (("policy_scope", "TEXT"), ("workspace_root
 # DatabaseManager.ensure_schema_initialized() is the single choke point
 # that compares this against the stored value on every process's first
 # connection and re-runs migrate_schema() only when behind.
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 
 
 def get_schema_version(conn: sqlite3.Connection) -> int:
@@ -565,6 +596,14 @@ def migrate_schema(conn: sqlite3.Connection) -> list:
     # ── v3, later in development: which policy file decided ──────────────────
     add_guardrail_event_columns(cursor, changes)
     add_security_scan_event_columns(cursor, changes)
+
+    # ── v4: where the transcript readers stopped ─────────────────────────────
+    # Purely additive: a new table, safe on any database.
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='TRANSCRIPT_READ_STATE'")
+    if not cursor.fetchone():
+        cursor.execute(TRANSCRIPT_READ_STATE_DDL)
+        logger.info("Migration: created TRANSCRIPT_READ_STATE table")
+        changes.append({"table": "TRANSCRIPT_READ_STATE", "action": "create_table", "status": "applied"})
 
     conn.commit()
     return changes

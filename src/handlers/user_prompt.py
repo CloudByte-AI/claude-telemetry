@@ -367,7 +367,8 @@ def handle_user_prompt():
         if session_id and cwd:
             try:
                 from src.core.recovery import process_missed_pairs
-                _counts = process_missed_pairs(session_id, cwd)
+                # Incremental: reads only what earlier prompt-time runs did not finish.
+                _counts = process_missed_pairs(session_id, cwd, incremental=True)
                 _total = _counts.get("pass1", 0) + _counts.get("pass2", 0)
                 if _total > 0:
                     logger.info(

@@ -40,7 +40,6 @@ from src.handlers.session_end import handle_session_end
 from src.observations.writer import save_observation, was_rejected
 from src.common.obs_salvage import salvage_obs_args
 import json as _json
-import glob as _glob
 from src.common.text_repair import fix_text as _fix_text
 
 # Initialize logger
@@ -181,7 +180,8 @@ def stop() -> None:
             convert_pairs_to_db_format,
         )
         from src.db.writers import DatabaseWriter
-        from src.integrations.claude.reader import get_claude_dir, read_jsonl_file, normalize_project_name
+        from src.integrations.claude.reader import get_claude_dir, normalize_project_name
+        from src.integrations.claude.transcript_window import read_window, apply_titles
         from src.db.schema import migrate_schema
         from src.db.manager import get_db_connection
         from src.common.time_utils import get_now_ist_iso, to_ist
@@ -235,51 +235,15 @@ def stop() -> None:
             logger.warning(f"JSONL file not found: {jsonl_path}")
             return
 
-        # Read events from JSONL - include subagent files if they exist
-        events = list(read_jsonl_file(jsonl_path))
+        # Read only what earlier runs have not fully processed (the whole file
+        # on the first run), plus the subagent files the pairing needs. See
+        # src/integrations/claude/transcript_window.py.
+        window = read_window(jsonl_path, "stop")
+        events = window.events
+        logger.info(f"Transcript {window.describe()}")
 
-        subagents_dir = str(jsonl_path).replace(".jsonl", "") + os.sep + "subagents"
-        if os.path.isdir(subagents_dir):
-            for subagent_file in _glob.glob(os.path.join(subagents_dir, "*.jsonl")):
-                try:
-                    with open(subagent_file, encoding="utf-8", errors="ignore") as sf:
-                        for line in sf:
-                            line = line.strip()
-                            if not line:
-                                continue
-                            try:
-                                events.append(json.loads(line))
-                            except Exception:
-                                continue
-                    logger.debug(f"Loaded subagent events from: {os.path.basename(subagent_file)}")
-                except Exception as exc:
-                    logger.warning(f"Failed reading subagent file {subagent_file}: {exc}")
-
-        # Scan events for session title records (ai-title and custom-title)
-        # Always overwrites when found (latest wins), preserves when not found (COALESCE)
-        ai_title = None
-        custom_title = None
-        for event in events:
-            if event.get("type") == "ai-title":
-                ai_title = event.get("aiTitle")
-            elif event.get("type") == "custom-title":
-                custom_title = event.get("customTitle")
-
-        if ai_title or custom_title:
-            try:
-                _title_conn = get_db_connection()
-                _title_cursor = _title_conn.cursor()
-                _title_cursor.execute(
-                    """UPDATE SESSION
-                       SET ai_title     = COALESCE(?, ai_title),
-                           custom_title = COALESCE(?, custom_title)
-                       WHERE session_id = ?""",
-                    (ai_title, custom_title, session_id),
-                )
-                _title_conn.commit()
-                logger.debug(f"Session titles updated - ai: {ai_title!r}, custom: {custom_title!r}")
-            except Exception as _te:
-                logger.warning(f"Could not update session titles: {_te}")
+        # Session titles (ai-title / custom-title): latest wins, COALESCE keeps earlier ones
+        apply_titles(session_id, events)
 
         pairs = extract_prompt_response_pairs(events)
 
@@ -307,6 +271,7 @@ def stop() -> None:
 
         if not filtered_pairs:
             logger.debug("No non-hook prompt/response pairs found")
+            window.commit()
             return
 
         # ── Process ALL unwritten pairs ───────────────────────────────────────────
@@ -512,6 +477,13 @@ def stop() -> None:
 
             logger.info(f"Pair {jsonl_prompt_id[:8]} stored: {pair_counts}")
 
+            # A reply that should have been stored but is not: read this prompt
+            # again next time, as the full read did.
+            if any(r["prompt_id"] == jsonl_prompt_id for r in db_data.get("responses", [])):
+                cursor.execute("SELECT 1 FROM RESPONSE WHERE message_id = ? LIMIT 1", (pair_message_id,))
+                if not cursor.fetchone():
+                    window.hold(jsonl_prompt_id)
+
             # ── Save MCP record_observation calls to HOOK_OBSERVATION ─────────
             logger.debug("Observation capture handled by MCP tool (record_observation)")
             try:
@@ -550,6 +522,9 @@ def stop() -> None:
                 logger.warning(f"MCP observation save failed: {obs_error}")
 
         logger.info(f"Stop hook totals: {total_counts}")
+
+        # Everything read is stored (or held): save where the next run starts.
+        window.commit()
 
         # ── Response security scan (on last processed pair) ──────────────────────
         # Runs after all DB writes. Response is never blocked - findings are
