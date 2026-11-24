@@ -12,7 +12,7 @@ and never print: capture must not affect the tool call, the guardrails answer or
 Cost on the hot path (every tool call): a few byte searches, with nothing imported but `os`
 and `time` (already loaded). Only a call that may change files (an edit tool, a shell
 command) parses the JSON and reads the settings (usually two stats); a shell call then runs
-`git status` once before and once after (snapshot.py).
+`git status` once before and once after in each repo it works in (snapshot.py).
 """
 
 import os

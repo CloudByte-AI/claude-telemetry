@@ -3,11 +3,13 @@ Shell snapshots: the exact lines a shell command (Bash, PowerShell) changed in a
 
 The client reports almost nothing a shell command writes, so the hooks look for themselves:
 
-    before  PreToolUse          one `git status --porcelain=v2 -z -uall --branch` in the repo
-                                of the folder the command starts in, plus a copy of every file
-                                that already differs from HEAD (git cannot give their "before"
-                                later). Saved per tool call: shell/pending/<tool_use_id>.json
-    after   PostToolUse, or     the same status call. For each file that changed, the "before"
+    before  PreToolUse          one `git status --porcelain=v2 -z -uall --branch` in each repo
+                                the command works in (shell_targets.py: the folders it runs in
+                                after any `cd`, `git -C` folders, path arguments; at most 3),
+                                plus a copy of every file that already differs from HEAD (git
+                                cannot give their "before" later). Saved per tool call:
+                                shell/pending/<tool_use_id>.json
+    after   PostToolUse, or     the same status calls. For each file that changed, the "before"
             PostToolUseFailure  is the copy (dirty or untracked before) or the HEAD blob (clean
             for a failed call   before, one `git cat-file --batch`); the lines are a difflib
                                 diff in the structuredPatch hunk shape. One record per file.
@@ -18,15 +20,16 @@ call; a changed file beyond them is recorded with no lines (no_diff). Excluded p
 copied.
 
 Rules:
-  - moved code keeps its author: a rename (staged, or a plain mv of identical content) is
-    recorded with no lines
+  - moved code keeps its author: a rename (staged, or a plain mv of identical content, also
+    between two snapshotted repos) is recorded with no lines
   - HEAD moved, or a git working-tree command (checkout, stash, reset, ...): the record is
     marked git_operation; those lines are not the assistant's writing
   - binary files (a NUL in the first 8000 bytes, git's own test) get no lines; a file with a
     byte-order mark (UTF-8, UTF-16, UTF-32: Windows PowerShell 5.1 writes UTF-16) is text
   - notes (kind "note") say where changes may be unseen: a background command (its changes
-    land after the hook), a command that ends in another repo, a repo skipped for the rest of
-    the session because its status was slow (over SLOW_SECONDS, SLOW_STRIKES times) or too big
+    land after the hook), a command that ends in a repo that was not snapshotted, a repo
+    skipped for the rest of the session because its status was slow (over SLOW_SECONDS,
+    SLOW_STRIKES times) or too big
 
 Git runs read-only (--no-optional-locks: never takes the user's index lock), with no window and
 no stdin. Never raises, never prints. Stdlib only.
@@ -289,52 +292,85 @@ def _store_blob(content: bytes):
         return None
 
 
-def take_before(payload: dict, client: str, profile, now: float):
-    """Snapshot the repo the command starts in. Returns (outcome, note records)."""
+def command_roots(payload: dict) -> list:
+    """The repos a shell call works in (shell_targets.py): the folders its commands run in after
+    any `cd`, `git -C` folders and path arguments. Falls back to the start folder's repo."""
+    cwd = payload.get("cwd")
+    start = find_repo(cwd)
+    tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    command = tool_input.get("command")
+    if not cwd or not isinstance(command, str) or not command.strip():
+        return [start] if start else []
     try:
-        root = find_repo(payload.get("cwd"))
-        if root is None:
+        from src.capture.shell_targets import command_repos, is_powershell
+        return command_repos(command, os.path.abspath(str(cwd)), is_powershell(payload.get("tool_name")), find_repo)
+    except Exception:
+        return [start] if start else []
+
+
+def take_before(payload: dict, client: str, profile, now: float):
+    """Snapshot every repo the command works in (command_roots). Returns (outcome, note records):
+    'taken' when at least one repo was snapshotted, else the first repo's outcome."""
+    try:
+        roots = command_roots(payload)
+        if not roots:
             return "no_repo", []
         session_id = payload.get("session_id")
-        if _skipped(session_id, root):
-            return "skipped", []
-        status = _status(root)
-        if status == "timeout":
-            _strike(session_id, root, force=True)
-            return "slow", [_note(payload, client, now, "slow_repo", root)]
-        if status is None:
-            return "git_failed", []
-        entries, head, seconds = status
-        notes = []
-        if seconds > SLOW_SECONDS and _strike(session_id, root):
-            notes.append(_note(payload, client, now, "slow_repo", root))
-        if len(entries) > MAX_ENTRIES:
-            _strike(session_id, root, force=True)
-            return "too_many", notes + [_note(payload, client, now, "too_many_changes", root)]
-
-        from src.capture.edits import excluded
-        copies, total = {}, 0
-        for path, entry in entries.items():
-            if entry[KIND] == "R-":
-                continue                                  # a rename's old path: gone from the tree
-            full = _full(root, path)
-            st = _stat(full)
-            info = {"stat": st}
-            if excluded(full, profile.exclude):
-                info["excluded"] = True
-            elif st is not None and st[0] <= MAX_COPY_FILE and total + st[0] <= MAX_COPY_TOTAL:
-                content = _read(full)
-                sha = _store_blob(content) if content is not None else None
-                if sha:
-                    info["copy"] = sha
-                    total += len(content)
-            copies[path] = info
-        state = {"v": 1, "root": root, "head": head, "entries": entries, "copies": copies,
-                 "time": now, "session_id": session_id, "tool_use_id": payload.get("tool_use_id")}
+        notes, repos, outcomes, budget = [], [], [], [0]
+        for root in roots:
+            outcome, repo_state = _before_repo(payload, client, profile, now, root, notes, budget)
+            outcomes.append(outcome)
+            if repo_state is not None:
+                repos.append(repo_state)
+        if not repos:
+            return outcomes[0], notes
+        state = {"v": 2, "repos": repos, "time": now, "session_id": session_id,
+                 "tool_use_id": payload.get("tool_use_id")}
         _write_atomic(pending_path(payload.get("tool_use_id")), json.dumps(state).encode("utf-8"))
         return "taken", notes
     except Exception:
         return "error", []
+
+
+def _before_repo(payload: dict, client: str, profile, now: float, root: str, notes: list, budget: list):
+    """One repo's status and copies: (outcome, {root, head, entries, copies} or None). Notes are
+    appended to `notes`; budget[0] is the bytes copied so far in this call (MAX_COPY_TOTAL)."""
+    session_id = payload.get("session_id")
+    if _skipped(session_id, root):
+        return "skipped", None
+    status = _status(root)
+    if status == "timeout":
+        _strike(session_id, root, force=True)
+        notes.append(_note(payload, client, now, "slow_repo", root))
+        return "slow", None
+    if status is None:
+        return "git_failed", None
+    entries, head, seconds = status
+    if seconds > SLOW_SECONDS and _strike(session_id, root):
+        notes.append(_note(payload, client, now, "slow_repo", root))
+    if len(entries) > MAX_ENTRIES:
+        _strike(session_id, root, force=True)
+        notes.append(_note(payload, client, now, "too_many_changes", root))
+        return "too_many", None
+
+    from src.capture.edits import excluded
+    copies = {}
+    for path, entry in entries.items():
+        if entry[KIND] == "R-":
+            continue                                      # a rename's old path: gone from the tree
+        full = _full(root, path)
+        st = _stat(full)
+        info = {"stat": st}
+        if excluded(full, profile.exclude):
+            info["excluded"] = True
+        elif st is not None and st[0] <= MAX_COPY_FILE and budget[0] + st[0] <= MAX_COPY_TOTAL:
+            content = _read(full)
+            sha = _store_blob(content) if content is not None else None
+            if sha:
+                info["copy"] = sha
+                budget[0] += len(content)
+        copies[path] = info
+    return "taken", {"root": root, "head": head, "entries": entries, "copies": copies}
 
 
 # ── After ─────────────────────────────────────────────────────────────────────
@@ -409,37 +445,53 @@ def _blob(sha):
         return None
 
 
+def _snapshot_repos(state) -> list:
+    """The per-repo snapshots of a before-state: v2 lists them, v1 (one repo) is the state itself."""
+    if not isinstance(state, dict):
+        return []
+    if state.get("v") == 2 and isinstance(state.get("repos"), list):
+        return [r for r in state["repos"] if isinstance(r, dict) and r.get("root")]
+    return [state] if state.get("root") else []
+
+
 def take_after(payload: dict, client: str, profile, now: float, failed: bool = False):
-    """The records for one shell call (changed files, then notes), or None when no before-
-    snapshot exists for it (outside a repo, skipped, or the before step failed)."""
+    """The records for one shell call (changed files of every snapshotted repo, then notes), or
+    None when no before-snapshot exists for it (no repo, skipped, or the before step failed)."""
     try:
         pending = pending_path(payload.get("tool_use_id"))
         state = _load_json(pending)
-        if not isinstance(state, dict) or not state.get("root"):
+        repos = _snapshot_repos(state)
+        if not repos:
             return None
         try:
             os.remove(pending)
         except OSError:
             pass
-        root = state["root"]
         notes = []
         result = payload.get("tool_response")
         if isinstance(result, dict) and result.get("backgroundTaskId"):
-            notes.append(_note(payload, client, now, "background", root))
+            notes.append(_note(payload, client, now, "background", repos[0]["root"]))
+        # The after-hook's cwd is where the command ended (a kept `cd` moves it: checked live
+        # 24 Nov 2026). A repo there that was not snapshotted may hold unseen changes.
         end_root = find_repo(payload.get("cwd"))
-        if end_root and not _same_path(end_root, root):
+        if end_root and not any(_same_path(end_root, r["root"]) for r in repos):
             notes.append(_note(payload, client, now, "other_repo", end_root))
 
-        status = _status(root)
-        if status == "timeout":
-            _strike(state.get("session_id"), root, force=True)
-            return notes + [_note(payload, client, now, "slow_repo", root)]
-        if status is None:
-            return notes
-        entries_now, head_now, seconds = status
-        if seconds > SLOW_SECONDS and _strike(state.get("session_id"), root):
-            notes.append(_note(payload, client, now, "slow_repo", root))
-        return _changed_records(payload, client, profile, now, failed, state, entries_now, head_now) + notes
+        records = []
+        for repo in repos:
+            root = repo["root"]
+            status = _status(root)
+            if status == "timeout":
+                _strike(state.get("session_id"), root, force=True)
+                notes.append(_note(payload, client, now, "slow_repo", root))
+                continue
+            if status is None:
+                continue
+            entries_now, head_now, seconds = status
+            if seconds > SLOW_SECONDS and _strike(state.get("session_id"), root):
+                notes.append(_note(payload, client, now, "slow_repo", root))
+            records += _changed_records(payload, client, profile, now, failed, repo, entries_now, head_now)
+        return _pair_moves(records) + notes
     except Exception:
         return None
 
@@ -465,7 +517,7 @@ def _changed_records(payload, client, profile, now, failed, state, entries_now, 
         changed.append((path, was, now_entry, full))
 
     blobs = _head_blobs(root, [e[HEAD_BLOB] for _, was, e, _ in changed if not was and e])
-    records, deleted = [], {}
+    records = []
     for path, was, now_entry, full in changed:
         content_now = _read(full)
         exists_now = os.path.lexists(full)
@@ -519,11 +571,20 @@ def _changed_records(payload, client, profile, now, failed, state, entries_now, 
         record["removed"] = sum(1 for h in hunks for x in h["lines"] if x.startswith("-"))
         record = _with_lines(record, profile, hunks=hunks)
         if op == "delete" and before:
-            deleted[before] = record
+            record["_before"] = before                    # for _pair_moves, never written
         records.append(record)
+    return records
 
-    # A plain `mv`: a deleted file and a new file with the same content are one rename, and
-    # moved code keeps its author, so no lines are credited.
+
+def _pair_moves(records: list) -> list:
+    """A plain `mv`, within one repo or between two snapshotted repos: a deleted file and a new
+    file with the same content are one rename, and moved code keeps its author, so no lines are
+    credited."""
+    deleted = {}
+    for record in records:
+        before = record.pop("_before", None)
+        if before is not None:
+            deleted[before] = record
     for record in list(records):
         if record["op"] == "create" and record.get("removed") == 0 and deleted:
             content = _read(record["file"])
