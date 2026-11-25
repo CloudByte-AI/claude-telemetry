@@ -57,13 +57,51 @@ def is_powershell(tool_name, nt: bool | None = None) -> bool:
     return tool_name == "PowerShell" or (tool_name == "Shell" and nt)
 
 
+def _heredoc_word(command: str, i: int):
+    """At a bash `<<` (index i): (delimiter, strip leading tabs, index after it), or None."""
+    j = i + 2
+    strip_tabs = command.startswith("-", j)
+    if strip_tabs:
+        j += 1
+    while j < len(command) and command[j] in " \t":
+        j += 1
+    if j < len(command) and command[j] in "'\"":
+        end = command.find(command[j], j + 1)
+        return (command[j + 1:end], strip_tabs, end + 1) if end > j else None
+    k = j
+    while k < len(command) and command[k] not in " \t\r\n;&|<>()":
+        k += 1
+    return (command[j:k].replace("\\", ""), strip_tabs, k) if k > j else None
+
+
+def _skip_body(command: str, i: int, closes, keep: int = -1) -> int:
+    """From the start of a heredoc's or here-string's body (index i), where reading goes on:
+    just past the closing line, or with `keep` >= 0 just past its first `keep` characters (the rest
+    of a here-string's closing line is still the command: '@ | Set-Content x); len(command) when
+    the body never closes. `closes(line)` tells the closing line."""
+    while i < len(command):
+        end = command.find("\n", i)
+        line = command[i:] if end < 0 else command[i:end]
+        if closes(line.rstrip("\r")):
+            if keep >= 0:
+                return i + keep
+            return len(command) if end < 0 else end + 1
+        if end < 0:
+            break
+        i = end + 1
+    return len(command)
+
+
 def segments(command: str, powershell: bool) -> list[str]:
-    """The simple commands: cut at unquoted ; & | and new lines. A heredoc (<<, not <<<) or a
-    here-string (@' or @" at the end of a line) ends the read after the rest of its line."""
+    """The simple commands: cut at unquoted ; & | and new lines. A heredoc's or a here-string's
+    body is data: it is skipped up to its closing line (bash: the delimiter, alone on its line, or
+    after leading tabs for <<-; PowerShell: '@ or "@ at the start of a line), and reading goes on
+    after it. A body that never closes ends the read."""
     escape = "`" if powershell else "\\"
     out: list[str] = []
     cur: list[str] = []
     quote = None
+    pending: list = []                                   # heredoc delimiters opened on this line
     i, n = 0, len(command)
     while i < n:
         c = command[i]
@@ -81,18 +119,34 @@ def segments(command: str, powershell: bool) -> list[str]:
             cur.append(c + command[i + 1])
             i += 2
             continue
-        heredoc = (not powershell and command.startswith("<<", i) and not command.startswith("<<<", i)
-                   and not (i > 0 and command[i - 1] == "<"))
-        herestring = (powershell and c == "@" and i + 1 < n and command[i + 1] in "'\""
-                      and command[i + 2:i + 3] in ("", "\r", "\n"))
-        if heredoc or herestring:
+        if (not powershell and command.startswith("<<", i) and not command.startswith("<<<", i)
+                and not (i > 0 and command[i - 1] == "<")):
+            word = _heredoc_word(command, i)
+            if word is None:
+                cur.append(c)
+                i += 1
+                continue
+            pending.append(word[:2])
+            cur.append(command[i:word[2]])
+            i = word[2]
+            continue
+        if powershell and c == "@" and i + 1 < n and command[i + 1] in "'\"" and command[i + 2:i + 3] in ("", "\r", "\n"):
+            closer = command[i + 1] + "@"
+            cur.append("@" + command[i + 1])                     # the here-string is the value here
             end = command.find("\n", i)
-            cur.append(command[i:] if end < 0 else command[i:end])
-            out.append("".join(cur))
-            return _clean(out)
+            i = n if end < 0 else _skip_body(command, end + 1, lambda line, cl=closer: line.startswith(cl), len(closer))
+            continue
         if c in "'\"":
             quote = c
             cur.append(c)
+        elif c == "\n" and pending:
+            out.append("".join(cur))
+            cur = []
+            i += 1
+            for word, strip_tabs in pending:
+                i = _skip_body(command, i, lambda line, w=word, s=strip_tabs: (line.lstrip("\t") if s else line) == w)
+            pending = []
+            continue
         elif c in ";&|\n":
             out.append("".join(cur))
             cur = []

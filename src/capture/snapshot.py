@@ -15,9 +15,13 @@ The client reports almost nothing a shell command writes, so the hooks look for 
                                 diff in the structuredPatch hunk shape. One record per file.
 
 Copies live in a content-addressed store (shell/blobs/<sha1>), so a file that did not change
-between commands is not written again. Limits: MAX_COPY_FILE per file and MAX_COPY_TOTAL per
-call; a changed file beyond them is recorded with no lines (no_diff). Excluded paths are never
-copied.
+between commands is not written again. Limits: MAX_COPY_FILE (8 MB) per file and MAX_COPY_TOTAL
+(32 MB) per call; a changed file beyond them is recorded with no lines (no_diff). Excluded paths
+are never copied. Reading and hashing an 8 MB file takes about 12 ms (measured 25 Nov 2026).
+
+The diff compares only the changed middle of a file (the common start and end are trimmed); a
+middle over MAX_DIFF_CELLS goes to `git diff --no-index`, which is exact and takes about 0.1 s even
+for a 23,000-line file, where difflib over the whole file took 2.7 s (F21).
 
 Rules:
   - moved code keeps its author: a rename (staged, or a plain mv of identical content, also
@@ -48,10 +52,11 @@ SHELL_DIRNAME = "shell"
 STATUS_TIMEOUT = 3.0
 SLOW_SECONDS = 0.5
 SLOW_STRIKES = 2
-MAX_COPY_FILE = 1_000_000
-MAX_COPY_TOTAL = 20_000_000
+MAX_COPY_FILE = 8_000_000           # F21: was 1 MB, so a shell copy of a 1.17 MB file got no lines
+MAX_COPY_TOTAL = 32_000_000
 MAX_ENTRIES = 5_000
-MAX_DIFF_CELLS = 40_000_000          # difflib work bound: changed-region lines before x after
+MAX_DIFF_CELLS = 1_000_000           # difflib bound on the changed middle (lines before x after); above: git
+GIT_DIFF_TIMEOUT = 5.0
 BINARY_PROBE = 8000
 STATE_TTL_SECONDS = 12 * 3600
 SESSION_TTL_SECONDS = 2 * 86400
@@ -144,8 +149,10 @@ def _stat(path: str):
     return [st.st_size, st.st_mtime_ns] if stat_mod.S_ISREG(st.st_mode) else None
 
 
-def _read(path: str, limit: int = MAX_COPY_FILE):
-    """The file's bytes, or None when it is missing, not a regular file or over `limit`."""
+def _read(path: str, limit: int | None = None):
+    """The file's bytes, or None when it is missing, not a regular file or over `limit`
+    (MAX_COPY_FILE when not given, read at call time)."""
+    limit = MAX_COPY_FILE if limit is None else limit
     st = _stat(path)
     if st is None or st[0] > limit:
         return None
@@ -406,8 +413,11 @@ def _lines(content: bytes | None) -> list[str]:
 
 
 def diff_hunks(before: list[str], after: list[str]):
-    """Hunks in the structuredPatch shape (3 context lines), or None when the changed region
-    is too big to diff within the budget."""
+    """Hunks in the structuredPatch shape (3 context lines), or None when the change cannot be
+    diffed. Only the changed middle is compared: the common start and end are trimmed first
+    (difflib on the whole of a 23,000-line file took 2.7 s for a 145-line change; F21). A middle
+    over MAX_DIFF_CELLS goes to `git diff --no-index` (exact, about 0.1 s for that file whatever
+    the change); None when git cannot do it either."""
     import difflib
     lead = 0
     while lead < len(before) and lead < len(after) and before[lead] == after[lead]:
@@ -416,11 +426,51 @@ def diff_hunks(before: list[str], after: list[str]):
     while (tail < len(before) - lead and tail < len(after) - lead
            and before[-1 - tail] == after[-1 - tail]):
         tail += 1
-    if (len(before) - lead - tail) * (len(after) - lead - tail) > MAX_DIFF_CELLS:
-        return None
-    matcher = difflib.SequenceMatcher(None, before, after, autojunk=False)
+    mid_a, mid_b = before[lead:len(before) - tail], after[lead:len(after) - tail]
+    if len(mid_a) * len(mid_b) > MAX_DIFF_CELLS:
+        return git_diff_hunks(before, after)
+    codes = [("equal", 0, lead, 0, lead)]
+    codes += [(tag, a1 + lead, a2 + lead, b1 + lead, b2 + lead)
+              for tag, a1, a2, b1, b2 in difflib.SequenceMatcher(None, mid_a, mid_b, autojunk=False).get_opcodes()]
+    codes.append(("equal", len(before) - tail, len(before), len(after) - tail, len(after)))
+    return _hunks(_grouped(codes), before, after)
+
+
+def _grouped(codes: list, n: int = 3) -> list:
+    """difflib's get_grouped_opcodes (n lines of context) over opcodes of the whole file: empty
+    codes dropped and neighbouring equal ones joined first."""
+    merged: list = []
+    for code in codes:
+        if code[1] == code[2] and code[3] == code[4]:
+            continue
+        if merged and merged[-1][0] == "equal" and code[0] == "equal":
+            merged[-1] = ("equal", merged[-1][1], code[2], merged[-1][3], code[4])
+        else:
+            merged.append(code)
+    if not merged or all(c[0] == "equal" for c in merged):
+        return []
+    if merged[0][0] == "equal":
+        _t, i1, i2, j1, j2 = merged[0]
+        merged[0] = ("equal", max(i1, i2 - n), i2, max(j1, j2 - n), j2)
+    if merged[-1][0] == "equal":
+        _t, i1, i2, j1, j2 = merged[-1]
+        merged[-1] = ("equal", i1, min(i2, i1 + n), j1, min(j2, j1 + n))
+    groups, group = [], []
+    for tag, i1, i2, j1, j2 in merged:
+        if tag == "equal" and i2 - i1 > n + n:
+            group.append((tag, i1, min(i2, i1 + n), j1, min(j2, j1 + n)))
+            groups.append(group)
+            group = []
+            i1, j1 = max(i1, i2 - n), max(j1, j2 - n)
+        group.append((tag, i1, i2, j1, j2))
+    if group and not (len(group) == 1 and group[0][0] == "equal"):
+        groups.append(group)
+    return groups
+
+
+def _hunks(groups: list, before: list[str], after: list[str]) -> list:
     hunks = []
-    for group in matcher.get_grouped_opcodes(3):
+    for group in groups:
         i1, i2, j1, j2 = group[0][1], group[-1][2], group[0][3], group[-1][4]
         lines = []
         for tag, a1, a2, b1, b2 in group:
@@ -433,6 +483,71 @@ def diff_hunks(before: list[str], after: list[str]):
         hunks.append({"old_start": i1 + 1 if i2 > i1 else i1, "old_lines": i2 - i1,
                       "new_start": j1 + 1 if j2 > j1 else j1, "new_lines": j2 - j1, "lines": lines})
     return hunks
+
+
+_GIT_HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+
+
+def git_diff_hunks(before: list[str], after: list[str]):
+    """The same hunks from `git diff --no-index -U3` of the two texts (written to temporary
+    files), every option a user's git config could change pinned; None when git is missing,
+    fails, times out or prints something the parser cannot vouch for."""
+    import subprocess
+    folder = os.path.join(_shell_dir(), "tmp")
+    tag = f"{os.getpid()}-{os.urandom(4).hex()}"
+    paths = (os.path.join(folder, tag + "-a"), os.path.join(folder, tag + "-b"))
+    try:
+        os.makedirs(folder, exist_ok=True)
+        for path, lines in zip(paths, (before, after)):
+            with open(path, "wb") as handle:
+                handle.write(("\n".join(lines) + "\n").encode("utf-8", "replace") if lines else b"")
+        options = {"capture_output": True, "timeout": GIT_DIFF_TIMEOUT, "stdin": subprocess.DEVNULL, "cwd": folder,
+                   "env": dict(os.environ, GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0")}
+        if os.name == "nt":
+            options["creationflags"] = _NO_WINDOW
+        result = subprocess.run(["git", "-c", "core.autocrlf=false", "-c", "diff.noprefix=false", "diff", "--no-index",
+                                 "--no-color", "--no-ext-diff", "--no-textconv", "--diff-algorithm=myers",
+                                 "--indent-heuristic", "--inter-hunk-context=0", "-U3", *paths], **options)
+        if result.returncode not in (0, 1):
+            return None
+        return _parse_git_hunks(result.stdout.decode("utf-8", "replace"))
+    except Exception:
+        return None
+    finally:
+        for path in paths:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+
+def _parse_git_hunks(text: str):
+    """structuredPatch-shaped hunks from a unified diff with headers; None when a hunk does not
+    hold the line counts its header gives."""
+    hunks, hunk, left_old, left_new = [], None, 0, 0
+    for line in text.split("\n"):
+        if hunk is not None and (left_old or left_new):
+            tag = line[:1]
+            if tag == " " and left_old and left_new:
+                left_old, left_new = left_old - 1, left_new - 1
+            elif tag == "-" and left_old:
+                left_old -= 1
+            elif tag == "+" and left_new:
+                left_new -= 1
+            elif tag == "\\":
+                continue
+            else:
+                return None
+            hunk["lines"].append(line)
+            continue
+        match = _GIT_HUNK.match(line)
+        if match:
+            left_old = int(match.group(2)) if match.group(2) is not None else 1
+            left_new = int(match.group(4)) if match.group(4) is not None else 1
+            hunk = {"old_start": int(match.group(1)), "old_lines": left_old, "new_start": int(match.group(3)),
+                    "new_lines": left_new, "lines": []}
+            hunks.append(hunk)
+    return None if (left_old or left_new) else hunks
 
 
 def _blob(sha):
