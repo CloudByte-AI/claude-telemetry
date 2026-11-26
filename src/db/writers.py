@@ -313,23 +313,29 @@ class DatabaseWriter:
             prompt_id = prompt_data["prompt_id"]
             cursor.execute("SELECT 1 FROM USER_PROMPT WHERE prompt_id = ? LIMIT 1", (prompt_id,))
             if cursor.fetchone() is not None:
-                # Update timestamp with correct value from JSONL (more reliable than hook timestamp)
+                # Update timestamp with correct value from JSONL (more reliable than hook timestamp).
+                # The transcript prompt id only fills an empty value: a row already bound to a
+                # transcript prompt keeps that binding.
                 cursor.execute("""
                     UPDATE USER_PROMPT
-                    SET timestamp = ?
+                    SET timestamp = ?,
+                        jsonl_prompt_id = COALESCE(jsonl_prompt_id, ?)
                     WHERE prompt_id = ?
-                """, (prompt_data["timestamp"], prompt_id))
+                """, (prompt_data["timestamp"], prompt_data.get("jsonl_prompt_id"), prompt_id))
                 conn.commit()
                 logger.debug(f"Updated user prompt timestamp: {prompt_id} → {prompt_data['timestamp']}")
                 return True
 
             session_id = prompt_data["session_id"]
 
+            # jsonl_prompt_id: the transcript's own prompt id when the hook knows it (Claude
+            # Code 2.1.196+ sends it with UserPromptSubmit), so the Stop hook finds this row by
+            # id instead of by text.
             cursor.execute("""
                 INSERT INTO USER_PROMPT
                 (prompt_id, session_id, uuid, parent_uuid, prompt, timestamp, client_version,
-                 attachments, mode, git_branch, entrypoint)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 attachments, mode, git_branch, entrypoint, jsonl_prompt_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 prompt_id,
                 session_id,
@@ -342,6 +348,7 @@ class DatabaseWriter:
                 prompt_data.get("mode"),
                 prompt_data.get("git_branch"),
                 prompt_data.get("entrypoint"),
+                prompt_data.get("jsonl_prompt_id"),
             ))
 
             conn.commit()

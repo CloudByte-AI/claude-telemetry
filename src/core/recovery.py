@@ -16,7 +16,6 @@ Two recovery passes:
 """
 
 import json
-import re as _re
 import uuid as _uuid_mod
 from src.common.text_repair import fix_text as _fix_text
 
@@ -28,7 +27,9 @@ from src.db.writers import DatabaseWriter
 from src.integrations.claude.prompt_response import (
     convert_pairs_to_db_format,
     extract_prompt_response_pairs,
+    non_prompt_tool_groups,
 )
+from src.core.prompt_match import find_db_prompt, write_non_prompt_tools
 from src.integrations.claude.reader import (
     get_claude_dir,
     normalize_project_name,
@@ -220,10 +221,6 @@ def _find_tool_is_error(events: list, tool_use_id: str) -> bool:
 # DB helpers
 # ---------------------------------------------------------------------------
 
-def _norm(text: str) -> str:
-    return _re.sub(r"\s+", " ", (text or "").strip().lower())
-
-
 def _find_or_create_db_prompt(
     session_id: str,
     jsonl_prompt_id: str,
@@ -233,42 +230,12 @@ def _find_or_create_db_prompt(
     status: str = None,
 ) -> str:
     """
-    Find an existing USER_PROMPT record by text match (3 passes), or create one.
+    Find the USER_PROMPT record of a transcript prompt (src/core/prompt_match.py: the row bound to
+    it, else a text match among unbound unanswered rows), or create one.
     Returns the db_prompt_id to use for all child records.
     """
     cursor = conn.cursor()
-    prompt_text_norm = _norm(prompt_text)
-
-    cursor.execute(
-        """
-        SELECT p.prompt_id, p.prompt FROM USER_PROMPT p
-        LEFT JOIN RESPONSE r ON r.prompt_id = p.prompt_id
-        WHERE p.session_id = ? AND r.message_id IS NULL
-        ORDER BY p.timestamp DESC LIMIT 30
-        """,
-        (session_id,),
-    )
-    candidates = cursor.fetchall()
-
-    db_prompt_id = None
-
-    # Pass 1 - normalized exact
-    for cid, ctxt in candidates:
-        if _norm(ctxt) == prompt_text_norm:
-            db_prompt_id = cid
-            break
-
-    # Pass 2 - fuzzy substring
-    # Minimum-length guard prevents short prompts ("ok", "yes", etc.) from
-    # false-matching any longer candidate and attaching records to the wrong
-    # prompt (Bug #3).
-    if not db_prompt_id:
-        for cid, ctxt in candidates:
-            cn = _norm(ctxt)
-            if len(prompt_text_norm) > 20 and len(cn) > 20:
-                if prompt_text_norm in cn or cn in prompt_text_norm:
-                    db_prompt_id = cid
-                    break
+    db_prompt_id = find_db_prompt(cursor, session_id, jsonl_prompt_id, prompt_text)
 
     # Pass 3 - create new record
     if not db_prompt_id:
@@ -309,7 +276,7 @@ def _find_or_create_db_prompt(
             cursor.execute(
                 """
                 UPDATE USER_PROMPT
-                SET jsonl_prompt_id  = ?,
+                SET jsonl_prompt_id  = COALESCE(jsonl_prompt_id, ?),
                     status           = COALESCE(status, ?),
                     parent_uuid      = COALESCE(parent_uuid, ?),
                     entrypoint       = COALESCE(entrypoint, ?),
@@ -646,7 +613,19 @@ def process_missed_pairs(session_id: str, cwd: str, incremental: bool = False) -
                 except Exception as obs_err:
                     logger.warning(f"recovery pass2: MCP obs save failed: {obs_err}")
 
-        # Both passes finished: save where the next run starts (not reached on an error,
+        # ── Pass 3: tool calls of turns that are not prompts ───────────────────
+        # Such a turn (a background agent or task reporting back) has no prompt/response pair;
+        # its tool calls are stored under
+        # the session's prompt at that time, only those not stored yet
+        # (src/core/prompt_match.py).
+        try:
+            counts["pass3"] = write_non_prompt_tools(
+                cursor, writer, session_id, non_prompt_tool_groups(events), skip_tool_names={MCP_OBS_TOOL}
+            )
+        except Exception as pass3_exc:
+            logger.warning(f"recovery pass3: tool calls of non-prompt turns not stored: {pass3_exc}")
+
+        # All passes finished: save where the next run starts (not reached on an error,
         # so a failed run is read again).
         if window is not None:
             window.commit()

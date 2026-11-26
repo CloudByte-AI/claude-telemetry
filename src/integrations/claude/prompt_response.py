@@ -150,25 +150,29 @@ def get_thinking_content(content: Any) -> Optional[str]:
     return "\n\n".join(parts) if parts else None
 
 
-def extract_prompt_response_pairs(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _collect(events: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
-    Extract prompt/response pairs from Claude Code events.
-
-    Args:
-        events: List of event dictionaries from JSONL
-
-    Returns:
-        List of prompt/response pair dictionaries
+    Steps 1-7 of the pairing, shared by extract_prompt_response_pairs() and
+    non_prompt_tool_groups(): the user prompts, the turns that are not prompts, each
+    promptId's tools and each prompt's final text response.
     """
     records = load_records_from_events(events)
     by_uuid = build_uuid_index(records)
 
     # ── Step 1: collect user prompts ──────────────────────────────────────────
     prompts: Dict[str, Dict[str, Any]] = {}  # promptId -> record
+    non_prompt_turns: Dict[str, Dict[str, Any]] = {}  # promptId -> first record of a turn that is not a prompt
     for r in records:
         if r.get("type") != "user":
             continue
-        if r.get("isMeta"):      # skip synthetic resume messages
+        if r.get("isMeta"):
+            # A record Claude Code adds itself (resume notes, skill text, and in newer
+            # versions a background agent's result: "Another Claude session sent a
+            # message: <agent-message ...>"). Never a prompt. A promptId that only such
+            # records carry is a turn Claude may call tools in (non_prompt_tool_groups);
+            # one a real prompt also carries is skipped there.
+            if r.get("promptId"):
+                non_prompt_turns.setdefault(r["promptId"], r)
             continue
         pid = r.get("promptId") or r.get("uuid")
         if not pid:
@@ -180,8 +184,11 @@ def extract_prompt_response_pairs(events: List[Dict[str, Any]]) -> List[Dict[str
         prompt_text = get_text_content(content)
 
         # Skip sub-agent task-notification blocks - these are delivered back
-        # into the transcript as a "user" record but aren't a real user prompt
+        # into the transcript as a "user" record but aren't a real user prompt.
+        # Their promptId is kept: Claude may call tools while handling one
+        # (non_prompt_tool_groups).
         if prompt_text and prompt_text.lstrip().startswith("<task-notification>"):
+            non_prompt_turns.setdefault(pid, r)
             continue
 
         if prompt_text and pid not in prompts:
@@ -387,6 +394,29 @@ def extract_prompt_response_pairs(events: List[Dict[str, Any]]) -> List[Dict[str
             "cache_creation_tokens": usage.get("cache_creation_input_tokens", 0) or 0,
         })
 
+    return {
+        "prompts": prompts,
+        "non_prompt_turns": non_prompt_turns,
+        "prompt_to_tools": prompt_to_tools,
+        "prompt_to_response": prompt_to_response,
+    }
+
+
+def extract_prompt_response_pairs(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Extract prompt/response pairs from Claude Code events.
+
+    Args:
+        events: List of event dictionaries from JSONL
+
+    Returns:
+        List of prompt/response pair dictionaries
+    """
+    collected = _collect(events)
+    prompts = collected["prompts"]
+    prompt_to_tools = collected["prompt_to_tools"]
+    prompt_to_response = collected["prompt_to_response"]
+
     # ── Step 8: assemble final pairs ──────────────────────────────────────────
     pairs = []
     for pid, prompt_rec in prompts.items():
@@ -497,41 +527,72 @@ def convert_pairs_to_db_format(pairs: List[Dict[str, Any]]) -> Dict[str, List[Di
         })
 
         # Tools and tool tokens
-        for tool in pair["tools"]:
-            tool_id = tool["tool_use_id"]
-
-            result["tools"].append({
-                "tool_id": tool_id,
-                "prompt_id": pid,
-                "uuid": tool.get("uuid", tool_id),  # Use assistant event uuid
-                "parent_uuid": tool.get("parent_uuid"),  # Use assistant event parent uuid
-                "tool_name": tool["tool_name"],
-                "model": tool["model"],
-                "input_json": json.dumps(tool["tool_input"]),
-                "output_json": json.dumps({"result": tool["tool_result"], "is_error": tool["is_error"]}),
-                "timestamp": pair["timestamp"],
-            })
-
-            result["tool_tokens"].append({
-                "id": f"{tool_id}_tokens",
-                "tool_id": tool_id,
-                "input_tokens": tool["input_tokens"],
-                "cache_creation_tokens": tool["cache_creation_tokens"],
-                "cache_read_tokens": tool["cache_read_tokens"],
-                "output_tokens": tool["output_tokens"],
-            })
-
-            # Thinking (if used)
-            if tool["thinking_used"]:
-                result["thinking"].append({
-                    "thinking_id": f"{tool_id}_thinking",
-                    "prompt_id": pid,
-                    "uuid": tool.get("uuid", f"{tool_id}_thinking_uuid"),  # Use assistant event uuid
-                    "parent_uuid": tool.get("parent_uuid"),  # Use assistant event parent uuid
-                    "content": f"Thinking used for {tool['tool_name']}",
-                    "signature": "",
-                    "timestamp": pair["timestamp"],
-                })
+        _tools_to_db_format(pid, pair["timestamp"], pair["tools"], result)
 
     logger.info(f"Converted {len(result['user_prompts'])} valid pairs (from {len(pairs)} total pairs)")
     return result
+
+
+def _tools_to_db_format(pid: str, timestamp: str, tools: List[Dict[str, Any]],
+                        result: Dict[str, List[Dict[str, Any]]]) -> None:
+    """Append one prompt's tools, tool tokens and thinking rows (database format) to `result`."""
+    for tool in tools:
+        tool_id = tool["tool_use_id"]
+
+        result["tools"].append({
+            "tool_id": tool_id,
+            "prompt_id": pid,
+            "uuid": tool.get("uuid", tool_id),  # Use assistant event uuid
+            "parent_uuid": tool.get("parent_uuid"),  # Use assistant event parent uuid
+            "tool_name": tool["tool_name"],
+            "model": tool["model"],
+            "input_json": json.dumps(tool["tool_input"]),
+            "output_json": json.dumps({"result": tool["tool_result"], "is_error": tool["is_error"]}),
+            "timestamp": timestamp,
+        })
+
+        result["tool_tokens"].append({
+            "id": f"{tool_id}_tokens",
+            "tool_id": tool_id,
+            "input_tokens": tool["input_tokens"],
+            "cache_creation_tokens": tool["cache_creation_tokens"],
+            "cache_read_tokens": tool["cache_read_tokens"],
+            "output_tokens": tool["output_tokens"],
+        })
+
+        # Thinking (if used)
+        if tool["thinking_used"]:
+            result["thinking"].append({
+                "thinking_id": f"{tool_id}_thinking",
+                "prompt_id": pid,
+                "uuid": tool.get("uuid", f"{tool_id}_thinking_uuid"),  # Use assistant event uuid
+                "parent_uuid": tool.get("parent_uuid"),  # Use assistant event parent uuid
+                "content": f"Thinking used for {tool['tool_name']}",
+                "signature": "",
+                "timestamp": timestamp,
+            })
+
+
+def non_prompt_tool_groups(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    The tool calls Claude made in turns that are not prompts (a task notification, or a meta
+    record such as a background agent's result), which extract_prompt_response_pairs() leaves
+    out because there is no prompt to pair them with. One group per such promptId that has tools
+    and that no real prompt carries:
+    {prompt_id, timestamp (the turn's first record), tools, tool_tokens, thinking}, the last
+    three in database format with prompt_id = the turn's (the caller stores them under the
+    session's prompt at that time, see src/core/prompt_match.py).
+    """
+    collected = _collect(events)
+    groups = []
+    for pid, rec in collected["non_prompt_turns"].items():
+        if pid in collected["prompts"]:
+            continue
+        tools = collected["prompt_to_tools"].get(pid)
+        if not tools:
+            continue
+        group = {"tools": [], "tool_tokens": [], "thinking": []}
+        _tools_to_db_format(pid, to_ist(rec.get("timestamp")), tools, group)
+        groups.append({"prompt_id": pid, "timestamp": rec.get("timestamp"), **group})
+    groups.sort(key=lambda g: g["timestamp"] or "")
+    return groups

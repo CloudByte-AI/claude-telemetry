@@ -178,7 +178,9 @@ def stop() -> None:
         from src.integrations.claude.prompt_response import (
             extract_prompt_response_pairs,
             convert_pairs_to_db_format,
+            non_prompt_tool_groups,
         )
+        from src.core.prompt_match import find_db_prompt, write_non_prompt_tools
         from src.db.writers import DatabaseWriter
         from src.integrations.claude.reader import get_claude_dir, normalize_project_name
         from src.integrations.claude.transcript_window import read_window, apply_titles
@@ -269,8 +271,27 @@ def stop() -> None:
 
         logger.debug(f"Filtered {len(pairs) - len(filtered_pairs)} hook output pairs from {len(pairs)} total")
 
+        # Tool calls Claude made in turns that are not prompts (a background agent or task
+        # reporting back): stored under the session's prompt at that time
+        # (src/core/prompt_match.py). Such a turn has no prompt/response pair of its own, so this
+        # also runs when there is no pair.
+        non_prompt_groups = non_prompt_tool_groups(events)
+
+        def _store_non_prompt_tools() -> int:
+            if not non_prompt_groups:
+                return 0
+            try:
+                return write_non_prompt_tools(get_db_connection().cursor(), DatabaseWriter(), session_id,
+                                                non_prompt_groups, skip_tool_names={MCP_OBS_TOOL})
+            except Exception as _ne:
+                logger.warning(f"Could not store the tool calls of non-prompt turns: {_ne}")
+                return 0
+
         if not filtered_pairs:
             logger.debug("No non-hook prompt/response pairs found")
+            _stored = _store_non_prompt_tools()
+            if _stored:
+                logger.info(f"Stored {_stored} tool call(s) from turns that were not prompts")
             window.commit()
             return
 
@@ -284,11 +305,7 @@ def stop() -> None:
         # Fix: iterate ALL pairs and skip any whose message_id is already in RESPONSE.
         # This processes every unwritten pair in one invocation, regardless of how
         # many future pairs the JSONL already contains when the hook reads it.
-        import re as _re
         import time
-
-        def _norm(text: str) -> str:
-            return _re.sub(r'\s+', ' ', (text or '').strip().lower())
 
         # Convert ALL pairs to DB format once (per-pair filtering happens below)
         db_data = convert_pairs_to_db_format(pairs)
@@ -316,42 +333,19 @@ def stop() -> None:
 
             jsonl_prompt_id = current_pair["prompt_id"]
             prompt_text = _fix_text(current_pair.get("prompt", ""))
-            prompt_text_norm = _norm(prompt_text)
             logger.info(
                 f"Processing unwritten pair: prompt_id={jsonl_prompt_id}, "
                 f"msg={pair_message_id}, prompt=\"{prompt_text[:50]}\""
             )
 
             # ── DB matching: find or create USER_PROMPT record ─────────────────
-            # Fetch recent unresponded prompts and compare in Python so both sides
-            # use identical whitespace normalization.
-            cursor.execute("""
-                SELECT p.prompt_id, p.prompt FROM USER_PROMPT p
-                LEFT JOIN RESPONSE r ON r.prompt_id = p.prompt_id
-                WHERE p.session_id = ? AND r.message_id IS NULL
-                ORDER BY p.timestamp DESC LIMIT 30
-            """, (session_id,))
-            candidates = cursor.fetchall()
-
-            db_prompt_id = None
+            # The row already bound to this transcript prompt, else a text match among
+            # the session's unanswered rows not bound to any transcript prompt yet
+            # (src/core/prompt_match.py).
+            db_prompt_id = find_db_prompt(cursor, session_id, jsonl_prompt_id, prompt_text)
             prompt_created = False
-
-            # Pass 1: normalized exact match
-            for cand_id, cand_text in candidates:
-                if _norm(cand_text) == prompt_text_norm:
-                    db_prompt_id = cand_id
-                    logger.info(f"Found DB prompt_id (norm-exact): {db_prompt_id} (JSONL: {jsonl_prompt_id})")
-                    break
-
-            # Pass 2: fuzzy substring match
-            if not db_prompt_id:
-                logger.info(f"Norm-exact not found for: \"{prompt_text[:50]}\", trying fuzzy match...")
-                for cand_id, cand_text in candidates:
-                    cand_norm = _norm(cand_text)
-                    if prompt_text_norm in cand_norm or cand_norm in prompt_text_norm:
-                        db_prompt_id = cand_id
-                        logger.info(f"Fuzzy match found: {db_prompt_id}")
-                        break
+            if db_prompt_id:
+                logger.info(f"Found DB prompt_id: {db_prompt_id} (JSONL: {jsonl_prompt_id})")
 
             # Pass 3: create new record
             if not db_prompt_id:
@@ -404,7 +398,9 @@ def stop() -> None:
                     prompt_rec = current_pair.get("prompt_rec", {})
                     cursor.execute(
                         """UPDATE USER_PROMPT
-                           SET jsonl_prompt_id = ?,
+                           -- Fills an empty binding only: a row bound to another
+                           -- transcript prompt is never re-bound.
+                           SET jsonl_prompt_id = COALESCE(jsonl_prompt_id, ?),
                                timestamp = ?,
                                parent_uuid = COALESCE(parent_uuid, ?),
                                entrypoint = ?,
@@ -520,6 +516,11 @@ def stop() -> None:
                         logger.warning(f"Failed to save MCP observation: {obs_data.get('title', 'Unknown')}")
             except Exception as obs_error:
                 logger.warning(f"MCP observation save failed: {obs_error}")
+
+        _stored = _store_non_prompt_tools()
+        if _stored:
+            total_counts["tools"] += _stored
+            logger.info(f"Stored {_stored} tool call(s) from turns that were not prompts")
 
         logger.info(f"Stop hook totals: {total_counts}")
 

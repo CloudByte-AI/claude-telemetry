@@ -132,6 +132,7 @@ class EventProcessor:
         event_uuid: Optional[str] = None,
         event_timestamp: Optional[str] = None,
         cwd: Optional[str] = None,
+        transcript_prompt_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Process a user prompt event.
@@ -144,6 +145,8 @@ class EventProcessor:
             event_uuid: Original event UUID from JSONL (if available)
             event_timestamp: Original event timestamp from JSONL (if available)
             cwd: Optional current working directory
+            transcript_prompt_id: The transcript's promptId for this turn, when the hook
+                provides it (stored as jsonl_prompt_id)
 
         Returns:
             Dict with processed data
@@ -170,6 +173,7 @@ class EventProcessor:
             # moment the answer is guaranteed to match what the user was
             # actually on. Mirrors what the Cursor beforeSubmitPrompt hook does.
             "git_branch": resolve_git_branch(cwd),
+            "jsonl_prompt_id": transcript_prompt_id,
         }
 
         success = self.db_writer.write_user_prompt(prompt_data)
@@ -212,7 +216,9 @@ def process_user_prompt(
     event_uuid: Optional[str] = None,
     event_timestamp: Optional[str] = None,
     cwd: Optional[str] = None,
+    transcript_prompt_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Process user prompt event."""
     processor = EventProcessor()
-    return processor.process_user_prompt(prompt, session_id, prompt_id, parent_uuid, event_uuid, event_timestamp, cwd)
+    return processor.process_user_prompt(prompt, session_id, prompt_id, parent_uuid, event_uuid, event_timestamp, cwd,
+                                         transcript_prompt_id)
